@@ -14,10 +14,12 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import { Award, Lock, Trophy } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
-import { SUBJECT_COLORS, formatMinutes } from '../lib/utils';
-import { Card, PageHeader, fadeUp } from '../components/ui/Primitives';
+import { BADGES, useGamification } from '../lib/gamification';
+import { SUBJECT_COLORS, formatMinutes, cx } from '../lib/utils';
+import { Card, Badge, PageHeader, fadeUp } from '../components/ui/Primitives';
 
 function lastNDays(n: number) {
   const days: string[] = [];
@@ -34,6 +36,7 @@ export default function Analytics() {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
   const studyLog = useAppStore((s) => s.studyLog);
+  const gami = useGamification();
 
   const totalTopics = getAllTopicsCount();
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
@@ -76,7 +79,7 @@ export default function Analytics() {
     <div>
       <PageHeader eyebrow="Insights" title="Analytics" description="Track your preparation trends across syllabus coverage, study time and test performance." />
 
-      <motion.div {...fadeUp} className="grid gap-4 sm:grid-cols-3 mb-6">
+      <motion.div {...fadeUp} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <Card className="p-5">
           <p className="text-xs text-slate-400 mb-1">Total Focused Time</p>
           <p className="font-display text-2xl font-bold text-slate-900 dark:text-white">{formatMinutes(totalFocusMinutes)}</p>
@@ -88,6 +91,12 @@ export default function Analytics() {
         <Card className="p-5">
           <p className="text-xs text-slate-400 mb-1">Average Accuracy</p>
           <p className="font-display text-2xl font-bold text-slate-900 dark:text-white">{avgAccuracy}%</p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-xs text-slate-400 mb-1">Level & XP</p>
+          <p className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+            {gami.level.level} <span className="text-sm font-medium text-slate-400">· {gami.xp} XP</span>
+          </p>
         </Card>
       </motion.div>
 
@@ -168,6 +177,37 @@ export default function Analytics() {
           </Card>
         </motion.div>
       </div>
+
+      <motion.div {...fadeUp} className="mt-6">
+        <Card className="p-5 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Achievements</h3>
+            <Badge tone="gold">
+              <Trophy className="h-3 w-3" /> {gami.earnedBadges.length}/{BADGES.length} earned
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {BADGES.map((badge) => {
+              const earned = gami.earnedBadges.some((b) => b.id === badge.id);
+              return (
+                <div
+                  key={badge.id}
+                  className={cx(
+                    'flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center',
+                    earned
+                      ? 'border-gold-300/60 bg-gold-50 dark:bg-gold-500/10 dark:border-gold-500/30'
+                      : 'border-slate-200 dark:border-slate-800 opacity-60',
+                  )}
+                >
+                  {earned ? <Award className="h-5 w-5 text-gold-500" /> : <Lock className="h-5 w-5 text-slate-300 dark:text-slate-600" />}
+                  <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{badge.title}</p>
+                  <p className="text-[11px] text-slate-400 leading-tight">{badge.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </motion.div>
     </div>
   );
 }

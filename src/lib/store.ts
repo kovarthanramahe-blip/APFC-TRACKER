@@ -43,6 +43,10 @@ interface AppState {
   setTheme: (t: ThemeMode) => void;
   examDate: string;
 
+  // Daily focused-study target, in minutes (gamification "today's goal")
+  dailyGoalMinutes: number;
+  setDailyGoalMinutes: (minutes: number) => void;
+
   // Device-local bookkeeping only (never synced to the cloud payload itself):
   // which signed-in account this cached local data currently belongs to, so
   // a different account signing in on the same device never adopts it.
@@ -149,6 +153,9 @@ export const useAppStore = create<AppState>()(
       setTheme: (t) => set({ theme: t }),
       examDate: '2026-12-20',
 
+      dailyGoalMinutes: 60,
+      setDailyGoalMinutes: (minutes) => set({ dailyGoalMinutes: Math.max(5, Math.round(minutes)) }),
+
       lastSyncedUserId: null,
       setLastSyncedUserId: (id) => set({ lastSyncedUserId: id }),
 
@@ -179,6 +186,7 @@ export function exportAllData() {
     studyLog: state.studyLog,
     starredQuestionIds: state.starredQuestionIds,
     theme: state.theme,
+    dailyGoalMinutes: state.dailyGoalMinutes,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -194,5 +202,6 @@ export function importAllData(json: string) {
     studyLog: data.studyLog ?? {},
     starredQuestionIds: data.starredQuestionIds ?? [],
     theme: data.theme ?? 'system',
+    dailyGoalMinutes: data.dailyGoalMinutes ?? 60,
   });
 }

@@ -1,35 +1,23 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock } from 'lucide-react';
+import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
+import { useGamification } from '../lib/gamification';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
-
-function useStreak() {
-  const studyLog = useAppStore((s) => s.studyLog);
-  let streak = 0;
-  const d = new Date();
-  for (;;) {
-    const key = d.toISOString().slice(0, 10);
-    const entry = studyLog[key];
-    const active = entry && (entry.focusMinutes > 0 || entry.topicsCompleted > 0 || entry.testsCompleted > 0);
-    if (active) {
-      streak += 1;
-      d.setDate(d.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-  return streak;
-}
 
 export default function Dashboard() {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
   const sessions = useAppStore((s) => s.sessions);
   const examDate = useAppStore((s) => s.examDate);
-  const streak = useStreak();
+  const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
+  const studyLog = useAppStore((s) => s.studyLog);
+  const gami = useGamification();
+  const streak = gami.streaks.current;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayMinutes = studyLog[todayKey]?.focusMinutes ?? 0;
 
   const totalTopics = getAllTopicsCount();
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
@@ -101,6 +89,48 @@ export default function Dashboard() {
               <StatTile icon={TrendingUp} label="Avg Score" value={avgScore !== null ? `${avgScore}%` : '—'} accent="text-fuchsia-600 dark:text-fuchsia-400" />
             </div>
           </div>
+        </Card>
+      </motion.div>
+
+      {/* Study progress / gamification */}
+      <motion.div {...fadeUp}>
+        <Card className="p-5 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Study Progress</h3>
+            <Badge tone="gold">
+              <Trophy className="h-3 w-3" /> Level {gami.level.level}
+            </Badge>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-3">
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-xs">
+                <span className="font-medium text-slate-600 dark:text-slate-300">{gami.xp} XP</span>
+                <span className="text-slate-400">{gami.level.xpToNext} to next level</span>
+              </div>
+              <ProgressBar value={gami.level.progressPct} colorClassName="bg-gold-400" height="h-1.5" />
+            </div>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-xs">
+                <span className="font-medium text-slate-600 dark:text-slate-300">Today's Goal</span>
+                <span className="text-slate-400">
+                  {todayMinutes}/{dailyGoalMinutes} min
+                </span>
+              </div>
+              <ProgressBar value={Math.min(100, (todayMinutes / dailyGoalMinutes) * 100)} colorClassName="bg-brand-500" height="h-1.5" />
+            </div>
+            <div className="flex items-center justify-between sm:block">
+              <div className="flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-200">
+                <Flame className="h-4 w-4 text-orange-500" /> {gami.streaks.current}-day streak
+              </div>
+              <p className="mt-1 text-xs text-slate-400">Best: {gami.streaks.best} days</p>
+            </div>
+          </div>
+          {gami.nextBadge && (
+            <div className="mt-4 flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+              <Sparkles className="h-3.5 w-3.5 text-brand-500 shrink-0" />
+              Next achievement: <span className="font-medium text-slate-700 dark:text-slate-200">{gami.nextBadge.title}</span> — {gami.nextBadge.description}
+            </div>
+          )}
         </Card>
       </motion.div>
 

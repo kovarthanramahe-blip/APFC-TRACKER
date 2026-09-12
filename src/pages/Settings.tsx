@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info, LogIn, LogOut, UserRound, Cloud, CloudOff, RefreshCw, AlertCircle } from 'lucide-react';
+import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info, LogIn, LogOut, UserRound, Cloud, CloudOff, RefreshCw, AlertCircle, Target } from 'lucide-react';
 import { useAppStore, exportAllData, importAllData } from '../lib/store';
 import { useAuth } from '../lib/useAuth';
 import { useSyncStatus, type SyncStatus } from '../lib/cloudSync';
@@ -75,6 +75,8 @@ function AccountCard() {
 export default function Settings() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
+  const setDailyGoalMinutes = useAppStore((s) => s.setDailyGoalMinutes);
   const resetAllData = useAppStore((s) => s.resetAllData);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -135,6 +137,28 @@ export default function Settings() {
                 <span className={cx('text-xs font-medium', theme === key ? 'text-brand-700 dark:text-brand-300' : 'text-slate-500')}>{label}</span>
               </button>
             ))}
+          </div>
+        </Card>
+
+        <Card className="p-5 sm:p-6">
+          <div className="mb-1 flex items-center gap-2">
+            <Target className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+            <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Daily Study Goal</h3>
+          </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 mb-3">
+            Your target for focused study time each day, shown on the Dashboard.
+          </p>
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              min={5}
+              max={480}
+              step={5}
+              value={dailyGoalMinutes}
+              onChange={(e) => setDailyGoalMinutes(Number(e.target.value) || 5)}
+              className="w-24 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            <span className="text-sm text-slate-500 dark:text-slate-400">minutes per day</span>
           </div>
         </Card>
 
