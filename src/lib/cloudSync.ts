@@ -49,7 +49,12 @@ function isOffline() {
  * Reconciles local Zustand state with the user's Supabase row once, right
  * after sign-in:
  *  - cloud has data  -> load it into the local store (cloud wins)
- *  - no cloud row, local has data -> upload local as the initial cloud copy
+ *  - no cloud row, local data belongs to this same user (or device has never
+ *    synced before) -> upload local as the initial cloud copy
+ *  - no cloud row, but local data belongs to a DIFFERENT account that
+ *    previously used this device -> never adopt it as this user's data;
+ *    clear it instead, so accounts sharing a device/browser can't leak
+ *    each other's progress
  *  - neither has data -> nothing to do; the first future change creates it
  */
 export async function reconcileOnSignIn(userId: string): Promise<void> {
@@ -60,11 +65,17 @@ export async function reconcileOnSignIn(userId: string): Promise<void> {
     if (cloud && hasMeaningfulData(cloud)) {
       importAllData(JSON.stringify(cloud));
     } else {
-      const local = currentLocalData();
-      if (hasMeaningfulData(local)) {
-        await saveCloudData(userId, local);
+      const { lastSyncedUserId, resetAllData } = useAppStore.getState();
+      if (lastSyncedUserId && lastSyncedUserId !== userId) {
+        resetAllData();
+      } else {
+        const local = currentLocalData();
+        if (hasMeaningfulData(local)) {
+          await saveCloudData(userId, local);
+        }
       }
     }
+    useAppStore.getState().setLastSyncedUserId(userId);
     setStatus('synced');
   } catch {
     setStatus(isOffline() ? 'offline' : 'error');

@@ -43,6 +43,12 @@ interface AppState {
   setTheme: (t: ThemeMode) => void;
   examDate: string;
 
+  // Device-local bookkeeping only (never synced to the cloud payload itself):
+  // which signed-in account this cached local data currently belongs to, so
+  // a different account signing in on the same device never adopts it.
+  lastSyncedUserId: string | null;
+  setLastSyncedUserId: (id: string | null) => void;
+
   // Reset
   resetAllData: () => void;
 }
@@ -142,6 +148,9 @@ export const useAppStore = create<AppState>()(
       theme: 'system',
       setTheme: (t) => set({ theme: t }),
       examDate: '2026-12-20',
+
+      lastSyncedUserId: null,
+      setLastSyncedUserId: (id) => set({ lastSyncedUserId: id }),
 
       resetAllData: () =>
         set({
