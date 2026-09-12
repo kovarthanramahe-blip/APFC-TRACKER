@@ -6,6 +6,7 @@ import { useThemeEffect } from './lib/useTheme';
 // chunk) so its built-in OAuth hash detection runs on every page load,
 // including the redirect landing on "/" straight after Google sign-in.
 import './lib/supabase';
+import { useCloudSync } from './lib/useCloudSync';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
@@ -30,6 +31,7 @@ function RouteFallback() {
 
 export default function App() {
   useThemeEffect();
+  useCloudSync();
 
   return (
     <AppShell>

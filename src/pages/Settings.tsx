@@ -1,9 +1,29 @@
 import { useRef, useState } from 'react';
-import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info, LogIn, LogOut, UserRound } from 'lucide-react';
+import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info, LogIn, LogOut, UserRound, Cloud, CloudOff, RefreshCw, AlertCircle } from 'lucide-react';
 import { useAppStore, exportAllData, importAllData } from '../lib/store';
 import { useAuth } from '../lib/useAuth';
+import { useSyncStatus, type SyncStatus } from '../lib/cloudSync';
 import { cx } from '../lib/utils';
 import { Card, Button, PageHeader, Badge } from '../components/ui/Primitives';
+
+const SYNC_STATUS_META: Record<SyncStatus, { label: string; tone: 'success' | 'neutral' | 'danger'; icon: typeof Cloud }> = {
+  idle: { label: 'Local only', tone: 'neutral', icon: CloudOff },
+  syncing: { label: 'Syncing…', tone: 'neutral', icon: RefreshCw },
+  synced: { label: 'Synced', tone: 'success', icon: Cloud },
+  offline: { label: 'Offline', tone: 'neutral', icon: CloudOff },
+  error: { label: 'Sync error', tone: 'danger', icon: AlertCircle },
+};
+
+function SyncBadge() {
+  const status = useSyncStatus((s) => s.status);
+  const meta = SYNC_STATUS_META[status];
+  return (
+    <Badge tone={meta.tone}>
+      <meta.icon className={cx('h-3 w-3', status === 'syncing' && 'animate-spin')} />
+      {meta.label}
+    </Badge>
+  );
+}
 
 function AccountCard() {
   const { user, loading, isSupabaseConfigured, signInWithGoogle, signOut } = useAuth();
@@ -33,13 +53,16 @@ function AccountCard() {
               <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
             </div>
           </div>
-          <Button variant="secondary" onClick={signOut}>
-            <LogOut className="h-4 w-4" /> Sign out
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <SyncBadge />
+            <Button variant="secondary" onClick={signOut}>
+              <LogOut className="h-4 w-4" /> Sign out
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="mt-3">
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Sign in to sync your progress across devices (coming soon).</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Sign in to sync your progress across devices.</p>
           <Button onClick={signInWithGoogle}>
             <LogIn className="h-4 w-4" /> Continue with Google
           </Button>
