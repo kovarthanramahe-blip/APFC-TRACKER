@@ -81,8 +81,15 @@ export function startCloudSync(userId: string, debounceMs = 1500): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const push = () => {
+    const local = currentLocalData();
+    if (!hasMeaningfulData(local)) {
+      // Never let a reset/emptied local store silently wipe valid cloud
+      // data — mirrors the same guard reconcileOnSignIn applies at sign-in.
+      setStatus('synced');
+      return;
+    }
     setStatus('syncing');
-    saveCloudData(userId, currentLocalData())
+    saveCloudData(userId, local)
       .then(() => setStatus('synced'))
       .catch(() => setStatus(isOffline() ? 'offline' : 'error'));
   };
