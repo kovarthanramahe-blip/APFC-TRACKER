@@ -1,8 +1,45 @@
 import { useRef, useState } from 'react';
-import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info } from 'lucide-react';
+import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info, LogIn, LogOut, UserRound } from 'lucide-react';
 import { useAppStore, exportAllData, importAllData } from '../lib/store';
+import { useAuth } from '../lib/useAuth';
 import { cx } from '../lib/utils';
 import { Card, Button, PageHeader, Badge } from '../components/ui/Primitives';
+
+function AccountCard() {
+  const { user, loading, isSupabaseConfigured, signInWithGoogle, signOut } = useAuth();
+
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-1 flex items-center gap-2">
+        <UserRound className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+        <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Account</h3>
+      </div>
+      {!isSupabaseConfigured ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+          Cloud sync isn't configured for this deployment yet. Your data stays local until it is.
+        </p>
+      ) : loading ? (
+        <p className="text-sm text-slate-400 mt-2">Checking sign-in status…</p>
+      ) : user ? (
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Signed in as <span className="font-medium text-slate-800 dark:text-slate-100">{user.email}</span>
+          </p>
+          <Button variant="secondary" onClick={signOut}>
+            <LogOut className="h-4 w-4" /> Sign out
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Sign in to sync your progress across devices (coming soon).</p>
+          <Button onClick={signInWithGoogle}>
+            <LogIn className="h-4 w-4" /> Continue with Google
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export default function Settings() {
   const theme = useAppStore((s) => s.theme);
@@ -43,6 +80,8 @@ export default function Settings() {
       <PageHeader eyebrow="Preferences" title="Settings" description="Customise your experience and manage your locally stored data." />
 
       <div className="space-y-6">
+        <AccountCard />
+
         <Card className="p-5 sm:p-6">
           <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Appearance</h3>
           <div className="flex gap-3">
