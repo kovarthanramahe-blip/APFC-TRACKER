@@ -1,0 +1,117 @@
+@import 'tailwindcss';
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+@import '@fontsource/sora/latin-600.css';
+@import '@fontsource/sora/latin-700.css';
+@import '@fontsource/sora/latin-800.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Sora', system-ui, sans-serif;
+
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe6fe;
+  --color-brand-200: #bccffd;
+  --color-brand-300: #8caefb;
+  --color-brand-400: #5686f6;
+  --color-brand-500: #3161ee;
+  --color-brand-600: #1f42e2;
+  --color-brand-700: #1c34c2;
+  --color-brand-800: #1c2d9c;
+  --color-brand-900: #101a42;
+  --color-brand-950: #0b1230;
+
+  --color-gold-50: #fdf9ed;
+  --color-gold-100: #f9edc9;
+  --color-gold-200: #f3da96;
+  --color-gold-300: #ecc25c;
+  --color-gold-400: #e5aa33;
+  --color-gold-500: #d1922a;
+  --color-gold-600: #b17322;
+  --color-gold-700: #8d5720;
+  --color-gold-800: #75461f;
+  --color-gold-900: #633b1e;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #f4f6fb;
+  color: #10172a;
+  transition: background-color 0.25s ease, color 0.25s ease;
+  overscroll-behavior-y: none;
+}
+
+html.dark body {
+  background: #070b16;
+  color: #e7ecf9;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.5);
+}
+
+/* Glassy card surface used throughout */
+.surface {
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(14px);
+}
+html.dark .surface {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.bg-grid {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.28) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+html.dark .bg-grid {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.14) 1px, transparent 0);
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, rgba(148,163,184,0.08) 25%, rgba(148,163,184,0.25) 37%, rgba(148,163,184,0.08) 63%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

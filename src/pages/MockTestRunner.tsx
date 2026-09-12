@@ -1,0 +1,272 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { Clock, ChevronLeft, ChevronRight, Flag, X } from 'lucide-react';
+import { getBlueprint, pickQuestionsForBlueprint } from '../data/mockTests';
+import { useAppStore } from '../lib/store';
+import { cx, uuid, SUBJECT_COLORS } from '../lib/utils';
+import { Button, Card } from '../components/ui/Primitives';
+import type { MockTestAttempt } from '../lib/types';
+
+export default function MockTestRunner() {
+  const { blueprintId } = useParams();
+  const navigate = useNavigate();
+  const addAttempt = useAppStore((s) => s.addAttempt);
+
+  const blueprint = blueprintId ? getBlueprint(blueprintId) : undefined;
+  const questions = useMemo(() => (blueprint ? pickQuestionsForBlueprint(blueprint) : []), [blueprint]);
+
+  const [started, setStarted] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string | null>>({});
+  const [flagged, setFlagged] = useState<Record<string, boolean>>({});
+  const [secondsLeft, setSecondsLeft] = useState((blueprint?.durationMinutes ?? 0) * 60);
+  const startedAtRef = useRef<string>('');
+  const submittedRef = useRef(false);
+
+  useEffect(() => {
+    if (!started) return;
+    const timer = setInterval(() => {
+      setSecondsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(timer);
+          handleSubmit();
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started]);
+
+  if (!blueprint) {
+    return (
+      <div className="py-20 text-center">
+        <p className="text-slate-500">Test not found.</p>
+        <Link to="/mock-tests" className="text-brand-600 hover:underline text-sm">
+          Back to Mock Tests
+        </Link>
+      </div>
+    );
+  }
+
+  function handleSubmit() {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+
+    let correct = 0;
+    let wrong = 0;
+    let skipped = 0;
+    const subjectBreakdown: MockTestAttempt['subjectBreakdown'] = {};
+
+    questions.forEach((q) => {
+      const bd = subjectBreakdown[q.subject] ?? { correct: 0, wrong: 0, skipped: 0, total: 0 };
+      bd.total += 1;
+      const ans = answers[q.id];
+      if (!ans) {
+        skipped += 1;
+        bd.skipped += 1;
+      } else if (ans === q.correctOptionId) {
+        correct += 1;
+        bd.correct += 1;
+      } else {
+        wrong += 1;
+        bd.wrong += 1;
+      }
+      subjectBreakdown[q.subject] = bd;
+    });
+
+    const score = Math.round((correct * blueprint!.marksPerCorrect - wrong * blueprint!.marksPerCorrect * blueprint!.negativeMarkFraction) * 100) / 100;
+    const maxScore = questions.length * blueprint!.marksPerCorrect;
+
+    const attempt: MockTestAttempt = {
+      id: uuid(),
+      blueprintId: blueprint!.id,
+      blueprintTitle: blueprint!.title,
+      startedAt: startedAtRef.current,
+      submittedAt: new Date().toISOString(),
+      durationMinutes: blueprint!.durationMinutes,
+      questionIds: questions.map((q) => q.id),
+      answers,
+      correctCount: correct,
+      wrongCount: wrong,
+      skippedCount: skipped,
+      score,
+      maxScore,
+      subjectBreakdown,
+    };
+    addAttempt(attempt);
+    navigate(`/mock-tests/result/${attempt.id}`, { replace: true });
+  }
+
+  if (!started) {
+    return (
+      <div className="mx-auto max-w-lg py-10">
+        <Card className="p-6 sm:p-8 text-center">
+          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">{blueprint.title}</h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{blueprint.description}</p>
+          <div className="mt-6 grid grid-cols-3 gap-3 text-sm">
+            <InfoTile label="Questions" value={`${questions.length}`} />
+            <InfoTile label="Duration" value={`${blueprint.durationMinutes}m`} />
+            <InfoTile label="Negative Mark" value="1/3" />
+          </div>
+          <p className="mt-6 text-xs text-slate-400">
+            +{blueprint.marksPerCorrect} for each correct answer, −{(blueprint.marksPerCorrect * blueprint.negativeMarkFraction).toFixed(2)} for each wrong answer. Unattempted questions are not penalised.
+          </p>
+          <Button
+            className="mt-6 w-full"
+            onClick={() => {
+              startedAtRef.current = new Date().toISOString();
+              setStarted(true);
+            }}
+          >
+            Begin Test
+          </Button>
+          <Link to="/mock-tests" className="mt-3 block text-xs text-slate-400 hover:underline">
+            Cancel and go back
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  const q = questions[current];
+  const colors = SUBJECT_COLORS[q.subject];
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+  const lowTime = secondsLeft < 60;
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
+      <div>
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+            Question {current + 1} of {questions.length}
+          </p>
+          <div className={cx('flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold', lowTime ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200')}>
+            <Clock className="h-3.5 w-3.5" />
+            {mins}:{secs.toString().padStart(2, '0')}
+          </div>
+        </div>
+
+        <Card className="p-5 sm:p-6">
+          <div className="mb-3 flex items-center justify-between">
+            <span className={cx('rounded-full px-2.5 py-0.5 text-xs font-medium', colors.bg, colors.text)}>{q.topic}</span>
+            <button
+              onClick={() => setFlagged((f) => ({ ...f, [q.id]: !f[q.id] }))}
+              className={cx('flex items-center gap-1 text-xs font-medium', flagged[q.id] ? 'text-gold-600' : 'text-slate-400 hover:text-slate-600')}
+            >
+              <Flag className={cx('h-3.5 w-3.5', flagged[q.id] && 'fill-gold-400')} /> {flagged[q.id] ? 'Flagged' : 'Flag for review'}
+            </button>
+          </div>
+          <motion.p
+            key={q.id}
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+            className="text-base font-medium text-slate-800 dark:text-slate-100"
+          >
+            {q.question}
+          </motion.p>
+
+          <div className="mt-5 space-y-2.5">
+            {q.options.map((opt) => {
+              const selected = answers[q.id] === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt.id }))}
+                  className={cx(
+                    'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
+                    selected
+                      ? 'border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-500/10 dark:text-brand-200'
+                      : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-brand-300',
+                  )}
+                >
+                  <span
+                    className={cx(
+                      'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-bold',
+                      selected ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 dark:border-slate-600 text-transparent',
+                    )}
+                  >
+                    ●
+                  </span>
+                  {opt.text}
+                </button>
+              );
+            })}
+          </div>
+          {answers[q.id] && (
+            <button className="mt-3 text-xs text-slate-400 hover:underline" onClick={() => setAnswers((a) => ({ ...a, [q.id]: null }))}>
+              Clear response
+            </button>
+          )}
+        </Card>
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <Button variant="secondary" disabled={current === 0} onClick={() => setCurrent((c) => c - 1)}>
+            <ChevronLeft className="h-4 w-4" /> Previous
+          </Button>
+          {current === questions.length - 1 ? (
+            <Button onClick={() => confirm('Submit the test now?') && handleSubmit()}>Submit Test</Button>
+          ) : (
+            <Button onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}>
+              Next <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Question navigator */}
+      <Card className="hidden lg:block p-4 h-fit sticky top-24">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Navigator</p>
+          <button onClick={() => confirm('Submit the test now?') && handleSubmit()} className="text-slate-400 hover:text-rose-500">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {questions.map((qq, i) => {
+            const answered = !!answers[qq.id];
+            const isCurrent = i === current;
+            return (
+              <button
+                key={qq.id}
+                onClick={() => setCurrent(i)}
+                className={cx(
+                  'relative h-8 w-8 rounded-lg text-xs font-semibold transition-colors',
+                  isCurrent
+                    ? 'bg-brand-600 text-white'
+                    : answered
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+                )}
+              >
+                {i + 1}
+                {flagged[qq.id] && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-gold-500" />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-4 space-y-1.5 text-xs text-slate-400">
+          <p>
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 mr-1.5" /> Answered: {Object.values(answers).filter(Boolean).length}
+          </p>
+          <p>
+            <span className="inline-block h-2 w-2 rounded-full bg-slate-300 mr-1.5" /> Unanswered: {questions.length - Object.values(answers).filter(Boolean).length}
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 py-3">
+      <p className="font-display font-bold text-slate-800 dark:text-slate-100">{value}</p>
+      <p className="text-[11px] text-slate-400 mt-0.5">{label}</p>
+    </div>
+  );
+}
