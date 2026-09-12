@@ -26,13 +26,6 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Debug - check Supabase secrets are present (values never printed)
-        run: |
-          [ -n "$VITE_SUPABASE_URL" ] && echo "VITE_SUPABASE_URL: SET (length ${#VITE_SUPABASE_URL})" || echo "VITE_SUPABASE_URL: EMPTY"
-          [ -n "$VITE_SUPABASE_ANON_KEY" ] && echo "VITE_SUPABASE_ANON_KEY: SET (length ${#VITE_SUPABASE_ANON_KEY})" || echo "VITE_SUPABASE_ANON_KEY: EMPTY"
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - run: npm run build
         env:
           GITHUB_PAGES: "true"
