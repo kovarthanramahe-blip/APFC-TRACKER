@@ -8,6 +8,7 @@ import { useThemeEffect } from './lib/useTheme';
 import './lib/supabase';
 import { useCloudSync } from './lib/useCloudSync';
 import { useNativeAuthBridge } from './lib/nativeAuth';
+import { RewardCelebration } from './components/RewardCelebration';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Suspense>
+      <RewardCelebration />
     </AppShell>
   );
 }

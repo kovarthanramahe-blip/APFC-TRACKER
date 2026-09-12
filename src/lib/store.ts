@@ -47,6 +47,12 @@ interface AppState {
   dailyGoalMinutes: number;
   setDailyGoalMinutes: (minutes: number) => void;
 
+  // Reward id -> ISO timestamp of when it was first detected as unlocked.
+  // Doubles as "already celebrated" (key present = don't toast again) and
+  // "recently unlocked" (latest timestamp), without a second reward list.
+  rewardUnlocks: Record<string, string>;
+  recordRewardUnlocks: (ids: string[]) => void;
+
   // Device-local bookkeeping only (never synced to the cloud payload itself):
   // which signed-in account this cached local data currently belongs to, so
   // a different account signing in on the same device never adopts it.
@@ -156,6 +162,18 @@ export const useAppStore = create<AppState>()(
       dailyGoalMinutes: 60,
       setDailyGoalMinutes: (minutes) => set({ dailyGoalMinutes: Math.max(5, Math.round(minutes)) }),
 
+      rewardUnlocks: {},
+      recordRewardUnlocks: (ids) =>
+        set((state) => {
+          if (ids.length === 0) return state;
+          const now = new Date().toISOString();
+          const next = { ...state.rewardUnlocks };
+          for (const id of ids) {
+            if (!next[id]) next[id] = now;
+          }
+          return { rewardUnlocks: next };
+        }),
+
       lastSyncedUserId: null,
       setLastSyncedUserId: (id) => set({ lastSyncedUserId: id }),
 
@@ -167,6 +185,7 @@ export const useAppStore = create<AppState>()(
           sessions: [],
           studyLog: {},
           starredQuestionIds: [],
+          rewardUnlocks: {},
         }),
     }),
     {
@@ -187,6 +206,7 @@ export function exportAllData() {
     starredQuestionIds: state.starredQuestionIds,
     theme: state.theme,
     dailyGoalMinutes: state.dailyGoalMinutes,
+    rewardUnlocks: state.rewardUnlocks,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -203,5 +223,6 @@ export function importAllData(json: string) {
     starredQuestionIds: data.starredQuestionIds ?? [],
     theme: data.theme ?? 'system',
     dailyGoalMinutes: data.dailyGoalMinutes ?? 60,
+    rewardUnlocks: data.rewardUnlocks ?? {},
   });
 }

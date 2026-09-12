@@ -208,3 +208,175 @@ export function useGamification(): GamificationSnapshot {
     [completedTopics, attempts, sessions, studyLog, starredQuestionIds],
   );
 }
+
+// --- Rewards ------------------------------------------------------------
+// A separate, differently-flavoured layer on top of the same derived data
+// (titles for level milestones, named rewards for streak/hours/test/syllabus
+// milestones). Reuses BadgeContext plus level/xp rather than introducing a
+// second computation pipeline.
+export interface RewardContext extends BadgeContext {
+  level: number;
+  xp: number;
+}
+
+export function buildRewardContext(inputs: GamificationInputs): RewardContext {
+  const xp = computeXp(inputs);
+  const { level } = getLevelInfo(xp);
+  return { ...buildBadgeContext(inputs), level, xp };
+}
+
+export interface RewardDefinition {
+  id: string;
+  title: string;
+  description: string;
+  kind: 'title' | 'badge';
+  check: (ctx: RewardContext) => boolean;
+  progress: (ctx: RewardContext) => number; // 0-100, for the not-yet-earned case
+}
+
+export const REWARDS: RewardDefinition[] = [
+  {
+    id: 'title-level-2',
+    title: 'Getting Started',
+    description: 'Reach Level 2',
+    kind: 'title',
+    check: (c) => c.level >= 2,
+    progress: (c) => Math.min(100, (c.xp / xpRequiredForLevel(2)) * 100),
+  },
+  {
+    id: 'title-level-3',
+    title: 'Consistent Aspirant',
+    description: 'Reach Level 3',
+    kind: 'title',
+    check: (c) => c.level >= 3,
+    progress: (c) => Math.min(100, (c.xp / xpRequiredForLevel(3)) * 100),
+  },
+  {
+    id: 'title-level-5',
+    title: 'Serious Aspirant',
+    description: 'Reach Level 5',
+    kind: 'title',
+    check: (c) => c.level >= 5,
+    progress: (c) => Math.min(100, (c.xp / xpRequiredForLevel(5)) * 100),
+  },
+  {
+    id: 'reward-streak-7',
+    title: '7-Day Warrior',
+    description: 'Maintain a 7-day study streak',
+    kind: 'badge',
+    check: (c) => c.streaks.best >= 7,
+    progress: (c) => Math.min(100, (c.streaks.best / 7) * 100),
+  },
+  {
+    id: 'reward-streak-30',
+    title: '30-Day Discipline',
+    description: 'Maintain a 30-day study streak',
+    kind: 'badge',
+    check: (c) => c.streaks.best >= 30,
+    progress: (c) => Math.min(100, (c.streaks.best / 30) * 100),
+  },
+  {
+    id: 'reward-focus-10h',
+    title: '10-Hour Milestone',
+    description: 'Accumulate 10 hours of focused study',
+    kind: 'badge',
+    check: (c) => c.totalFocusMinutes >= 600,
+    progress: (c) => Math.min(100, (c.totalFocusMinutes / 600) * 100),
+  },
+  {
+    id: 'reward-focus-50h',
+    title: 'Deep Work',
+    description: 'Accumulate 50 hours of focused study',
+    kind: 'badge',
+    check: (c) => c.totalFocusMinutes >= 3000,
+    progress: (c) => Math.min(100, (c.totalFocusMinutes / 3000) * 100),
+  },
+  {
+    id: 'reward-mock-10',
+    title: 'Mock Master',
+    description: 'Complete 10 mock tests',
+    kind: 'badge',
+    check: (c) => c.attemptsCount >= 10,
+    progress: (c) => Math.min(100, (c.attemptsCount / 10) * 100),
+  },
+  {
+    id: 'reward-syllabus-50',
+    title: 'Halfway There',
+    description: 'Complete 50% of the syllabus',
+    kind: 'badge',
+    check: (c) => c.syllabusPct >= 50,
+    progress: (c) => Math.min(100, (c.syllabusPct / 50) * 100),
+  },
+  {
+    id: 'reward-syllabus-100',
+    title: 'Syllabus Conqueror',
+    description: 'Complete 100% of the syllabus',
+    kind: 'badge',
+    check: (c) => c.syllabusPct >= 100,
+    progress: (c) => Math.min(100, c.syllabusPct),
+  },
+];
+
+export interface RewardsSnapshot {
+  context: RewardContext;
+  unlocked: RewardDefinition[];
+  locked: RewardDefinition[];
+  currentTitle: string | null;
+  nextReward: RewardDefinition | null;
+}
+
+export function getRewardsSnapshot(inputs: GamificationInputs): RewardsSnapshot {
+  const context = buildRewardContext(inputs);
+  const unlocked = REWARDS.filter((r) => r.check(context));
+  const locked = REWARDS.filter((r) => !r.check(context));
+  const titleRewards = unlocked.filter((r) => r.kind === 'title');
+  const currentTitle = titleRewards.length ? titleRewards[titleRewards.length - 1].title : null;
+  const nextReward = locked.length
+    ? [...locked].sort((a, b) => b.progress(context) - a.progress(context))[0]
+    : null;
+  return { context, unlocked, locked, currentTitle, nextReward };
+}
+
+export function useRewards(): RewardsSnapshot {
+  const completedTopics = useAppStore((s) => s.completedTopics);
+  const attempts = useAppStore((s) => s.attempts);
+  const sessions = useAppStore((s) => s.sessions);
+  const studyLog = useAppStore((s) => s.studyLog);
+  const starredQuestionIds = useAppStore((s) => s.starredQuestionIds);
+
+  return useMemo(
+    () => getRewardsSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds }),
+    [completedTopics, attempts, sessions, studyLog, starredQuestionIds],
+  );
+}
+
+// --- Context-aware encouragement -----------------------------------------
+// Reflects current standing, never a "you missed a day" message. Priority
+// order picks the single most relevant, actionable line for right now.
+export interface EncouragementInputs {
+  todayMinutes: number;
+  dailyGoalMinutes: number;
+  streakCurrent: number;
+  syllabusPct: number;
+  tookTestToday: boolean;
+}
+
+export function getEncouragementMessage(inputs: EncouragementInputs): string {
+  if (inputs.tookTestToday) {
+    return 'Test completed. Now review the mistakes.';
+  }
+  if (inputs.todayMinutes >= inputs.dailyGoalMinutes && inputs.dailyGoalMinutes > 0) {
+    return "Today's target is done. Protect the habit.";
+  }
+  if (inputs.todayMinutes > 0) {
+    const remaining = Math.max(0, inputs.dailyGoalMinutes - inputs.todayMinutes);
+    return `You're ${remaining} minute${remaining === 1 ? '' : 's'} away from today's target.`;
+  }
+  if (inputs.streakCurrent > 0) {
+    return 'Keep the streak alive.';
+  }
+  if (inputs.syllabusPct >= 50 && inputs.syllabusPct < 100) {
+    return 'Halfway is not the finish line. Keep moving.';
+  }
+  return "Your first focused session starts today's progress.";
+}

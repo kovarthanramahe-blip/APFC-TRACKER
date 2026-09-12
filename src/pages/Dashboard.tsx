@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy } from 'lucide-react';
+import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy, Quote as QuoteIcon, RefreshCcw } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
-import { useGamification } from '../lib/gamification';
+import { useGamification, useRewards, getEncouragementMessage } from '../lib/gamification';
+import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
 
@@ -15,13 +17,27 @@ export default function Dashboard() {
   const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
   const studyLog = useAppStore((s) => s.studyLog);
   const gami = useGamification();
+  const rewards = useRewards();
   const streak = gami.streaks.current;
   const todayKey = new Date().toISOString().slice(0, 10);
   const todayMinutes = studyLog[todayKey]?.focusMinutes ?? 0;
 
+  const [quoteOverride, setQuoteOverride] = useState<number | null>(null);
+  const dailyQuoteIndex = getQuoteIndexForDate(todayKey);
+  const quote = QUOTES[quoteOverride ?? dailyQuoteIndex];
+
   const totalTopics = getAllTopicsCount();
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
   const overallPct = totalTopics ? Math.round((doneTopics / totalTopics) * 100) : 0;
+
+  const tookTestToday = attempts.some((a) => a.submittedAt.slice(0, 10) === todayKey);
+  const encouragement = getEncouragementMessage({
+    todayMinutes,
+    dailyGoalMinutes,
+    streakCurrent: gami.streaks.current,
+    syllabusPct: overallPct,
+    tookTestToday,
+  });
 
   const days = daysUntil(examDate);
 
@@ -66,8 +82,19 @@ export default function Dashboard() {
                 )}
               </h1>
               <p className="mt-2 text-sm sm:text-base text-slate-500 dark:text-slate-400">
-                Target exam date: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatDate(examDate)}</span>. Stay consistent — small daily progress compounds.
+                Target exam date: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatDate(examDate)}</span>
               </p>
+              <div className="mt-3 flex items-start gap-2 max-w-xl">
+                <QuoteIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-400" />
+                <p className="text-sm italic text-slate-600 dark:text-slate-300">{quote}</p>
+                <button
+                  onClick={() => setQuoteOverride((i) => ((i ?? dailyQuoteIndex) + 1) % QUOTES.length)}
+                  title="Show another quote"
+                  className="shrink-0 rounded-lg p-1 text-slate-300 hover:text-brand-500 dark:text-slate-600 dark:hover:text-brand-400"
+                >
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                </button>
+              </div>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link to="/mock-tests">
                   <Button>
@@ -97,9 +124,12 @@ export default function Dashboard() {
         <Card className="p-5 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Study Progress</h3>
-            <Badge tone="gold">
-              <Trophy className="h-3 w-3" /> Level {gami.level.level}
-            </Badge>
+            <div className="flex items-center gap-2">
+              {rewards.currentTitle && <Badge tone="brand">{rewards.currentTitle}</Badge>}
+              <Badge tone="gold">
+                <Trophy className="h-3 w-3" /> Level {gami.level.level}
+              </Badge>
+            </div>
           </div>
           <div className="grid gap-5 sm:grid-cols-3">
             <div>
@@ -125,8 +155,9 @@ export default function Dashboard() {
               <p className="mt-1 text-xs text-slate-400">Best: {gami.streaks.best} days</p>
             </div>
           </div>
+          <p className="mt-4 text-sm font-medium text-brand-700 dark:text-brand-300">{encouragement}</p>
           {gami.nextBadge && (
-            <div className="mt-4 flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+            <div className="mt-3 flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2.5 text-xs text-slate-500 dark:text-slate-400">
               <Sparkles className="h-3.5 w-3.5 text-brand-500 shrink-0" />
               Next achievement: <span className="font-medium text-slate-700 dark:text-slate-200">{gami.nextBadge.title}</span> — {gami.nextBadge.description}
             </div>
