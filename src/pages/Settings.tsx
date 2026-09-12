@@ -21,10 +21,18 @@ function AccountCard() {
       ) : loading ? (
         <p className="text-sm text-slate-400 mt-2">Checking sign-in status…</p>
       ) : user ? (
-        <div className="mt-3 flex items-center justify-between">
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Signed in as <span className="font-medium text-slate-800 dark:text-slate-100">{user.email}</span>
-          </p>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {user.user_metadata?.avatar_url && (
+              <img src={user.user_metadata.avatar_url} alt="" className="h-9 w-9 shrink-0 rounded-full" referrerPolicy="no-referrer" />
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                {user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+            </div>
+          </div>
           <Button variant="secondary" onClick={signOut}>
             <LogOut className="h-4 w-4" /> Sign out
           </Button>

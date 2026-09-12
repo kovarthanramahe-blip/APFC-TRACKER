@@ -27,9 +27,11 @@ export function useAuth() {
 
   async function signInWithGoogle() {
     if (!supabase) return;
+    // Account for deployments served from a subpath (e.g. GitHub Pages).
+    const redirectTo = window.location.origin + import.meta.env.BASE_URL;
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo },
     });
   }
 
