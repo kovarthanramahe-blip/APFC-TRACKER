@@ -11,13 +11,13 @@ A complete, installable web + Android (PWA) preparation companion for the **UPSC
 - **Notes** — quick subject-tagged notes for formulas, mnemonics and revision points.
 - **Pomodoro Timer** — a 25/5/15 focus-break cycle timer with subject tagging and a session log.
 - **Analytics** — charts for daily focus time, mock test score trend, and syllabus coverage by subject.
-- **Settings** — light/dark/system theme, install-as-app instructions, and local JSON export/import/reset for your data.
+- **Settings** — light/dark/system theme, install-as-app instructions, Google sign-in with cloud sync, and local JSON export/import/reset for your data.
 
 ## Tech Stack
 
-React 19 + TypeScript + Vite, Tailwind CSS v4, Framer Motion, Zustand (persisted to `localStorage`), React Router, Recharts, and `vite-plugin-pwa` for offline support and installability.
+React 19 + TypeScript + Vite, Tailwind CSS v4, Framer Motion, Zustand (persisted to `localStorage`), React Router, Recharts, and `vite-plugin-pwa` for offline support and installability. Capacitor wraps the app for Android.
 
-All data is stored **locally in the browser** — there is no backend. Use **Settings → Export backup** regularly to avoid losing progress, especially before clearing browser data.
+All data lives **locally in the browser** by default (`localStorage`) and keeps working fully offline. Signing in with Google (Settings → Account) additionally syncs it to a Supabase `user_data` table scoped by row-level security, so progress carries across devices — see `.env.example` for the two `VITE_SUPABASE_*` variables this needs. Use **Settings → Export backup** as a manual fallback either way.
 
 ## Getting Started
 
@@ -36,18 +36,20 @@ This is a Progressive Web App:
 - **iOS (Safari):** Share → "Add to Home Screen".
 - **Desktop (Chrome/Edge):** click the install icon in the address bar.
 
-### Building a native Android APK (optional)
+### Building a native Android app
 
-For a store-distributable APK/AAB, wrap this PWA with [Capacitor](https://capacitorjs.com/):
+The Android project already exists at `android/` ([Capacitor](https://capacitorjs.com/), app id `com.apfctracker.app`). This repo doesn't ship a built APK — you build it locally with Android Studio, which manages its own SDK:
 
 ```bash
-npm install @capacitor/core @capacitor/android
-npx cap init "APFC Tracker" "com.apfctracker.app"
-npm run build
-npx cap add android
-npx cap copy android
-npx cap open android   # opens Android Studio to build/sign the APK
+npm run android:sync   # builds the web app and copies it + native deps into android/
+npm run android:open   # opens the android/ project in Android Studio
 ```
+
+From Android Studio: **Run ▶** to install a debug build on an emulator/device, or **Build → Generate Signed Bundle / APK** for a release build to sideload or publish. Re-run `npm run android:sync` after any web app change so the native project picks it up.
+
+Source icon/splash images live in `assets/`; regenerate the native assets after changing them with `npx @capacitor/assets generate --android`.
+
+**Note on Google Sign-In:** the current implementation opens the OAuth flow in-page (`window.location`), which works on the web but Google blocks OAuth inside an embedded Android WebView. Cloud sync's Google sign-in will need a follow-up using `@capacitor/browser` (system browser) + a custom URL scheme deep link back into the app before it works in the native app; the web version is unaffected.
 
 ## Content note
 
