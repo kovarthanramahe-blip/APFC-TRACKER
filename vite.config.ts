@@ -35,6 +35,11 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         navigateFallbackDenylist: [/^\/api\//],
+        // Make sure a newly deployed build takes over immediately instead of
+        // an old service worker continuing to serve a stale cached bundle.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
       },
     }),
   ],
