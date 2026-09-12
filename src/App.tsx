@@ -7,6 +7,7 @@ import { useThemeEffect } from './lib/useTheme';
 // including the redirect landing on "/" straight after Google sign-in.
 import './lib/supabase';
 import { useCloudSync } from './lib/useCloudSync';
+import { useNativeAuthBridge } from './lib/nativeAuth';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
@@ -31,6 +32,7 @@ function RouteFallback() {
 
 export default function App() {
   useThemeEffect();
+  useNativeAuthBridge();
   useCloudSync();
 
   return (

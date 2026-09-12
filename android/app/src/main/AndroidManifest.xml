@@ -18,6 +18,18 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Google Sign-In callback: the system browser hands control
+                 back to the app via this custom scheme once Supabase has
+                 finished the OAuth exchange. Must match NATIVE_REDIRECT_URL
+                 in src/lib/nativeAuth.ts and be added to Supabase's
+                 Authentication > URL Configuration > Redirect URLs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.apfctracker.app" android:host="callback" />
+            </intent-filter>
         </activity>
 
         <provider

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { isNativePlatform, signInWithGoogleNative } from './nativeAuth';
 
 interface AuthState {
   user: User | null;
@@ -27,6 +28,10 @@ export function useAuth() {
 
   async function signInWithGoogle() {
     if (!supabase) return;
+    if (isNativePlatform) {
+      await signInWithGoogleNative();
+      return;
+    }
     // Account for deployments served from a subpath (e.g. GitHub Pages).
     const redirectTo = window.location.origin + import.meta.env.BASE_URL;
     await supabase.auth.signInWithOAuth({
