@@ -2,6 +2,10 @@ import { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { useThemeEffect } from './lib/useTheme';
+// Eagerly load the Supabase client (rather than only via the lazy Settings
+// chunk) so its built-in OAuth hash detection runs on every page load,
+// including the redirect landing on "/" straight after Google sign-in.
+import './lib/supabase';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
