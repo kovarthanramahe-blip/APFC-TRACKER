@@ -27,6 +27,20 @@ function SyncBadge() {
 
 function AccountCard() {
   const { user, loading, isSupabaseConfigured, signInWithGoogle, signOut } = useAuth();
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
+
+  async function handleSignIn() {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      await signInWithGoogle();
+    } catch {
+      setSignInError('Could not start Google sign-in. Please try again.');
+    } finally {
+      setSigningIn(false);
+    }
+  }
 
   return (
     <Card className="p-5 sm:p-6">
@@ -63,9 +77,11 @@ function AccountCard() {
       ) : (
         <div className="mt-3">
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Sign in to sync your progress across devices.</p>
-          <Button onClick={signInWithGoogle}>
-            <LogIn className="h-4 w-4" /> Continue with Google
+          <Button onClick={handleSignIn} disabled={signingIn}>
+            {signingIn ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+            {signingIn ? 'Signing in…' : 'Continue with Google'}
           </Button>
+          {signInError && <p className="mt-3 text-xs text-rose-600 dark:text-rose-400">{signInError}</p>}
         </div>
       )}
     </Card>

@@ -18,7 +18,10 @@ export async function signInWithGoogleNative() {
     provider: 'google',
     options: { redirectTo: NATIVE_REDIRECT_URL, skipBrowserRedirect: true },
   });
-  if (error || !data.url) return;
+  if (error || !data.url) {
+    console.error('Native Google sign-in failed:', error ?? 'No OAuth URL returned');
+    throw error ?? new Error('Could not start Google sign-in.');
+  }
   await Browser.open({ url: data.url });
 }
 
