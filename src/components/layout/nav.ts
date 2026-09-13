@@ -3,6 +3,7 @@ import {
   ListChecks,
   BookOpenCheck,
   FileClock,
+  FileQuestion,
   NotebookPen,
   Timer,
   BarChart3,
@@ -20,6 +21,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/syllabus', label: 'Syllabus', icon: ListChecks },
   { to: '/pyq', label: 'Question Bank', icon: BookOpenCheck },
+  { to: '/pyq-test', label: 'PYQs', icon: FileQuestion },
   { to: '/mock-tests', label: 'Mock Tests', icon: FileClock },
   { to: '/notes', label: 'Notes', icon: NotebookPen },
   { to: '/pomodoro', label: 'Pomodoro', icon: Timer },
@@ -28,10 +30,5 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 // Subset shown in the mobile bottom bar
-export const MOBILE_NAV_ITEMS: NavItem[] = [
-  NAV_ITEMS[0],
-  NAV_ITEMS[1],
-  NAV_ITEMS[3],
-  NAV_ITEMS[5],
-  NAV_ITEMS[4],
-];
+const MOBILE_ROUTES = ['/', '/syllabus', '/mock-tests', '/pomodoro', '/notes'];
+export const MOBILE_NAV_ITEMS: NavItem[] = MOBILE_ROUTES.map((to) => NAV_ITEMS.find((item) => item.to === to)!);

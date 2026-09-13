@@ -13,6 +13,7 @@ import { RewardCelebration } from './components/RewardCelebration';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
 const QuestionBank = lazy(() => import('./pages/QuestionBank'));
+const PYQTest = lazy(() => import('./pages/PYQTest'));
 const MockTests = lazy(() => import('./pages/MockTests'));
 const MockTestRunner = lazy(() => import('./pages/MockTestRunner'));
 const MockTestResult = lazy(() => import('./pages/MockTestResult'));
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/syllabus" element={<Syllabus />} />
           <Route path="/pyq" element={<QuestionBank />} />
+          <Route path="/pyq-test" element={<PYQTest />} />
           <Route path="/mock-tests" element={<MockTests />} />
           <Route path="/mock-tests/run/:blueprintId" element={<MockTestRunner />} />
           <Route path="/mock-tests/result/:attemptId" element={<MockTestResult />} />

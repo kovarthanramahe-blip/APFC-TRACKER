@@ -99,7 +99,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
-  const activeLabel = NAV_ITEMS.find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'APFC Tracker';
+  // Match exactly, or as a path segment prefix (e.g. "/mock-tests/run/1" matches "/mock-tests")
+  // — a plain startsWith would also match "/pyq-test" against "/pyq", which is wrong.
+  const activeLabel =
+    NAV_ITEMS.find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname === n.to || location.pathname.startsWith(`${n.to}/`)))?.label ??
+    'APFC Tracker';
 
   return (
     <div className="min-h-screen bg-grid">
