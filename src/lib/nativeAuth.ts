@@ -63,19 +63,39 @@ export function useNativeAuthBridge() {
     const client = supabase;
 
     const listenerPromise = CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
-      if (!url.startsWith(NATIVE_REDIRECT_URL)) return;
+      // Safe diagnostic only — never logs the full URL or any token/code value,
+      // just structural facts needed to see where the callback is diverging.
+      const matchesRedirect = url.startsWith(NATIVE_REDIRECT_URL);
+      const hashIndex = url.indexOf('#');
+      const hasFragment = hashIndex !== -1;
+      let protocol = '';
+      let host = '';
+      let pathname = '';
+      let paramNames: string[] = [];
+      try {
+        const parsed = new URL(url);
+        protocol = parsed.protocol;
+        host = parsed.host;
+        pathname = parsed.pathname;
+        const searchNames = Array.from(parsed.searchParams.keys());
+        const hashNames = hasFragment ? Array.from(new URLSearchParams(url.slice(hashIndex + 1)).keys()) : [];
+        paramNames = Array.from(new Set([...searchNames, ...hashNames]));
+      } catch (err) {
+        console.error('Native Google sign-in: failed to parse callback URL.', err);
+      }
+      console.error('Native Google sign-in: appUrlOpen received.', { matchesRedirect, protocol, host, pathname, hasFragment, paramNames });
+
+      if (!matchesRedirect) return;
       try {
         const tokens = parseTokensFromUrl(url);
+        console.error('Native Google sign-in: token parse result.', { tokensFound: Boolean(tokens) });
         if (!tokens) {
-          const hashIndex = url.indexOf('#');
-          const hasFragment = hashIndex !== -1;
-          const paramNames = hasFragment ? Array.from(new URLSearchParams(url.slice(hashIndex + 1)).keys()) : [];
-          console.error('Native Google sign-in: callback URL did not contain a session.', { hasFragment, paramNames });
           useNativeAuthStatus.setState({ status: 'error', error: 'Google sign-in did not complete. Please try again.' });
           return;
         }
         try {
           await client.auth.setSession(tokens);
+          console.error('Native Google sign-in: setSession succeeded.');
           useNativeAuthStatus.setState({ status: 'idle', error: null });
         } catch (err) {
           console.error('Native Google sign-in: setSession failed.', err);
