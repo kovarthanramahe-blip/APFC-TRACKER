@@ -14,6 +14,8 @@ import {
   BookOpen,
   History,
   Star,
+  BarChart3,
+  TrendingDown,
 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
@@ -29,8 +31,11 @@ type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
 const MARKS_CORRECT = 2.5;
 const MARKS_WRONG = -0.833333;
 
-// topicId -> topic title, built once from the existing syllabus (not modified).
+// topicId -> topic title / subject, built once from the existing syllabus (not modified).
 const TOPIC_TITLES: Record<string, string> = Object.fromEntries(SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, t.title])));
+const TOPIC_SUBJECTS: Record<string, SubjectColorKey> = Object.fromEntries(
+  SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, s.colorKey])),
+);
 
 type QuestionStatus = 'correct' | 'wrong' | 'unanswered';
 
@@ -52,7 +57,7 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-type Phase = 'select' | 'testing' | 'results' | 'review' | 'bookmarks';
+type Phase = 'select' | 'testing' | 'results' | 'review' | 'bookmarks' | 'analytics';
 
 function BookmarkButton({ pyqId }: { pyqId: string }) {
   const isBookmarked = useAppStore((s) => s.bookmarkedPyqIds.includes(pyqId));
@@ -230,6 +235,103 @@ export default function PYQTest() {
     setPhase('testing');
   }
 
+  // Performance analytics, derived entirely from the existing PYQAttempt[] — no new
+  // persisted data. Subject/topic are resolved per-question from PYQ_BANK (the
+  // existing single source of truth), never from an attempt's own subject/topicId
+  // filter fields — those are just the selection used to build the test and are
+  // 'all' for mixed/full tests, so using them directly would misattribute every
+  // question in a mixed test to one subject/topic.
+  const performance = useMemo(() => {
+    if (pyqAttempts.length === 0) return null;
+
+    let totalQuestions = 0;
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let totalUnanswered = 0;
+    let totalScore = 0;
+
+    const subjectAgg = new Map<SubjectColorKey, { attempted: number; correct: number; wrong: number; testIds: Set<string> }>();
+    const topicAgg = new Map<string, { attempted: number; correct: number; wrong: number }>();
+
+    for (const attempt of pyqAttempts) {
+      totalQuestions += attempt.questionIds.length;
+      totalCorrect += attempt.correctCount;
+      totalWrong += attempt.wrongCount;
+      totalUnanswered += attempt.unansweredCount;
+      totalScore += attempt.score;
+
+      for (const qid of attempt.questionIds) {
+        const pyq = PYQ_BANK.find((p) => p.id === qid);
+        if (!pyq) continue; // defensive: skip if a question id can't be resolved
+        const ans = attempt.answers[qid];
+        const status: QuestionStatus = !ans ? 'unanswered' : ans === pyq.correctOptionId ? 'correct' : 'wrong';
+
+        const subjEntry = subjectAgg.get(pyq.subject) ?? { attempted: 0, correct: 0, wrong: 0, testIds: new Set<string>() };
+        subjEntry.testIds.add(attempt.id);
+        if (status !== 'unanswered') {
+          subjEntry.attempted += 1;
+          if (status === 'correct') subjEntry.correct += 1;
+          else subjEntry.wrong += 1;
+        }
+        subjectAgg.set(pyq.subject, subjEntry);
+
+        if (status !== 'unanswered') {
+          const topicEntry = topicAgg.get(pyq.topicId) ?? { attempted: 0, correct: 0, wrong: 0 };
+          topicEntry.attempted += 1;
+          if (status === 'correct') topicEntry.correct += 1;
+          else topicEntry.wrong += 1;
+          topicAgg.set(pyq.topicId, topicEntry);
+        }
+      }
+    }
+
+    const totalAttempted = totalCorrect + totalWrong;
+
+    const overall = {
+      testsCompleted: pyqAttempts.length,
+      totalQuestions,
+      totalAttempted,
+      totalCorrect,
+      totalWrong,
+      totalUnanswered,
+      overallAccuracy: totalAttempted > 0 ? (totalCorrect / totalAttempted) * 100 : 0,
+      averageScore: totalScore / pyqAttempts.length,
+    };
+
+    const subjects = Array.from(subjectAgg.entries())
+      .map(([subj, v]) => ({
+        subject: subj,
+        subjectTitle: SYLLABUS.find((s) => s.colorKey === subj)?.shortTitle ?? subj,
+        attempted: v.attempted,
+        correct: v.correct,
+        wrong: v.wrong,
+        accuracy: v.attempted > 0 ? (v.correct / v.attempted) * 100 : 0,
+        testCount: v.testIds.size,
+      }))
+      .sort((a, b) => a.subjectTitle.localeCompare(b.subjectTitle));
+
+    const allTopics = Array.from(topicAgg.entries()).map(([topicId, v]) => {
+      const subj = TOPIC_SUBJECTS[topicId];
+      return {
+        topicId,
+        topicTitle: TOPIC_TITLES[topicId] ?? topicId,
+        subject: subj,
+        subjectTitle: subj ? SYLLABUS.find((s) => s.colorKey === subj)?.shortTitle ?? subj : '—',
+        attempted: v.attempted,
+        correct: v.correct,
+        wrong: v.wrong,
+        accuracy: v.attempted > 0 ? (v.correct / v.attempted) * 100 : 0,
+      };
+    });
+
+    const topics = [...allTopics].sort((a, b) => a.topicTitle.localeCompare(b.topicTitle));
+
+    // Weakest first; ties broken alphabetically by topic title for a stable, deterministic order.
+    const weakTopics = [...allTopics].sort((a, b) => a.accuracy - b.accuracy || a.topicTitle.localeCompare(b.topicTitle)).slice(0, 6);
+
+    return { overall, subjects, topics, weakTopics };
+  }, [pyqAttempts]);
+
   if (phase === 'select') {
     return (
       <div>
@@ -238,10 +340,15 @@ export default function PYQTest() {
           title="PYQs"
           description="Practice with actual previous-year APFC questions, filtered by year, subject and topic."
           action={
-            <Button variant="secondary" onClick={() => setPhase('bookmarks')}>
-              <Star className={cx('h-4 w-4', bookmarkedQuestions.length > 0 && 'fill-gold-400 text-gold-500')} />
-              Bookmarked PYQs{bookmarkedQuestions.length > 0 ? ` (${bookmarkedQuestions.length})` : ''}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" onClick={() => setPhase('analytics')}>
+                <BarChart3 className="h-4 w-4" /> Performance
+              </Button>
+              <Button variant="secondary" onClick={() => setPhase('bookmarks')}>
+                <Star className={cx('h-4 w-4', bookmarkedQuestions.length > 0 && 'fill-gold-400 text-gold-500')} />
+                Bookmarked PYQs{bookmarkedQuestions.length > 0 ? ` (${bookmarkedQuestions.length})` : ''}
+              </Button>
+            </div>
           }
         />
 
@@ -401,6 +508,101 @@ export default function PYQTest() {
                 </Card>
               );
             })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (phase === 'analytics') {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <button
+          className="mb-4 flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          onClick={() => setPhase('select')}
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+
+        <PageHeader
+          eyebrow="Previous Year Questions"
+          title="Performance"
+          description="How you're doing across all your PYQ practice tests so far."
+        />
+
+        {!performance ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <BarChart3 className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
+            <p className="text-slate-400 text-sm">Take a PYQ test to see your performance analytics here.</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <Card className="p-5 sm:p-6">
+              <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Overall Performance</h3>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatTile label="Tests Completed" value={`${performance.overall.testsCompleted}`} />
+                <StatTile label="Total Questions" value={`${performance.overall.totalQuestions}`} />
+                <StatTile label="Attempted" value={`${performance.overall.totalAttempted}`} />
+                <StatTile label="Unanswered" value={`${performance.overall.totalUnanswered}`} />
+                <StatTile label="Correct" value={`${performance.overall.totalCorrect}`} tone="success" />
+                <StatTile label="Wrong" value={`${performance.overall.totalWrong}`} tone="danger" />
+                <StatTile label="Overall Accuracy" value={`${performance.overall.overallAccuracy.toFixed(1)}%`} tone="brand" />
+                <StatTile label="Average Score" value={performance.overall.averageScore.toFixed(2)} tone="brand" />
+              </div>
+            </Card>
+
+            <Card className="p-5 sm:p-6">
+              <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Subject Performance</h3>
+              <div className="space-y-2">
+                {performance.subjects.map((s) => {
+                  const colors = SUBJECT_COLORS[s.subject];
+                  return (
+                    <div
+                      key={s.subject}
+                      className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Badge className={cx(colors.bg, colors.text)}>{s.subjectTitle}</Badge>
+                        <span className="text-xs text-slate-400">
+                          {s.testCount} test{s.testCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">{s.attempted} attempted</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{s.correct} correct</span>
+                        <span className="text-rose-600 dark:text-rose-400">{s.wrong} wrong</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {s.attempted > 0 ? `${s.accuracy.toFixed(1)}%` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            {performance.weakTopics.length > 0 && (
+              <Card className="p-5 sm:p-6">
+                <div className="mb-4 flex items-center gap-2">
+                  <TrendingDown className="h-4 w-4 text-rose-500" />
+                  <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Topics to Improve</h3>
+                </div>
+                <div className="space-y-2">
+                  {performance.weakTopics.map((t) => (
+                    <TopicRow key={t.topicId} topic={t} />
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            <Card className="p-5 sm:p-6">
+              <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Topic Performance</h3>
+              <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                {performance.topics.map((t) => (
+                  <TopicRow key={t.topicId} topic={t} />
+                ))}
+              </div>
+            </Card>
           </div>
         )}
       </div>
@@ -651,6 +853,42 @@ export default function PYQTest() {
             Next <ChevronRight className="h-4 w-4" />
           </Button>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface TopicPerf {
+  topicId: string;
+  topicTitle: string;
+  subject: SubjectColorKey | undefined;
+  subjectTitle: string;
+  attempted: number;
+  correct: number;
+  wrong: number;
+  accuracy: number;
+}
+
+function TopicRow({ topic }: { topic: TopicPerf }) {
+  const colors = topic.subject ? SUBJECT_COLORS[topic.subject] : null;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          {colors && <Badge className={cx(colors.bg, colors.text)}>{topic.subjectTitle}</Badge>}
+        </div>
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{topic.topicTitle}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-4 text-xs">
+        <span className="text-slate-500 dark:text-slate-400">{topic.attempted} attempted</span>
+        <span className="text-emerald-600 dark:text-emerald-400">{topic.correct} correct</span>
+        <span className="text-rose-600 dark:text-rose-400">{topic.wrong} wrong</span>
+        <span className="font-semibold text-slate-700 dark:text-slate-200">{topic.accuracy.toFixed(1)}%</span>
+        <Link to={`/syllabus?topicId=${encodeURIComponent(topic.topicId)}`}>
+          <Button variant="secondary" size="sm">
+            <BookOpen className="h-3.5 w-3.5" /> Study
+          </Button>
+        </Link>
       </div>
     </div>
   );
