@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { create } from 'zustand';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
@@ -12,17 +13,33 @@ import { supabase } from './supabase';
 export const isNativePlatform = Capacitor.isNativePlatform();
 export const NATIVE_REDIRECT_URL = 'com.apfctracker.app://callback';
 
+export type NativeAuthStatus = 'idle' | 'pending' | 'error';
+
+// Ephemeral (not persisted) — mirrors the useSyncStatus pattern in
+// cloudSync.ts. The actual OAuth completion happens asynchronously in the
+// appUrlOpen listener below, a separate boundary from the signInWithGoogle
+// call the UI awaits, so this is how that listener reports success/failure
+// back to AccountCard.
+export const useNativeAuthStatus = create<{ status: NativeAuthStatus; error: string | null }>(() => ({
+  status: 'idle',
+  error: null,
+}));
+
 export async function signInWithGoogleNative() {
   if (!supabase) return;
+  useNativeAuthStatus.setState({ status: 'pending', error: null });
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: NATIVE_REDIRECT_URL, skipBrowserRedirect: true },
   });
   if (error || !data.url) {
     console.error('Native Google sign-in failed:', error ?? 'No OAuth URL returned');
-    throw error ?? new Error('Could not start Google sign-in.');
+    const message = 'Could not start Google sign-in.';
+    useNativeAuthStatus.setState({ status: 'error', error: message });
+    throw error ?? new Error(message);
   }
   await Browser.open({ url: data.url });
+  // Status stays 'pending' until the appUrlOpen listener below resolves it.
 }
 
 function parseTokensFromUrl(url: string) {
@@ -47,11 +64,26 @@ export function useNativeAuthBridge() {
 
     const listenerPromise = CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
       if (!url.startsWith(NATIVE_REDIRECT_URL)) return;
-      const tokens = parseTokensFromUrl(url);
-      if (tokens) {
-        await client.auth.setSession(tokens);
+      try {
+        const tokens = parseTokensFromUrl(url);
+        if (!tokens) {
+          const hashIndex = url.indexOf('#');
+          const hasFragment = hashIndex !== -1;
+          const paramNames = hasFragment ? Array.from(new URLSearchParams(url.slice(hashIndex + 1)).keys()) : [];
+          console.error('Native Google sign-in: callback URL did not contain a session.', { hasFragment, paramNames });
+          useNativeAuthStatus.setState({ status: 'error', error: 'Google sign-in did not complete. Please try again.' });
+          return;
+        }
+        try {
+          await client.auth.setSession(tokens);
+          useNativeAuthStatus.setState({ status: 'idle', error: null });
+        } catch (err) {
+          console.error('Native Google sign-in: setSession failed.', err);
+          useNativeAuthStatus.setState({ status: 'error', error: 'Could not complete Google sign-in. Please try again.' });
+        }
+      } finally {
+        await Browser.close().catch(() => {});
       }
-      await Browser.close().catch(() => {});
     });
 
     return () => {

@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, Upload, Trash2, Sun, Moon, Laptop, Smartphone, Info, LogIn, LogOut, UserRound, Cloud, CloudOff, RefreshCw, AlertCircle, Target } from 'lucide-react';
 import { useAppStore, exportAllData, importAllData } from '../lib/store';
 import { useAuth } from '../lib/useAuth';
+import { isNativePlatform, useNativeAuthStatus } from '../lib/nativeAuth';
 import { useSyncStatus, type SyncStatus } from '../lib/cloudSync';
 import { cx } from '../lib/utils';
 import { Card, Button, PageHeader, Badge } from '../components/ui/Primitives';
@@ -29,6 +30,19 @@ function AccountCard() {
   const { user, loading, isSupabaseConfigured, signInWithGoogle, signOut } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
+  const nativeAuthStatus = useNativeAuthStatus((s) => s.status);
+  const nativeAuthError = useNativeAuthStatus((s) => s.error);
+
+  // On native, the OAuth call itself only opens the browser — the actual
+  // completion/failure arrives later via the appUrlOpen bridge, so the
+  // button must keep waiting on that shared status, not just this call.
+  const isSigningIn = signingIn || (isNativePlatform && nativeAuthStatus === 'pending');
+
+  useEffect(() => {
+    if (isNativePlatform && nativeAuthStatus === 'error' && nativeAuthError) {
+      setSignInError(nativeAuthError);
+    }
+  }, [nativeAuthStatus, nativeAuthError]);
 
   async function handleSignIn() {
     setSigningIn(true);
@@ -77,9 +91,9 @@ function AccountCard() {
       ) : (
         <div className="mt-3">
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Sign in to sync your progress across devices.</p>
-          <Button onClick={handleSignIn} disabled={signingIn}>
-            {signingIn ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-            {signingIn ? 'Signing in…' : 'Continue with Google'}
+          <Button onClick={handleSignIn} disabled={isSigningIn}>
+            {isSigningIn ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+            {isSigningIn ? 'Signing in…' : 'Continue with Google'}
           </Button>
           {signInError && <p className="mt-3 text-xs text-rose-600 dark:text-rose-400">{signInError}</p>}
         </div>
