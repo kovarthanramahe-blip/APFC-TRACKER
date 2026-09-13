@@ -94,9 +94,14 @@ export function useNativeAuthBridge() {
           return;
         }
         try {
-          await client.auth.setSession(tokens);
-          console.error('Native Google sign-in: setSession succeeded.');
-          useNativeAuthStatus.setState({ status: 'idle', error: null });
+          const { data, error: sessionError } = await client.auth.setSession(tokens);
+          if (sessionError || !data.session) {
+            console.error('Native Google sign-in: setSession did not establish a session.', sessionError ?? 'no session returned');
+            useNativeAuthStatus.setState({ status: 'error', error: 'Could not complete Google sign-in. Please try again.' });
+          } else {
+            console.error('Native Google sign-in: setSession succeeded.');
+            useNativeAuthStatus.setState({ status: 'idle', error: null });
+          }
         } catch (err) {
           console.error('Native Google sign-in: setSession failed.', err);
           useNativeAuthStatus.setState({ status: 'error', error: 'Could not complete Google sign-in. Please try again.' });
