@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
@@ -12,12 +12,15 @@ import {
   RotateCcw,
   ArrowLeft,
   BookOpen,
+  History,
+  Star,
 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
-import { SUBJECT_COLORS, cx } from '../lib/utils';
+import { useAppStore } from '../lib/store';
+import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, ProgressBar } from '../components/ui/Primitives';
-import type { PYQ, SubjectColorKey } from '../lib/types';
+import type { PYQ, PYQAttempt, SubjectColorKey } from '../lib/types';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
@@ -49,9 +52,30 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-type Phase = 'select' | 'testing' | 'results' | 'review';
+type Phase = 'select' | 'testing' | 'results' | 'review' | 'bookmarks';
+
+function BookmarkButton({ pyqId }: { pyqId: string }) {
+  const isBookmarked = useAppStore((s) => s.bookmarkedPyqIds.includes(pyqId));
+  const toggleBookmarkedPyq = useAppStore((s) => s.toggleBookmarkedPyq);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        toggleBookmarkedPyq(pyqId);
+      }}
+      title={isBookmarked ? 'Remove bookmark' : 'Bookmark this question'}
+      className={cx('shrink-0 rounded-lg p-1.5 transition-colors', isBookmarked ? 'text-gold-500' : 'text-slate-300 hover:text-gold-500 dark:text-slate-600')}
+    >
+      <Star className={cx('h-4.5 w-4.5', isBookmarked && 'fill-gold-400')} />
+    </button>
+  );
+}
 
 export default function PYQTest() {
+  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
+  const addPyqAttempt = useAppStore((s) => s.addPyqAttempt);
+  const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
+
   const [phase, setPhase] = useState<Phase>('select');
 
   const [year, setYear] = useState<number>(AVAILABLE_YEARS[0]);
@@ -63,6 +87,9 @@ export default function PYQTest() {
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | null>>({});
   const [reviewIndex, setReviewIndex] = useState(0);
+  // Guards against saving more than one attempt record per submitted test,
+  // even if the results screen is somehow re-entered/re-rendered.
+  const submittedRef = useRef(false);
 
   const filtered = useMemo(() => {
     return PYQ_BANK.filter((p) => {
@@ -100,22 +127,11 @@ export default function PYQTest() {
     if (filtered.length === 0) return;
     const n = countChoice === 'all' ? filtered.length : Math.min(countChoice, filtered.length);
     const selected = shuffle(filtered).slice(0, n);
+    submittedRef.current = false;
     setQuestions(selected);
     setAnswers({});
     setCurrent(0);
     setPhase('testing');
-  }
-
-  function handleSubmit() {
-    setPhase('results');
-  }
-
-  function restart() {
-    setQuestions([]);
-    setAnswers({});
-    setCurrent(0);
-    setReviewIndex(0);
-    setPhase('select');
   }
 
   const results = useMemo(() => {
@@ -135,10 +151,99 @@ export default function PYQTest() {
     return { total, attempted, correct, wrong, unanswered, score, accuracy };
   }, [questions, answers]);
 
+  function handleSubmit() {
+    if (!submittedRef.current) {
+      submittedRef.current = true;
+      const attempt: PYQAttempt = {
+        id: uuid(),
+        submittedAt: new Date().toISOString(),
+        year,
+        subject,
+        topicId,
+        questionIds: questions.map((q) => q.id),
+        answers,
+        correctCount: results.correct,
+        wrongCount: results.wrong,
+        unansweredCount: results.unanswered,
+        score: results.score,
+        accuracy: results.accuracy,
+      };
+      addPyqAttempt(attempt);
+    }
+    setPhase('results');
+  }
+
+  function restart() {
+    setQuestions([]);
+    setAnswers({});
+    setCurrent(0);
+    setReviewIndex(0);
+    setPhase('select');
+  }
+
+  // Reopen a saved attempt: rebuild its question list from the live PYQ_BANK (never
+  // duplicated into the attempt record) and drop straight into the existing
+  // Results/Review UI — no second review implementation, and nothing is re-saved.
+  function openAttempt(attempt: PYQAttempt) {
+    const qs = attempt.questionIds.map((id) => PYQ_BANK.find((p) => p.id === id)).filter((q): q is PYQ => !!q);
+    submittedRef.current = true;
+    setQuestions(qs);
+    setAnswers(attempt.answers);
+    setCurrent(0);
+    setReviewIndex(0);
+    setPhase('results');
+  }
+
+  function retryWrong() {
+    const wrongQs = questions.filter((q) => statusOf(q, answers) === 'wrong');
+    if (wrongQs.length === 0) return;
+    submittedRef.current = false;
+    setQuestions(wrongQs);
+    setAnswers({});
+    setCurrent(0);
+    setPhase('testing');
+  }
+
+  const bookmarkedQuestions = useMemo(
+    () => bookmarkedPyqIds.map((id) => PYQ_BANK.find((p) => p.id === id)).filter((q): q is PYQ => !!q),
+    [bookmarkedPyqIds],
+  );
+
+  // Opens a bookmarked question for revision (correct answer + explanation visible
+  // immediately, like reviewing a completed test) — reuses the review UI as-is,
+  // with no user answers since this isn't a live attempt.
+  function openBookmarks(startAt = 0) {
+    if (bookmarkedQuestions.length === 0) return;
+    submittedRef.current = true;
+    setQuestions(bookmarkedQuestions);
+    setAnswers({});
+    setReviewIndex(Math.min(startAt, bookmarkedQuestions.length - 1));
+    setPhase('review');
+  }
+
+  function practiceBookmarked() {
+    if (bookmarkedQuestions.length === 0) return;
+    submittedRef.current = false;
+    setQuestions(bookmarkedQuestions);
+    setAnswers({});
+    setCurrent(0);
+    setPhase('testing');
+  }
+
   if (phase === 'select') {
     return (
       <div>
-        <PageHeader eyebrow="Previous Year Questions" title="PYQs" description="Practice with actual previous-year APFC questions, filtered by year, subject and topic." />
+        <PageHeader
+          eyebrow="Previous Year Questions"
+          title="PYQs"
+          description="Practice with actual previous-year APFC questions, filtered by year, subject and topic."
+          action={
+            <Button variant="secondary" onClick={() => setPhase('bookmarks')}>
+              <Star className={cx('h-4 w-4', bookmarkedQuestions.length > 0 && 'fill-gold-400 text-gold-500')} />
+              Bookmarked PYQs{bookmarkedQuestions.length > 0 ? ` (${bookmarkedQuestions.length})` : ''}
+            </Button>
+          }
+        />
 
         <Card className="p-5 sm:p-6 space-y-6">
           <div>
@@ -206,6 +311,98 @@ export default function PYQTest() {
             </Button>
           </div>
         </Card>
+
+        {pyqAttempts.length > 0 && (
+          <Card className="mt-6 p-5 sm:p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <History className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Attempt History</h3>
+            </div>
+            <div className="space-y-2">
+              {pyqAttempts.map((a) => (
+                <button
+                  key={a.id}
+                  onClick={() => openAttempt(a)}
+                  className="flex w-full flex-col gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3 text-left transition-colors hover:border-brand-300 dark:hover:border-brand-500/40 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                      {new Date(a.submittedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {a.year} · {a.questionIds.length} question{a.questionIds.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="font-display text-sm font-bold text-slate-700 dark:text-slate-200">{a.score.toFixed(2)} pts</span>
+                    <span className="text-slate-400">{a.accuracy.toFixed(1)}% accuracy</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">{a.correctCount} correct</span>
+                    <span className="text-rose-600 dark:text-rose-400">{a.wrongCount} wrong</span>
+                    <span className="text-slate-400">{a.unansweredCount} unanswered</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  if (phase === 'bookmarks') {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <button
+          className="mb-4 flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+          onClick={() => setPhase('select')}
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+
+        <PageHeader
+          eyebrow="Previous Year Questions"
+          title="Bookmarked PYQs"
+          description={
+            bookmarkedQuestions.length > 0
+              ? `${bookmarkedQuestions.length} question${bookmarkedQuestions.length === 1 ? '' : 's'} saved for revision.`
+              : 'Questions you bookmark while practicing will show up here.'
+          }
+          action={
+            bookmarkedQuestions.length > 0 ? (
+              <Button onClick={practiceBookmarked}>Practice Bookmarked</Button>
+            ) : undefined
+          }
+        />
+
+        {bookmarkedQuestions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <Star className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
+            <p className="text-slate-400 text-sm">No bookmarked PYQs yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {bookmarkedQuestions.map((q, idx) => {
+              const colors = SUBJECT_COLORS[q.subject];
+              const subjectTitle = SYLLABUS.find((s) => s.colorKey === q.subject)?.shortTitle ?? q.subject;
+              return (
+                <Card key={q.id} className="p-4 cursor-pointer" onClick={() => openBookmarks(idx)}>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 text-xs font-semibold text-slate-300 dark:text-slate-600 w-6 shrink-0">{idx + 1}.</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                        <Badge tone="neutral">{q.year}</Badge>
+                        <Badge className={cx(colors.bg, colors.text)}>{subjectTitle}</Badge>
+                        <Badge tone="neutral">{TOPIC_TITLES[q.topicId] ?? q.topicId}</Badge>
+                      </div>
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 line-clamp-2">{q.question}</p>
+                    </div>
+                    <BookmarkButton pyqId={q.id} />
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
@@ -243,8 +440,13 @@ export default function PYQTest() {
           >
             Review Answers
           </Button>
+          {results.wrong > 0 && (
+            <Button variant="secondary" className="flex-1" onClick={retryWrong}>
+              <RotateCcw className="h-4 w-4" /> Retry Wrong ({results.wrong})
+            </Button>
+          )}
           <Button variant="secondary" className="flex-1" onClick={restart}>
-            <RotateCcw className="h-4 w-4" /> Start Another Test
+            Start Another Test
           </Button>
         </div>
       </div>
@@ -274,9 +476,12 @@ export default function PYQTest() {
         </div>
 
         <Card className="p-5 sm:p-6">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Badge className={cx(colors.bg, colors.text)}>{topicTitle}</Badge>
-            <StatusBadge status={status} />
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className={cx(colors.bg, colors.text)}>{topicTitle}</Badge>
+              <StatusBadge status={status} />
+            </div>
+            <BookmarkButton pyqId={q.id} />
           </div>
           <p className="whitespace-pre-line text-base font-medium text-slate-800 dark:text-slate-100">{q.question}</p>
 
@@ -387,8 +592,9 @@ export default function PYQTest() {
       </div>
 
       <Card className="p-5 sm:p-6">
-        <div className="mb-3">
+        <div className="mb-3 flex items-center justify-between gap-2">
           <Badge className={cx(colors.bg, colors.text)}>{TOPIC_TITLES[q.topicId] ?? q.subject}</Badge>
+          <BookmarkButton pyqId={q.id} />
         </div>
         <motion.p
           key={q.id}

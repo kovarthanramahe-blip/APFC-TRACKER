@@ -69,6 +69,21 @@ export interface PYQ {
   source?: string;
 }
 
+export interface PYQAttempt {
+  id: string;
+  submittedAt: string;
+  year: number;
+  subject: SubjectColorKey | 'all'; // the selection filter used to build the test, not a per-question value
+  topicId: string | 'all';
+  questionIds: string[]; // preserves the exact question order used in the test
+  answers: Record<string, string | null>; // questionId -> optionId | null (unanswered)
+  correctCount: number;
+  wrongCount: number;
+  unansweredCount: number;
+  score: number;
+  accuracy: number;
+}
+
 export interface MockTestBlueprint {
   id: string;
   title: string;

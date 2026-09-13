@@ -4,6 +4,7 @@ import type {
   MockTestAttempt,
   Note,
   PomodoroSession,
+  PYQAttempt,
   StudyLogEntry,
   ThemeMode,
 } from './types';
@@ -24,6 +25,10 @@ interface AppState {
   attempts: MockTestAttempt[];
   addAttempt: (attempt: MockTestAttempt) => void;
 
+  // PYQ practice test attempts (local-only for now — no cloud sync yet)
+  pyqAttempts: PYQAttempt[];
+  addPyqAttempt: (attempt: PYQAttempt) => void;
+
   // Pomodoro
   sessions: PomodoroSession[];
   addSession: (session: PomodoroSession) => void;
@@ -37,6 +42,10 @@ interface AppState {
   // Bookmarked / starred questions for revision
   starredQuestionIds: string[];
   toggleStarredQuestion: (id: string) => void;
+
+  // Bookmarked PYQs (previous-year questions) for later revision
+  bookmarkedPyqIds: string[];
+  toggleBookmarkedPyq: (id: string) => void;
 
   // Settings
   theme: ThemeMode;
@@ -126,6 +135,17 @@ export const useAppStore = create<AppState>()(
           };
         }),
 
+      pyqAttempts: [],
+      addPyqAttempt: (attempt) =>
+        set((state) => {
+          const date = todayKey();
+          const entry = ensureLogEntry(state.studyLog, date);
+          return {
+            pyqAttempts: [attempt, ...state.pyqAttempts],
+            studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } },
+          };
+        }),
+
       sessions: [],
       addSession: (session) =>
         set((state) => ({ sessions: [session, ...state.sessions] })),
@@ -155,6 +175,14 @@ export const useAppStore = create<AppState>()(
             : [...state.starredQuestionIds, id],
         })),
 
+      bookmarkedPyqIds: [],
+      toggleBookmarkedPyq: (id) =>
+        set((state) => ({
+          bookmarkedPyqIds: state.bookmarkedPyqIds.includes(id)
+            ? state.bookmarkedPyqIds.filter((x) => x !== id)
+            : [...state.bookmarkedPyqIds, id],
+        })),
+
       theme: 'system',
       setTheme: (t) => set({ theme: t }),
       examDate: '2026-12-20',
@@ -182,9 +210,11 @@ export const useAppStore = create<AppState>()(
           completedTopics: {},
           notes: [],
           attempts: [],
+          pyqAttempts: [],
           sessions: [],
           studyLog: {},
           starredQuestionIds: [],
+          bookmarkedPyqIds: [],
           rewardUnlocks: {},
         }),
     }),
@@ -201,9 +231,11 @@ export function exportAllData() {
     completedTopics: state.completedTopics,
     notes: state.notes,
     attempts: state.attempts,
+    pyqAttempts: state.pyqAttempts,
     sessions: state.sessions,
     studyLog: state.studyLog,
     starredQuestionIds: state.starredQuestionIds,
+    bookmarkedPyqIds: state.bookmarkedPyqIds,
     theme: state.theme,
     dailyGoalMinutes: state.dailyGoalMinutes,
     rewardUnlocks: state.rewardUnlocks,
@@ -218,9 +250,11 @@ export function importAllData(json: string) {
     completedTopics: data.completedTopics ?? {},
     notes: data.notes ?? [],
     attempts: data.attempts ?? [],
+    pyqAttempts: data.pyqAttempts ?? [],
     sessions: data.sessions ?? [],
     studyLog: data.studyLog ?? {},
     starredQuestionIds: data.starredQuestionIds ?? [],
+    bookmarkedPyqIds: data.bookmarkedPyqIds ?? [],
     theme: data.theme ?? 'system',
     dailyGoalMinutes: data.dailyGoalMinutes ?? 60,
     rewardUnlocks: data.rewardUnlocks ?? {},
