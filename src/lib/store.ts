@@ -8,7 +8,8 @@ import type {
   StudyLogEntry,
   ThemeMode,
 } from './types';
-import type { StudyPlan } from './studyPlan';
+import type { StudyPlan, StudyPlanTask } from './studyPlan';
+import type { PersonalPlanTask } from './studyPlanEditing';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -76,6 +77,15 @@ interface AppState {
   studyPlanGeneratedAt: string | null;
   setStudyPlan: (plan: StudyPlan) => void;
   clearStudyPlan: () => void;
+
+  // Study Plan editing (Stage 3): edits (complete/move/resize/remove/rebalance — see
+  // lib/studyPlanEditing) replace `studyPlan.tasks` wholesale via setStudyPlanTasks, keeping
+  // every other field (capacity, capacityReport, coverageSummary, phases, config) exactly as
+  // generated. Personal tasks live in their own array — never mixed into the engine's own task
+  // list, so they can never be mistaken for syllabus-derived tasks.
+  setStudyPlanTasks: (tasks: StudyPlanTask[]) => void;
+  personalStudyPlanTasks: PersonalPlanTask[];
+  setPersonalStudyPlanTasks: (tasks: PersonalPlanTask[]) => void;
 
   // Reset
   resetAllData: () => void;
@@ -219,6 +229,12 @@ export const useAppStore = create<AppState>()(
       setStudyPlan: (plan) => set({ studyPlan: plan, studyPlanGeneratedAt: new Date().toISOString() }),
       clearStudyPlan: () => set({ studyPlan: null, studyPlanGeneratedAt: null }),
 
+      setStudyPlanTasks: (tasks) =>
+        set((state) => (state.studyPlan ? { studyPlan: { ...state.studyPlan, tasks } } : state)),
+
+      personalStudyPlanTasks: [],
+      setPersonalStudyPlanTasks: (tasks) => set({ personalStudyPlanTasks: tasks }),
+
       resetAllData: () =>
         set({
           completedTopics: {},
@@ -232,6 +248,7 @@ export const useAppStore = create<AppState>()(
           rewardUnlocks: {},
           studyPlan: null,
           studyPlanGeneratedAt: null,
+          personalStudyPlanTasks: [],
         }),
     }),
     {
@@ -257,6 +274,7 @@ export function exportAllData() {
     rewardUnlocks: state.rewardUnlocks,
     studyPlan: state.studyPlan,
     studyPlanGeneratedAt: state.studyPlanGeneratedAt,
+    personalStudyPlanTasks: state.personalStudyPlanTasks,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -278,5 +296,6 @@ export function importAllData(json: string) {
     rewardUnlocks: data.rewardUnlocks ?? {},
     studyPlan: data.studyPlan ?? null,
     studyPlanGeneratedAt: data.studyPlanGeneratedAt ?? null,
+    personalStudyPlanTasks: data.personalStudyPlanTasks ?? [],
   });
 }

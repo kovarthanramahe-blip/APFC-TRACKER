@@ -1,6 +1,19 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CalendarRange, Sparkles, RotateCcw, AlertTriangle, CheckCircle2, Layers } from 'lucide-react';
+import {
+  CalendarRange,
+  Sparkles,
+  RotateCcw,
+  AlertTriangle,
+  CheckCircle2,
+  Layers,
+  Check,
+  CalendarClock,
+  Clock,
+  Trash2,
+  Plus,
+  Shuffle,
+} from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
@@ -13,9 +26,24 @@ import {
   type WeekdayIndex,
   type CapacityVerdict,
   type PlanTaskType,
+  type PlanTaskStatus,
 } from '../lib/studyPlan';
+import {
+  completeStudyPlanTask,
+  reopenStudyPlanTask,
+  moveStudyPlanTask,
+  resizeStudyPlanTask,
+  removeStudyPlanTask,
+  addPersonalStudyPlanTask,
+  rebalanceStudyPlan,
+  computeEditedCapacity,
+  MAX_TASK_MINUTES,
+  type PersonalPlanTask,
+} from '../lib/studyPlanEditing';
 import { formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
+
+type TaskKind = 'syllabus' | 'personal';
 
 const WEEKDAY_LABELS: { index: WeekdayIndex; short: string }[] = [
   { index: 0, short: 'Sun' },
@@ -76,6 +104,9 @@ export default function StudyPlan() {
   const studyPlan = useAppStore((s) => s.studyPlan);
   const studyPlanGeneratedAt = useAppStore((s) => s.studyPlanGeneratedAt);
   const setStudyPlan = useAppStore((s) => s.setStudyPlan);
+  const setStudyPlanTasks = useAppStore((s) => s.setStudyPlanTasks);
+  const personalTasks = useAppStore((s) => s.personalStudyPlanTasks);
+  const setPersonalStudyPlanTasks = useAppStore((s) => s.setPersonalStudyPlanTasks);
 
   // Sensible defaults reuse existing app conventions: examDate is already the target the rest of
   // the app counts down to, and dailyGoalMinutes is the user's own existing daily-study setting.
@@ -114,7 +145,120 @@ export default function StudyPlan() {
   }
 
   const plan = studyPlan;
-  const tasksByDate = useMemo(() => (plan ? groupTasksByDate(plan.tasks) : []), [plan]);
+
+  // --- Editing (Stage 3) — every mutation goes through lib/studyPlanEditing's pure functions;
+  // this component only picks which of the two task arrays (syllabus vs personal) to apply the
+  // result to and persists it via the existing store setters. Only one inline editor (move or
+  // resize) is open at a time, and edits never auto-rebalance — the user rebalances explicitly.
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
+  const [resizingTaskId, setResizingTaskId] = useState<string | null>(null);
+  const [showAddPersonal, setShowAddPersonal] = useState(false);
+
+  function handleComplete(taskId: string, kind: TaskKind) {
+    if (kind === 'syllabus') {
+      if (!plan) return;
+      const result = completeStudyPlanTask(plan.tasks, taskId);
+      if (result.ok) setStudyPlanTasks(result.tasks);
+    } else {
+      const result = completeStudyPlanTask(personalTasks, taskId);
+      if (result.ok) setPersonalStudyPlanTasks(result.tasks);
+    }
+  }
+
+  function handleReopen(taskId: string, kind: TaskKind) {
+    if (kind === 'syllabus') {
+      if (!plan) return;
+      const result = reopenStudyPlanTask(plan.tasks, taskId);
+      if (result.ok) setStudyPlanTasks(result.tasks);
+    } else {
+      const result = reopenStudyPlanTask(personalTasks, taskId);
+      if (result.ok) setPersonalStudyPlanTasks(result.tasks);
+    }
+  }
+
+  function handleMove(taskId: string, kind: TaskKind, newDate: string) {
+    if (kind === 'syllabus') {
+      if (!plan) return;
+      const result = moveStudyPlanTask(plan.tasks, taskId, newDate, {
+        validStudyDates: plan.capacity.studyDayDates,
+        minutesPerStudyDay: plan.capacity.minutesPerStudyDay,
+      });
+      if (result.ok) setStudyPlanTasks(result.tasks);
+      setActionMessage(result.warning ?? result.error ?? null);
+    } else {
+      const result = moveStudyPlanTask(personalTasks, taskId, newDate);
+      if (result.ok) setPersonalStudyPlanTasks(result.tasks);
+      setActionMessage(result.warning ?? result.error ?? null);
+    }
+    setMovingTaskId(null);
+  }
+
+  function handleResize(taskId: string, kind: TaskKind, minutes: number) {
+    if (kind === 'syllabus') {
+      if (!plan) return;
+      const result = resizeStudyPlanTask(plan.tasks, taskId, minutes, plan.capacity.minutesPerStudyDay);
+      if (result.ok) setStudyPlanTasks(result.tasks);
+      setActionMessage(result.warning ?? result.error ?? null);
+    } else {
+      const result = resizeStudyPlanTask(personalTasks, taskId, minutes);
+      if (result.ok) setPersonalStudyPlanTasks(result.tasks);
+      setActionMessage(result.warning ?? result.error ?? null);
+    }
+    setResizingTaskId(null);
+  }
+
+  function handleRemove(taskId: string, kind: TaskKind) {
+    if (!confirm('Remove this task from your schedule? The topic stays part of your syllabus either way.')) return;
+    if (kind === 'syllabus') {
+      if (!plan) return;
+      const result = removeStudyPlanTask(plan.tasks, taskId);
+      if (result.ok) setStudyPlanTasks(result.tasks);
+      else setActionMessage(result.error ?? null);
+    } else {
+      const result = removeStudyPlanTask(personalTasks, taskId);
+      if (result.ok) setPersonalStudyPlanTasks(result.tasks);
+      else setActionMessage(result.error ?? null);
+    }
+  }
+
+  function handleAddPersonal(input: { title: string; date: string; estimatedMinutes: number }) {
+    const result = addPersonalStudyPlanTask(personalTasks, input);
+    if (result.ok) {
+      setPersonalStudyPlanTasks(result.tasks);
+      setShowAddPersonal(false);
+      setActionMessage(null);
+    } else {
+      setActionMessage(result.error ?? null);
+    }
+  }
+
+  function handleRebalance() {
+    if (!plan) return;
+    const result = rebalanceStudyPlan(plan.capacity, plan.tasks);
+    setStudyPlanTasks(result.tasks);
+    if (result.movedCount === 0) {
+      setActionMessage('Nothing needed to move — your plan is already well balanced.');
+    } else {
+      const extra = result.unscheduledTaskIds.length > 0 ? ` ${result.unscheduledTaskIds.length} task(s) still don't fit before your target date.` : '';
+      setActionMessage(`Rebalanced: moved ${result.movedCount} task${result.movedCount === 1 ? '' : 's'} to fit your schedule.${extra}`);
+    }
+  }
+
+  const editedCapacity = useMemo(
+    () => (plan ? computeEditedCapacity(plan.capacity, [...plan.tasks, ...personalTasks]) : null),
+    [plan, personalTasks],
+  );
+
+  const tasksByDate = useMemo(() => {
+    if (!plan) return [];
+    const dates = new Set([...plan.tasks.map((t) => t.date), ...personalTasks.map((t) => t.date)]);
+    return [...dates].sort().map((date) => ({
+      date,
+      syllabus: plan.tasks.filter((t) => t.date === date),
+      personal: personalTasks.filter((t) => t.date === date),
+    }));
+  }, [plan, personalTasks]);
 
   return (
     <div>
@@ -179,10 +323,17 @@ export default function StudyPlan() {
           </div>
         )}
 
-        <Button onClick={handleGenerate} disabled={validationErrors.length > 0}>
-          {plan ? <RotateCcw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-          {plan ? 'Regenerate Plan' : 'Generate Study Plan'}
-        </Button>
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={handleGenerate} disabled={validationErrors.length > 0}>
+            {plan ? <RotateCcw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+            {plan ? 'Regenerate Plan' : 'Generate Study Plan'}
+          </Button>
+          {plan && (
+            <Button variant="secondary" onClick={handleRebalance}>
+              <Shuffle className="h-4 w-4" /> Rebalance Remaining Plan
+            </Button>
+          )}
+        </div>
       </Card>
 
       {!plan ? (
@@ -192,9 +343,31 @@ export default function StudyPlan() {
         </div>
       ) : (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-6 space-y-6">
-          <CapacitySummary plan={plan} generatedAt={studyPlanGeneratedAt} />
+          {actionMessage && (
+            <div className="rounded-xl border border-brand-200 bg-brand-50 dark:border-brand-500/30 dark:bg-brand-500/10 px-4 py-3">
+              <p className="text-xs text-brand-700 dark:text-brand-300">{actionMessage}</p>
+            </div>
+          )}
+          {editedCapacity && <CapacitySummary plan={plan} edited={editedCapacity} generatedAt={studyPlanGeneratedAt} />}
           {plan.phases.length > 0 && <PhaseList phases={plan.phases} />}
-          <TaskList tasksByDate={tasksByDate} />
+          <AddPersonalTask show={showAddPersonal} onToggle={() => setShowAddPersonal((v) => !v)} onAdd={handleAddPersonal} />
+          <TaskList
+            tasksByDate={tasksByDate}
+            studyDayDates={plan.capacity.studyDayDates}
+            movingTaskId={movingTaskId}
+            resizingTaskId={resizingTaskId}
+            onStartMove={setMovingTaskId}
+            onStartResize={setResizingTaskId}
+            onCancelEdit={() => {
+              setMovingTaskId(null);
+              setResizingTaskId(null);
+            }}
+            onComplete={handleComplete}
+            onReopen={handleReopen}
+            onMove={handleMove}
+            onResize={handleResize}
+            onRemove={handleRemove}
+          />
         </motion.div>
       )}
     </div>
@@ -242,9 +415,20 @@ function WeekdayPicker({ selected, onToggle }: { selected: WeekdayIndex[]; onTog
   );
 }
 
-function CapacitySummary({ plan, generatedAt }: { plan: NonNullable<ReturnType<typeof useAppStore.getState>['studyPlan']>; generatedAt: string | null }) {
+function CapacitySummary({
+  plan,
+  edited,
+  generatedAt,
+}: {
+  plan: NonNullable<ReturnType<typeof useAppStore.getState>['studyPlan']>;
+  edited: ReturnType<typeof computeEditedCapacity>;
+  generatedAt: string | null;
+}) {
   const { capacity, capacityReport, coverageSummary, unscheduledTopicIds } = plan;
-  const meta = VERDICT_META[capacityReport.verdict];
+  // The verdict/planned-time shown here reflect the LIVE, post-edit state (edited) — the
+  // original capacityReport.requiredMinutes is kept only as "what the syllabus originally
+  // needed" context; everything else updates as tasks are completed/moved/resized/removed/added.
+  const meta = VERDICT_META[edited.verdict];
   return (
     <Card className="p-5 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -254,26 +438,31 @@ function CapacitySummary({ plan, generatedAt }: { plan: NonNullable<ReturnType<t
         </Badge>
       </div>
 
-      {capacityReport.verdict === 'insufficient' && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10 px-4 py-3">
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-500" />
-          <p className="text-xs text-rose-700 dark:text-rose-300">{capacityReport.message}</p>
-        </div>
-      )}
-      {capacityReport.verdict === 'tight' && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 px-4 py-3">
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
-          <p className="text-xs text-amber-700 dark:text-amber-300">{capacityReport.message}</p>
+      {edited.verdict !== 'comfortable' && (
+        <div
+          className={cx(
+            'mb-4 flex items-start gap-2 rounded-xl border px-4 py-3',
+            edited.verdict === 'insufficient'
+              ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10'
+              : 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10',
+          )}
+        >
+          <AlertTriangle className={cx('h-4 w-4 shrink-0 mt-0.5', edited.verdict === 'insufficient' ? 'text-rose-500' : 'text-amber-500')} />
+          <p className={cx('text-xs', edited.verdict === 'insufficient' ? 'text-rose-700 dark:text-rose-300' : 'text-amber-700 dark:text-amber-300')}>
+            {edited.message}
+          </p>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat label="Target Date" value={formatDate(plan.config.targetDate)} />
         <Stat label="Available Time" value={formatMinutes(capacity.totalAvailableMinutes)} />
-        <Stat label="Planned Time" value={formatMinutes(plan.tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0))} />
-        <Stat label="Estimated Required" value={formatMinutes(capacityReport.requiredMinutes)} />
+        <Stat label="Pending Time" value={formatMinutes(edited.plannedPendingMinutes)} />
+        <Stat label="Completed" value={formatMinutes(edited.completedMinutes)} />
+        <Stat label="Total Planned" value={formatMinutes(edited.totalPlannedMinutes)} />
+        <Stat label="Originally Required" value={formatMinutes(capacityReport.requiredMinutes)} />
         <Stat label="Buffer Reserved" value={formatMinutes(capacity.totalAvailableMinutes - capacity.plannableMinutes)} />
-        {capacityReport.deficitMinutes > 0 && <Stat label="Deficit" value={formatMinutes(capacityReport.deficitMinutes)} tone="danger" />}
+        {edited.overCapacityMinutes > 0 && <Stat label="Over Capacity" value={formatMinutes(edited.overCapacityMinutes)} tone="danger" />}
       </div>
 
       {unscheduledTopicIds.length > 0 && (
@@ -328,7 +517,39 @@ function PhaseList({ phases }: { phases: NonNullable<ReturnType<typeof useAppSto
   );
 }
 
-function TaskList({ tasksByDate }: { tasksByDate: [string, NonNullable<ReturnType<typeof useAppStore.getState>['studyPlan']>['tasks']][] }) {
+interface TaskListDay {
+  date: string;
+  syllabus: StudyPlanTask[];
+  personal: PersonalPlanTask[];
+}
+
+function TaskList({
+  tasksByDate,
+  studyDayDates,
+  movingTaskId,
+  resizingTaskId,
+  onStartMove,
+  onStartResize,
+  onCancelEdit,
+  onComplete,
+  onReopen,
+  onMove,
+  onResize,
+  onRemove,
+}: {
+  tasksByDate: TaskListDay[];
+  studyDayDates: string[];
+  movingTaskId: string | null;
+  resizingTaskId: string | null;
+  onStartMove: (id: string | null) => void;
+  onStartResize: (id: string | null) => void;
+  onCancelEdit: () => void;
+  onComplete: (id: string, kind: TaskKind) => void;
+  onReopen: (id: string, kind: TaskKind) => void;
+  onMove: (id: string, kind: TaskKind, date: string) => void;
+  onResize: (id: string, kind: TaskKind, minutes: number) => void;
+  onRemove: (id: string, kind: TaskKind) => void;
+}) {
   if (tasksByDate.length === 0) {
     return (
       <Card className="p-5 sm:p-6">
@@ -336,30 +557,37 @@ function TaskList({ tasksByDate }: { tasksByDate: [string, NonNullable<ReturnTyp
       </Card>
     );
   }
+
+  const rowProps = { movingTaskId, resizingTaskId, onStartMove, onStartResize, onCancelEdit, onComplete, onReopen, onMove, onResize, onRemove, studyDayDates };
+
   return (
     <Card className="p-5 sm:p-6">
       <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Schedule</h3>
-      <div className="space-y-4 max-h-[32rem] overflow-y-auto pr-1">
-        {tasksByDate.map(([date, tasks]) => {
-          const byPhase = groupTasksByPhase(tasks);
+      <div className="space-y-4 max-h-[36rem] overflow-y-auto pr-1">
+        {tasksByDate.map(({ date, syllabus, personal }) => {
+          const byPhase = groupTasksByPhase(syllabus);
           return (
             <div key={date} className="rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3">
               <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
                 {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
               </p>
               <div className="space-y-3">
+                {personal.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Personal</p>
+                    <ul className="space-y-1.5">
+                      {personal.map((t) => (
+                        <TaskRow key={t.id} id={t.id} date={t.date} title={t.title} reason={t.reason} estimatedMinutes={t.estimatedMinutes} status={t.status} kind="personal" {...rowProps} />
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {byPhase.map(([phase, phaseTasks]) => (
                   <div key={phase}>
                     <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{TASK_TYPE_LABEL[phaseTasks[0].taskType]}</p>
                     <ul className="space-y-1.5">
-                      {phaseTasks.map((task) => (
-                        <li key={task.id} className="flex items-start justify-between gap-3 text-sm">
-                          <div className="min-w-0">
-                            <p className="truncate text-slate-700 dark:text-slate-200">{task.title}</p>
-                            <p className="truncate text-[11px] text-slate-400">{task.reason}</p>
-                          </div>
-                          <span className="shrink-0 text-xs text-slate-400">{task.estimatedMinutes} min</span>
-                        </li>
+                      {phaseTasks.map((t) => (
+                        <TaskRow key={t.id} id={t.id} date={t.date} title={t.title} reason={t.reason} estimatedMinutes={t.estimatedMinutes} status={t.status} kind="syllabus" {...rowProps} />
                       ))}
                     </ul>
                   </div>
@@ -369,6 +597,217 @@ function TaskList({ tasksByDate }: { tasksByDate: [string, NonNullable<ReturnTyp
           );
         })}
       </div>
+    </Card>
+  );
+}
+
+function TaskRow({
+  id,
+  date,
+  title,
+  reason,
+  estimatedMinutes,
+  status,
+  kind,
+  studyDayDates,
+  movingTaskId,
+  resizingTaskId,
+  onStartMove,
+  onStartResize,
+  onCancelEdit,
+  onComplete,
+  onReopen,
+  onMove,
+  onResize,
+  onRemove,
+}: {
+  id: string;
+  date: string;
+  title: string;
+  reason: string;
+  estimatedMinutes: number;
+  status: PlanTaskStatus;
+  kind: TaskKind;
+  studyDayDates: string[];
+  movingTaskId: string | null;
+  resizingTaskId: string | null;
+  onStartMove: (id: string | null) => void;
+  onStartResize: (id: string | null) => void;
+  onCancelEdit: () => void;
+  onComplete: (id: string, kind: TaskKind) => void;
+  onReopen: (id: string, kind: TaskKind) => void;
+  onMove: (id: string, kind: TaskKind, date: string) => void;
+  onResize: (id: string, kind: TaskKind, minutes: number) => void;
+  onRemove: (id: string, kind: TaskKind) => void;
+}) {
+  const isCompleted = status === 'completed';
+  const isMoving = movingTaskId === id;
+  const isResizing = resizingTaskId === id;
+  // Syllabus tasks may only move to a configured study day; personal tasks can go on any date.
+  const dateOptions = kind === 'syllabus' ? studyDayDates : undefined;
+
+  return (
+    <li className="rounded-lg border border-slate-100 dark:border-slate-800/80 px-2.5 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cx('truncate text-sm', isCompleted ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-200')}>{title}</p>
+          <p className="truncate text-[11px] text-slate-400">{reason}</p>
+        </div>
+        <span className="shrink-0 text-xs text-slate-400">{estimatedMinutes} min</span>
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {isCompleted ? (
+          <IconButton label="Reopen" onClick={() => onReopen(id, kind)} icon={RotateCcw} />
+        ) : (
+          <>
+            <IconButton label="Complete" onClick={() => onComplete(id, kind)} icon={Check} />
+            <IconButton label="Move" onClick={() => onStartMove(isMoving ? null : id)} icon={CalendarClock} active={isMoving} />
+            <IconButton label="Edit time" onClick={() => onStartResize(isResizing ? null : id)} icon={Clock} active={isResizing} />
+            <IconButton label="Remove" onClick={() => onRemove(id, kind)} icon={Trash2} tone="danger" />
+          </>
+        )}
+      </div>
+
+      {isMoving && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="date"
+            defaultValue={date}
+            min={dateOptions?.[0]}
+            max={dateOptions?.[dateOptions.length - 1]}
+            list={dateOptions ? `study-dates-${id}` : undefined}
+            onKeyDown={(e) => e.key === 'Enter' && onMove(id, kind, (e.target as HTMLInputElement).value)}
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            id={`move-input-${id}`}
+          />
+          {dateOptions && (
+            <datalist id={`study-dates-${id}`}>
+              {dateOptions.map((d) => (
+                <option key={d} value={d} />
+              ))}
+            </datalist>
+          )}
+          <Button size="sm" onClick={() => onMove(id, kind, (document.getElementById(`move-input-${id}`) as HTMLInputElement).value)}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancelEdit}>
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {isResizing && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={MAX_TASK_MINUTES}
+            defaultValue={estimatedMinutes}
+            onKeyDown={(e) => e.key === 'Enter' && onResize(id, kind, Math.round(Number((e.target as HTMLInputElement).value) || 0))}
+            className="w-24 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            id={`resize-input-${id}`}
+          />
+          <span className="text-xs text-slate-400">min</span>
+          <Button size="sm" onClick={() => onResize(id, kind, Math.round(Number((document.getElementById(`resize-input-${id}`) as HTMLInputElement).value) || 0))}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancelEdit}>
+            Cancel
+          </Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function IconButton({
+  label,
+  icon: Icon,
+  onClick,
+  active,
+  tone = 'neutral',
+}: {
+  label: string;
+  icon: typeof Check;
+  onClick: () => void;
+  active?: boolean;
+  tone?: 'neutral' | 'danger';
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      onClick={onClick}
+      className={cx(
+        'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium border transition-colors',
+        active
+          ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
+          : tone === 'danger'
+          ? 'border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 hover:border-rose-300 dark:hover:text-rose-400'
+          : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:text-brand-600 hover:border-brand-300 dark:text-slate-400 dark:hover:text-brand-400',
+      )}
+    >
+      <Icon className="h-3 w-3" /> {label}
+    </button>
+  );
+}
+
+function AddPersonalTask({
+  show,
+  onToggle,
+  onAdd,
+}: {
+  show: boolean;
+  onToggle: () => void;
+  onAdd: (input: { title: string; date: string; estimatedMinutes: number }) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [date, setDate] = useState(todayStr());
+  const [minutes, setMinutes] = useState(30);
+
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Personal Tasks</h3>
+        <Button variant="secondary" size="sm" onClick={onToggle}>
+          <Plus className="h-3.5 w-3.5" /> Add Personal Task
+        </Button>
+      </div>
+      {show && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
+          <Field label="Title" required>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Revise my notes"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Date" required>
+            <DateInput value={date} onChange={setDate} />
+          </Field>
+          <Field label="Minutes" required>
+            <input
+              type="number"
+              min={1}
+              max={MAX_TASK_MINUTES}
+              value={minutes}
+              onChange={(e) => setMinutes(Math.round(Number(e.target.value) || 0))}
+              className={cx(inputClass, 'sm:w-24')}
+            />
+          </Field>
+          <Button
+            onClick={() => {
+              onAdd({ title, date, estimatedMinutes: minutes });
+              setTitle('');
+            }}
+            disabled={!title.trim()}
+          >
+            Add
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
