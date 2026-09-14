@@ -15,7 +15,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList } from 'lucide-react';
+import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList, Brain } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
@@ -25,6 +25,8 @@ import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressResult } from '../lib/studyPlanProgress';
 import type { PlanTaskType } from '../lib/studyPlan';
+import { computeRevisionStatusMap, computeEligibleRevisionIds } from '../lib/pyqFilters';
+import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
 import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
@@ -48,12 +50,26 @@ export default function Analytics() {
   const studyPlan = useAppStore((s) => s.studyPlan);
   const personalStudyPlanTasks = useAppStore((s) => s.personalStudyPlanTasks);
   const sessions = useAppStore((s) => s.sessions);
+  const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
+  const revisionQueue = useAppStore((s) => s.revisionQueue);
   const gami = useGamification();
   const rewards = useRewards();
 
   // Same computePyqPerformance helper PYQTest.tsx's own "Performance" view uses — one source of
   // truth for PYQ aggregation, so the two views can never disagree.
   const pyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
+
+  // Revision Queue summary (Stage 3) — reuses lib/revisionQueue's getQueueCounts and
+  // lib/pyqFilters' computeEligibleRevisionIds verbatim; no second scheduling/eligibility engine.
+  const revisionCounts: RevisionQueueCounts = useMemo(() => {
+    const statusMap = computeRevisionStatusMap(PYQ_BANK, pyqAttempts);
+    const eligibleIds = computeEligibleRevisionIds(PYQ_BANK, statusMap, bookmarkedPyqIds);
+    return getQueueCounts(revisionQueue, eligibleIds, getLocalDateString());
+  }, [pyqAttempts, bookmarkedPyqIds, revisionQueue]);
+
+  // "Basic review activity" from the queue's own already-stored metadata (reviewCount per item) —
+  // no new tracking, just a sum over what lib/revisionQueue already persists.
+  const totalRevisionReviews = useMemo(() => Object.values(revisionQueue).reduce((sum, item) => sum + item.reviewCount, 0), [revisionQueue]);
 
   // Connects the "Needs Improvement" ranking (pure PYQ accuracy, unchanged) to the unified
   // topic-status verdict (lib/topicStatus) — a low accuracy from only 1-2 questions isn't the
@@ -328,6 +344,10 @@ export default function Analytics() {
       </motion.div>
 
       <motion.div {...fadeUp} className="mt-6">
+        <RevisionQueueCard counts={revisionCounts} totalReviews={totalRevisionReviews} />
+      </motion.div>
+
+      <motion.div {...fadeUp} className="mt-6">
         <StudyPlanProgressCard progress={planProgress} />
       </motion.div>
 
@@ -566,6 +586,38 @@ function StudyPlanProgressCard({ progress }: { progress: StudyPlanProgressResult
               </div>
             </div>
           )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** Revision Queue Stage 3 — a compact, read-only summary of the existing revision queue
+ * (lib/revisionQueue). Reuses getQueueCounts/computeEligibleRevisionIds verbatim; no new
+ * scheduling or eligibility logic, and nothing here mutates the queue or PYQ data. */
+function RevisionQueueCard({ counts, totalReviews }: { counts: RevisionQueueCounts; totalReviews: number }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Brain className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Revision Queue</h3>
+        </div>
+        <Link to="/pyq-test" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+          Revise Now
+        </Link>
+      </div>
+
+      {counts.totalTracked === 0 ? (
+        <p className="text-sm text-slate-400 dark:text-slate-500">
+          No PYQs are eligible for revision yet — questions you answer incorrectly or bookmark will show up here.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <PyqStat label="Eligible" value={`${counts.totalTracked}`} />
+          <PyqStat label="Due Now" value={`${counts.dueCount}`} tone={counts.dueCount > 0 ? 'brand' : 'neutral'} />
+          <PyqStat label="Mastered" value={`${counts.masteredCount}`} tone="success" />
+          <PyqStat label="Total Reviews" value={`${totalReviews}`} />
         </div>
       )}
     </Card>

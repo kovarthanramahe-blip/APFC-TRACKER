@@ -16,6 +16,7 @@ import {
   ListChecks,
   ListTodo,
   Check,
+  Brain,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { PYQ_BANK } from '../data/pyq';
@@ -25,6 +26,8 @@ import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus, sortByAttentionPriority, type TopicStatus } from '../lib/topicStatus';
 import { completeStudyPlanTask } from '../lib/studyPlanEditing';
 import { computeDailyStudyQueue, type DailyQueueInput, type DailyQueueItem, type DailyQueueResult } from '../lib/studyPlanDailyQueue';
+import { computeRevisionStatusMap, computeEligibleRevisionIds } from '../lib/pyqFilters';
+import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
@@ -41,6 +44,8 @@ export default function Dashboard() {
   const personalStudyPlanTasks = useAppStore((s) => s.personalStudyPlanTasks);
   const setStudyPlanTasks = useAppStore((s) => s.setStudyPlanTasks);
   const setPersonalStudyPlanTasks = useAppStore((s) => s.setPersonalStudyPlanTasks);
+  const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
+  const revisionQueue = useAppStore((s) => s.revisionQueue);
   const gami = useGamification();
   const rewards = useRewards();
   const streak = gami.streaks.current;
@@ -100,6 +105,14 @@ export default function Dashboard() {
     };
     return computeDailyStudyQueue(dailyQueueInput);
   }, [studyPlan, personalStudyPlanTasks, completedTopics, pyqPerf, todayKey]);
+
+  // Due for Revision (Stage 3) — reuses lib/revisionQueue's own getQueueCounts and lib/pyqFilters'
+  // computeEligibleRevisionIds (Stage 2) verbatim; no second scheduling/eligibility calculation.
+  const revisionCounts: RevisionQueueCounts = useMemo(() => {
+    const statusMap = computeRevisionStatusMap(PYQ_BANK, pyqAttempts);
+    const eligibleIds = computeEligibleRevisionIds(PYQ_BANK, statusMap, bookmarkedPyqIds);
+    return getQueueCounts(revisionQueue, eligibleIds, todayKey);
+  }, [pyqAttempts, bookmarkedPyqIds, revisionQueue, todayKey]);
 
   // Completing an item reuses the exact same pure function + store setters StudyPlan.tsx's own
   // Complete action uses — no second task-mutation code path.
@@ -226,6 +239,11 @@ export default function Dashboard() {
       {/* Today's Study (Stage 7) */}
       <motion.div {...fadeUp}>
         <TodayStudyCard queue={dailyQueue} onComplete={handleCompleteDailyItem} />
+      </motion.div>
+
+      {/* Due for Revision (Revision Queue Stage 3) */}
+      <motion.div {...fadeUp}>
+        <DueForRevisionCard counts={revisionCounts} />
       </motion.div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -452,6 +470,36 @@ function DoNextList({ queue, onComplete }: { queue: Extract<DailyQueueResult, { 
         ))}
       </ul>
     </div>
+  );
+}
+
+/** Revision Queue Stage 3 — a compact, read-only summary of the existing revision queue
+ * (lib/revisionQueue, Stage 1/2). Purely derived from current store state; nothing here mutates
+ * the queue or PYQ data — the actual answering happens in the existing "Revise Now" flow on the
+ * PYQs page, linked to here. */
+function DueForRevisionCard({ counts }: { counts: RevisionQueueCounts }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Brain className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Due for Revision</h3>
+        </div>
+        {counts.dueCount > 0 && (
+          <Link to="/pyq-test">
+            <Button size="sm">Revise Now ({counts.dueCount})</Button>
+          </Link>
+        )}
+      </div>
+      {counts.dueCount > 0 ? (
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+          <span className="font-semibold text-slate-700 dark:text-slate-200">{counts.dueCount}</span> PYQ{counts.dueCount === 1 ? '' : 's'} ready for spaced
+          revision.
+        </p>
+      ) : (
+        <p className="mt-2 text-sm text-emerald-600 dark:text-emerald-400">Nothing due right now — nice work staying on top of revision.</p>
+      )}
+    </Card>
   );
 }
 
