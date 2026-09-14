@@ -17,6 +17,7 @@ import {
   ListTodo,
   Check,
   Brain,
+  Gauge,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { PYQ_BANK } from '../data/pyq';
@@ -28,6 +29,7 @@ import { completeStudyPlanTask } from '../lib/studyPlanEditing';
 import { computeDailyStudyQueue, type DailyQueueInput, type DailyQueueItem, type DailyQueueResult } from '../lib/studyPlanDailyQueue';
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from '../lib/pyqFilters';
 import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
+import { computeExamReadiness, type ExamReadinessReport, type DimensionScore, type ExamReadinessVerdict } from '../lib/examReadiness';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
@@ -114,6 +116,28 @@ export default function Dashboard() {
     return getQueueCounts(revisionQueue, eligibleIds, todayKey);
   }, [pyqAttempts, bookmarkedPyqIds, revisionQueue, todayKey]);
 
+  // Exam Readiness (Stage 2) — a read-only capstone view combining five already-computed signals
+  // via lib/examReadiness's computeExamReadiness. No scoring logic is duplicated here; every input
+  // below is either an existing store field or an already-memoized value (pyqPerf, todayKey).
+  const examReadiness = useMemo<ExamReadinessReport>(
+    () =>
+      computeExamReadiness({
+        syllabus: SYLLABUS,
+        completedTopics,
+        pyqPerf,
+        pyqBank: PYQ_BANK,
+        pyqAttempts,
+        bookmarkedPyqIds,
+        revisionQueue,
+        mockTestAttempts: attempts,
+        studyPlan,
+        personalTasks: personalStudyPlanTasks,
+        sessions,
+        currentDate: todayKey,
+      }),
+    [completedTopics, pyqPerf, pyqAttempts, bookmarkedPyqIds, revisionQueue, attempts, studyPlan, personalStudyPlanTasks, sessions, todayKey]
+  );
+
   // Completing an item reuses the exact same pure function + store setters StudyPlan.tsx's own
   // Complete action uses — no second task-mutation code path.
   function handleCompleteDailyItem(item: DailyQueueItem) {
@@ -188,6 +212,11 @@ export default function Dashboard() {
             </div>
           </div>
         </Card>
+      </motion.div>
+
+      {/* Exam Readiness (Stage 2) */}
+      <motion.div {...fadeUp}>
+        <ExamReadinessCard report={examReadiness} />
       </motion.div>
 
       {/* Study progress / gamification */}
@@ -500,6 +529,62 @@ function DueForRevisionCard({ counts }: { counts: RevisionQueueCounts }) {
         <p className="mt-2 text-sm text-emerald-600 dark:text-emerald-400">Nothing due right now — nice work staying on top of revision.</p>
       )}
     </Card>
+  );
+}
+
+const VERDICT_META: Record<ExamReadinessVerdict, { label: string; tone: 'danger' | 'warning' | 'success'; barColor: string }> = {
+  needs_work: { label: 'Needs Work', tone: 'danger', barColor: 'bg-rose-500' },
+  getting_there: { label: 'Getting There', tone: 'warning', barColor: 'bg-amber-400' },
+  exam_ready: { label: 'Exam Ready', tone: 'success', barColor: 'bg-emerald-500' },
+};
+
+/** Exam Readiness Stage 2 — a read-only capstone summary over lib/examReadiness's composite score.
+ * All scoring/weighting happens in that module; this component only renders its already-computed
+ * output (overallScore, verdict, weakestDimension, dimensions) — it never recomputes a score. */
+function ExamReadinessCard({ report }: { report: ExamReadinessReport }) {
+  const meta = VERDICT_META[report.verdict];
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Exam Readiness</h3>
+        </div>
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+      </div>
+
+      <div className="flex items-baseline gap-2">
+        <span className="font-display text-3xl font-bold text-slate-900 dark:text-white">{report.overallScore}</span>
+        <span className="text-xs text-slate-400">/ 100</span>
+      </div>
+      <div className="mt-2">
+        <ProgressBar value={report.overallScore} colorClassName={meta.barColor} height="h-1.5" />
+      </div>
+
+      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+        Weakest area: <span className="font-medium text-slate-700 dark:text-slate-200">{report.weakestDimension.label}</span> — {report.weakestDimension.reason}
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 sm:grid-cols-2">
+        {report.dimensions.map((d) => (
+          <DimensionRow key={d.dimension} dimension={d} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function DimensionRow({ dimension }: { dimension: DimensionScore }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+        <span className="truncate font-medium text-slate-600 dark:text-slate-300">{dimension.label}</span>
+        <span className={cx('shrink-0', dimension.hasData ? 'text-slate-400' : 'italic text-slate-400')}>
+          {dimension.hasData ? `${dimension.score}%` : 'No data yet'}
+        </span>
+      </div>
+      <ProgressBar value={dimension.score} colorClassName={dimension.hasData ? 'bg-brand-400' : 'bg-slate-300 dark:bg-slate-700'} height="h-1.5" />
+    </div>
   );
 }
 
