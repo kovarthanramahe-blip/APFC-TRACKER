@@ -25,7 +25,8 @@ export async function saveCloudData(userId: string, data: Record<string, unknown
   if (error) throw error;
 }
 
-function hasMeaningfulData(data: Record<string, unknown>): boolean {
+// Exported so it can be unit-tested directly (see cloudSync.test.ts) without mocking Supabase.
+export function hasMeaningfulData(data: Record<string, unknown>): boolean {
   const counts = [
     Object.keys((data.completedTopics as object) ?? {}).length,
     ((data.notes as unknown[]) ?? []).length,
@@ -33,6 +34,8 @@ function hasMeaningfulData(data: Record<string, unknown>): boolean {
     ((data.sessions as unknown[]) ?? []).length,
     Object.keys((data.studyLog as object) ?? {}).length,
     ((data.starredQuestionIds as unknown[]) ?? []).length,
+    ((data.pyqAttempts as unknown[]) ?? []).length,
+    ((data.bookmarkedPyqIds as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }

@@ -18,6 +18,7 @@ import { Award, Lock, Trophy, Gem, Star } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
+import { computeAggregateAccuracy } from '../lib/mockTestStats';
 import { SUBJECT_COLORS, formatMinutes, cx } from '../lib/utils';
 import { Card, Badge, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
@@ -74,12 +75,7 @@ export default function Analytics() {
 
   const totalFocusMinutes = Object.values(studyLog).reduce((sum, e) => sum + e.focusMinutes, 0);
   const totalTestsTaken = attempts.length;
-  const avgAccuracy =
-    attempts.length > 0
-      ? Math.round(
-          (attempts.reduce((s, a) => s + (a.correctCount / Math.max(1, a.correctCount + a.wrongCount)) * 100, 0) / attempts.length) * 10,
-        ) / 10
-      : 0;
+  const avgAccuracy = computeAggregateAccuracy(attempts);
 
   return (
     <div>
