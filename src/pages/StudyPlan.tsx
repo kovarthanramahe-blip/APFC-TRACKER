@@ -14,6 +14,8 @@ import {
   Plus,
   Shuffle,
   Activity,
+  FlaskConical,
+  X,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
@@ -41,7 +43,8 @@ import {
   MAX_TASK_MINUTES,
   type PersonalPlanTask,
 } from '../lib/studyPlanEditing';
-import { computePlanHealth, type PlanHealthReport, type PlanHealthVerdict } from '../lib/studyPlanHealth';
+import { computePlanHealth, type PlanHealthInput, type PlanHealthReport, type PlanHealthVerdict } from '../lib/studyPlanHealth';
+import { simulateMissedStudyDays, simulateTargetDateShift, type ScenarioResult } from '../lib/studyPlanScenarios';
 import { formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 
@@ -270,12 +273,55 @@ export default function StudyPlan() {
   );
 
   // Plan Health (Stage 5) — purely derived from current state on every render, never persisted
-  // (see lib/studyPlanHealth). Recomputed the same way generate/adapt gather their inputs.
-  const planHealth = useMemo(() => {
+  // (see lib/studyPlanHealth). Recomputed the same way generate/adapt gather their inputs. Shared
+  // as `healthInput` with the Stage 6 scenario simulator below so both stay in sync with exactly
+  // the same real-plan snapshot.
+  const healthInput: PlanHealthInput | null = useMemo(() => {
     if (!plan) return null;
     const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
-    return computePlanHealth({ plan, personalTasks, syllabus: SYLLABUS, completedTopics, pyqPerf, currentDate: todayStr() });
+    return { plan, personalTasks, syllabus: SYLLABUS, completedTopics, pyqPerf, currentDate: todayStr() };
   }, [plan, personalTasks, pyqAttempts, completedTopics]);
+
+  const planHealth = useMemo(() => (healthInput ? computePlanHealth(healthInput) : null), [healthInput]);
+
+  // Plan Scenarios (Stage 6) — a pure "what if" simulation, run only when the user explicitly
+  // presses Simulate. Held entirely in local component state: never written to the store, and
+  // never touches the real plan (see lib/studyPlanScenarios). Re-simulating after the underlying
+  // plan changes is left to the user — a stale scenario result is cleared automatically below
+  // whenever the input it was computed from goes away or the plan regenerates.
+  const [scenarioMissedDays, setScenarioMissedDays] = useState(3);
+  const [scenarioShiftDays, setScenarioShiftDays] = useState(7);
+  const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+
+  function handleSimulateMissedDays() {
+    if (!healthInput) return;
+    const outcome = simulateMissedStudyDays(healthInput, scenarioMissedDays);
+    if (outcome.ok) {
+      setScenarioResult(outcome.result);
+      setScenarioError(null);
+    } else {
+      setScenarioResult(null);
+      setScenarioError(outcome.error);
+    }
+  }
+
+  function handleSimulateTargetDateShift() {
+    if (!healthInput) return;
+    const outcome = simulateTargetDateShift(healthInput, scenarioShiftDays);
+    if (outcome.ok) {
+      setScenarioResult(outcome.result);
+      setScenarioError(null);
+    } else {
+      setScenarioResult(null);
+      setScenarioError(outcome.error);
+    }
+  }
+
+  function handleClearScenario() {
+    setScenarioResult(null);
+    setScenarioError(null);
+  }
 
   const tasksByDate = useMemo(() => {
     if (!plan) return [];
@@ -382,6 +428,19 @@ export default function StudyPlan() {
           )}
           {editedCapacity && <CapacitySummary plan={plan} edited={editedCapacity} generatedAt={studyPlanGeneratedAt} />}
           {planHealth && <PlanHealthCard health={planHealth} />}
+          {plan && (
+            <PlanScenariosCard
+              missedDays={scenarioMissedDays}
+              onMissedDaysChange={setScenarioMissedDays}
+              onSimulateMissedDays={handleSimulateMissedDays}
+              shiftDays={scenarioShiftDays}
+              onShiftDaysChange={setScenarioShiftDays}
+              onSimulateTargetDateShift={handleSimulateTargetDateShift}
+              result={scenarioResult}
+              error={scenarioError}
+              onClear={handleClearScenario}
+            />
+          )}
           {plan.phases.length > 0 && <PhaseList phases={plan.phases} />}
           <AddPersonalTask show={showAddPersonal} onToggle={() => setShowAddPersonal((v) => !v)} onAdd={handleAddPersonal} />
           <TaskList
@@ -568,6 +627,153 @@ function PlanHealthCard({ health }: { health: PlanHealthReport }) {
       {health.recommendations[0] && <p className="mt-3 text-xs text-brand-700 dark:text-brand-300">{health.recommendations[0]}</p>}
     </Card>
   );
+}
+
+function scenarioTitle(result: ScenarioResult): string {
+  if (result.type === 'missed_days') return `Miss ${result.missedDays} study day${result.missedDays === 1 ? '' : 's'}`;
+  const { targetDateShiftDays } = result;
+  if (targetDateShiftDays === 0) return 'No change to target date';
+  const days = Math.abs(targetDateShiftDays);
+  const direction = targetDateShiftDays > 0 ? 'Extend' : 'Shorten';
+  return `${direction} target date by ${days} day${days === 1 ? '' : 's'}`;
+}
+
+function formatSignedMinutesPerDay(delta: number): string {
+  if (delta === 0) return 'No change in required time/day';
+  const sign = delta > 0 ? '+' : '−';
+  return `${sign}${formatMinutes(Math.abs(delta))}/day required`;
+}
+
+const SCENARIO_OUTCOME_META: Record<ScenarioResult['comparison']['outcome'], { label: string; tone: 'success' | 'warning' | 'danger' }> = {
+  improves: { label: 'Improves', tone: 'success' },
+  worsens: { label: 'Worsens', tone: 'danger' },
+  unchanged: { label: 'Unchanged', tone: 'warning' },
+};
+
+/** Stage 6 — compact "what if" simulator. Two explicit, button-triggered scenarios (never run
+ * automatically while typing); results are ephemeral local state passed in from the parent and
+ * never touch the real plan/store (see lib/studyPlanScenarios). */
+function PlanScenariosCard({
+  missedDays,
+  onMissedDaysChange,
+  onSimulateMissedDays,
+  shiftDays,
+  onShiftDaysChange,
+  onSimulateTargetDateShift,
+  result,
+  error,
+  onClear,
+}: {
+  missedDays: number;
+  onMissedDaysChange: (n: number) => void;
+  onSimulateMissedDays: () => void;
+  shiftDays: number;
+  onShiftDaysChange: (n: number) => void;
+  onSimulateTargetDateShift: () => void;
+  result: ScenarioResult | null;
+  error: string | null;
+  onClear: () => void;
+}) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <FlaskConical className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Plan Scenarios</h3>
+        </div>
+        {(result || error) && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-rose-600 dark:hover:text-rose-400"
+          >
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
+
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">See how your plan would change without actually changing it.</p>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-3">
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Miss study days</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={missedDays}
+              onChange={(e) => onMissedDaysChange(clampInt(Number(e.target.value), 1, 30))}
+              className="w-20 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-2.5 py-1.5 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            <Button size="sm" variant="secondary" onClick={onSimulateMissedDays}>
+              Simulate
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-3">
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Change target date (days)</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={-365}
+              max={365}
+              value={shiftDays}
+              onChange={(e) => onShiftDaysChange(clampInt(Number(e.target.value), -365, 365))}
+              className="w-20 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-2.5 py-1.5 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            <Button size="sm" variant="secondary" onClick={onSimulateTargetDateShift}>
+              Simulate
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10 px-4 py-3">
+          <p className="text-xs text-rose-700 dark:text-rose-300">{error}</p>
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-4 space-y-3 border-t border-slate-100 dark:border-slate-800 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Scenario: {scenarioTitle(result)}</p>
+            <Badge tone={SCENARIO_OUTCOME_META[result.comparison.outcome].tone}>{SCENARIO_OUTCOME_META[result.comparison.outcome].label}</Badge>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Current</p>
+              <Badge tone={HEALTH_VERDICT_META[result.comparison.current.verdict].tone}>{HEALTH_VERDICT_META[result.comparison.current.verdict].label}</Badge>
+              <p className="mt-1.5 font-display text-sm font-bold text-slate-900 dark:text-white">
+                {formatMinutes(result.comparison.current.requiredMinutesPerStudyDay)}/day
+              </p>
+            </div>
+            <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Scenario</p>
+              <Badge tone={HEALTH_VERDICT_META[result.comparison.scenario.verdict].tone}>{HEALTH_VERDICT_META[result.comparison.scenario.verdict].label}</Badge>
+              <p className="mt-1.5 font-display text-sm font-bold text-slate-900 dark:text-white">
+                {formatMinutes(result.comparison.scenario.requiredMinutesPerStudyDay)}/day
+              </p>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Impact: <span className="font-medium text-slate-700 dark:text-slate-200">{formatSignedMinutesPerDay(result.comparison.requiredMinutesPerDayDelta)}</span>
+          </p>
+
+          <p className="text-xs text-brand-700 dark:text-brand-300">{result.recommendation}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function clampInt(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, Math.round(n)));
 }
 
 function PhaseList({ phases }: { phases: NonNullable<ReturnType<typeof useAppStore.getState>['studyPlan']>['phases'] }) {
