@@ -50,6 +50,8 @@ import {
 import { getDueItems } from '../lib/revisionQueue';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
+import { useQuestionSession } from '../lib/useQuestionSession';
+import type { QuestionSessionScoring } from '../lib/questionSessionEngine';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
@@ -58,6 +60,11 @@ type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
 // subject or topic (or their counts) is ever hardcoded, so a future data import shows up automatically.
 const AVAILABLE_YEARS = getAvailableYears(PYQ_BANK);
 const YEAR_COUNTS = getYearCounts(PYQ_BANK);
+
+// Unified Question Architecture Stage 2 — PYQ's exact existing marking scheme and status
+// classifier (lib/pyqPerformance, both untouched), handed to the generic session engine as data
+// rather than the engine hardcoding them. Module scope keeps its identity stable across renders.
+const PYQ_SCORING: QuestionSessionScoring<PYQ> = { marksCorrect: MARKS_CORRECT, marksWrong: MARKS_WRONG, statusOf };
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -111,13 +118,11 @@ export default function PYQTest() {
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>('all');
   const [countChoice, setCountChoice] = useState<CountChoice>(10);
 
-  const [questions, setQuestions] = useState<PYQ[]>([]);
-  const [current, setCurrent] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string | null>>({});
-  const [reviewIndex, setReviewIndex] = useState(0);
-  // Guards against saving more than one attempt record per submitted test,
-  // even if the results screen is somehow re-entered/re-rendered.
-  const submittedRef = useRef(false);
+  // Unified Question Architecture Stage 2 — the shared testing/results/review engine, previously
+  // duplicated inline here as local state. PYQ_SCORING supplies PYQ's own marking scheme; the
+  // engine itself (lib/questionSessionEngine.ts) knows nothing PYQ-specific.
+  const session = useQuestionSession<PYQ>(PYQ_SCORING);
+  const { questions, current, answers, reviewIndex, results } = session;
   // Weak-Topic Practice (Stage 2) — purely a display flag so the shared testing/results screens
   // can show "Weak Topics Practice"; it never changes what those screens do, only what they show.
   const [isWeakTopicSession, setIsWeakTopicSession] = useState(false);
@@ -176,34 +181,13 @@ export default function PYQTest() {
     if (filtered.length === 0) return;
     const n = countChoice === 'all' ? filtered.length : Math.min(countChoice, filtered.length);
     const selected = shuffle(filtered).slice(0, n);
-    submittedRef.current = false;
     setIsWeakTopicSession(false);
-    setQuestions(selected);
-    setAnswers({});
-    setCurrent(0);
+    session.start(selected);
     setPhase('testing');
   }
 
-  const results = useMemo(() => {
-    let correct = 0;
-    let wrong = 0;
-    let unanswered = 0;
-    for (const q of questions) {
-      const s = statusOf(q, answers);
-      if (s === 'correct') correct += 1;
-      else if (s === 'wrong') wrong += 1;
-      else unanswered += 1;
-    }
-    const attempted = correct + wrong;
-    const total = questions.length;
-    const score = correct * MARKS_CORRECT + wrong * MARKS_WRONG;
-    const accuracy = attempted > 0 ? (correct / attempted) * 100 : 0;
-    return { total, attempted, correct, wrong, unanswered, score, accuracy };
-  }, [questions, answers]);
-
   function handleSubmit() {
-    if (!submittedRef.current) {
-      submittedRef.current = true;
+    if (session.trySubmit()) {
       const attempt: PYQAttempt = {
         id: uuid(),
         submittedAt: new Date().toISOString(),
@@ -224,10 +208,7 @@ export default function PYQTest() {
   }
 
   function restart() {
-    setQuestions([]);
-    setAnswers({});
-    setCurrent(0);
-    setReviewIndex(0);
+    session.reset();
     setIsWeakTopicSession(false);
     setPhase('select');
   }
@@ -237,22 +218,15 @@ export default function PYQTest() {
   // Results/Review UI — no second review implementation, and nothing is re-saved.
   function openAttempt(attempt: PYQAttempt) {
     const qs = attempt.questionIds.map((id) => PYQ_BANK.find((p) => p.id === id)).filter((q): q is PYQ => !!q);
-    submittedRef.current = true;
     setIsWeakTopicSession(false);
-    setQuestions(qs);
-    setAnswers(attempt.answers);
-    setCurrent(0);
-    setReviewIndex(0);
+    session.loadForReview(qs, attempt.answers, 0);
     setPhase('results');
   }
 
   function retryWrong() {
     const wrongQs = questions.filter((q) => statusOf(q, answers) === 'wrong');
     if (wrongQs.length === 0) return;
-    submittedRef.current = false;
-    setQuestions(wrongQs);
-    setAnswers({});
-    setCurrent(0);
+    session.start(wrongQs);
     setPhase('testing');
   }
 
@@ -266,20 +240,14 @@ export default function PYQTest() {
   // with no user answers since this isn't a live attempt.
   function openBookmarks(startAt = 0) {
     if (bookmarkedQuestions.length === 0) return;
-    submittedRef.current = true;
-    setQuestions(bookmarkedQuestions);
-    setAnswers({});
-    setReviewIndex(Math.min(startAt, bookmarkedQuestions.length - 1));
+    session.loadForReview(bookmarkedQuestions, {}, Math.min(startAt, bookmarkedQuestions.length - 1));
     setPhase('review');
   }
 
   function practiceBookmarked() {
     if (bookmarkedQuestions.length === 0) return;
-    submittedRef.current = false;
     setIsWeakTopicSession(false);
-    setQuestions(bookmarkedQuestions);
-    setAnswers({});
-    setCurrent(0);
+    session.start(bookmarkedQuestions);
     setPhase('testing');
   }
 
@@ -305,11 +273,8 @@ export default function PYQTest() {
   // PYQAttempt is saved through the same handleSubmit path with unchanged attempt semantics.
   function practiceWeakTopics() {
     if (weakTopicQuestions.length === 0) return;
-    submittedRef.current = false;
     setIsWeakTopicSession(true);
-    setQuestions(weakTopicQuestions);
-    setAnswers({});
-    setCurrent(0);
+    session.start(weakTopicQuestions);
     setPhase('testing');
   }
 
@@ -883,7 +848,7 @@ export default function PYQTest() {
           <Button
             className="flex-1"
             onClick={() => {
-              setReviewIndex(0);
+              session.setReviewIndex(0);
               setPhase('review');
             }}
           >
@@ -978,10 +943,10 @@ export default function PYQTest() {
         </Card>
 
         <div className="mt-4 flex items-center justify-between gap-3">
-          <Button variant="secondary" disabled={reviewIndex === 0} onClick={() => setReviewIndex((i) => i - 1)}>
+          <Button variant="secondary" disabled={reviewIndex === 0} onClick={session.reviewPrevious}>
             <ChevronLeft className="h-4 w-4" /> Previous
           </Button>
-          <Button variant="secondary" disabled={reviewIndex === questions.length - 1} onClick={() => setReviewIndex((i) => Math.min(questions.length - 1, i + 1))}>
+          <Button variant="secondary" disabled={reviewIndex === questions.length - 1} onClick={session.reviewNext}>
             Next <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
@@ -995,7 +960,7 @@ export default function PYQTest() {
               return (
                 <button
                   key={qq.id}
-                  onClick={() => setReviewIndex(i)}
+                  onClick={() => session.setReviewIndex(i)}
                   className={cx(
                     'h-8 w-8 rounded-lg text-xs font-semibold transition-colors',
                     isCurrent
@@ -1069,7 +1034,7 @@ export default function PYQTest() {
             return (
               <button
                 key={opt.id}
-                onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt.id }))}
+                onClick={() => session.selectAnswer(q.id, opt.id)}
                 className={cx(
                   'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
                   selected
@@ -1091,20 +1056,20 @@ export default function PYQTest() {
           })}
         </div>
         {answers[q.id] && (
-          <button className="mt-3 text-xs text-slate-400 hover:underline" onClick={() => setAnswers((a) => ({ ...a, [q.id]: null }))}>
+          <button className="mt-3 text-xs text-slate-400 hover:underline" onClick={() => session.clearAnswer(q.id)}>
             Clear response
           </button>
         )}
       </Card>
 
       <div className="mt-4 flex items-center justify-between gap-3">
-        <Button variant="secondary" disabled={current === 0} onClick={() => setCurrent((c) => c - 1)}>
+        <Button variant="secondary" disabled={current === 0} onClick={session.goToPrevious}>
           <ChevronLeft className="h-4 w-4" /> Previous
         </Button>
         {current === questions.length - 1 ? (
           <Button onClick={() => confirm('Submit the test now?') && handleSubmit()}>Submit Test</Button>
         ) : (
-          <Button onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}>
+          <Button onClick={session.goToNext}>
             Next <ChevronRight className="h-4 w-4" />
           </Button>
         )}
