@@ -47,13 +47,26 @@ export default function MockTestRunner() {
   const [secondsLeft, setSecondsLeft] = useState((blueprint?.durationMinutes ?? 0) * 60);
   const startedAtRef = useRef<string>('');
 
+  // The countdown effect below only ever runs once per test (its deps are `[started]`, and
+  // `started` flips true exactly once), so the `handleSubmit` it captured at that moment would
+  // otherwise stay frozen with whatever `answers` existed right when the timer started — silently
+  // dropping every answer given afterward if the clock ever actually reaches zero. This ref is kept
+  // pointed at the latest `handleSubmit` (redeclared fresh every render, closing over the current
+  // `session.answers`/`session.results`) via a no-dependency effect that runs after every render,
+  // so the interval always calls the up-to-date version without needing to be torn down and
+  // re-created — the smallest fix that doesn't touch the countdown/interval mechanics themselves.
+  const handleSubmitRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  });
+
   useEffect(() => {
     if (!started) return;
     const timer = setInterval(() => {
       setSecondsLeft((s) => {
         if (s <= 1) {
           clearInterval(timer);
-          handleSubmit();
+          handleSubmitRef.current();
           return 0;
         }
         return s - 1;
