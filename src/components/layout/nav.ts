@@ -7,6 +7,7 @@ import {
   NotebookPen,
   Timer,
   BarChart3,
+  CalendarRange,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -26,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/notes', label: 'Notes', icon: NotebookPen },
   { to: '/pomodoro', label: 'Pomodoro', icon: Timer },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { to: '/study-plan', label: 'Study Plan', icon: CalendarRange },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

@@ -20,6 +20,7 @@ const MockTestResult = lazy(() => import('./pages/MockTestResult'));
 const Notes = lazy(() => import('./pages/Notes'));
 const Pomodoro = lazy(() => import('./pages/Pomodoro'));
 const Analytics = lazy(() => import('./pages/Analytics'));
+const StudyPlan = lazy(() => import('./pages/StudyPlan'));
 const Settings = lazy(() => import('./pages/Settings'));
 
 function RouteFallback() {
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/notes" element={<Notes />} />
           <Route path="/pomodoro" element={<Pomodoro />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/study-plan" element={<StudyPlan />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Suspense>

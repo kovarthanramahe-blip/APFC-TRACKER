@@ -8,6 +8,7 @@ import type {
   StudyLogEntry,
   ThemeMode,
 } from './types';
+import type { StudyPlan } from './studyPlan';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -67,6 +68,14 @@ interface AppState {
   // a different account signing in on the same device never adopts it.
   lastSyncedUserId: string | null;
   setLastSyncedUserId: (id: string | null) => void;
+
+  // Study Plan (Stage 2): the most recently generated plan, produced entirely by
+  // lib/studyPlan's generateStudyPlan — the store only stores its output, never
+  // recomputes it. Regenerating replaces this wholesale; there is no plan history.
+  studyPlan: StudyPlan | null;
+  studyPlanGeneratedAt: string | null;
+  setStudyPlan: (plan: StudyPlan) => void;
+  clearStudyPlan: () => void;
 
   // Reset
   resetAllData: () => void;
@@ -205,6 +214,11 @@ export const useAppStore = create<AppState>()(
       lastSyncedUserId: null,
       setLastSyncedUserId: (id) => set({ lastSyncedUserId: id }),
 
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      setStudyPlan: (plan) => set({ studyPlan: plan, studyPlanGeneratedAt: new Date().toISOString() }),
+      clearStudyPlan: () => set({ studyPlan: null, studyPlanGeneratedAt: null }),
+
       resetAllData: () =>
         set({
           completedTopics: {},
@@ -216,6 +230,8 @@ export const useAppStore = create<AppState>()(
           starredQuestionIds: [],
           bookmarkedPyqIds: [],
           rewardUnlocks: {},
+          studyPlan: null,
+          studyPlanGeneratedAt: null,
         }),
     }),
     {
@@ -239,6 +255,8 @@ export function exportAllData() {
     theme: state.theme,
     dailyGoalMinutes: state.dailyGoalMinutes,
     rewardUnlocks: state.rewardUnlocks,
+    studyPlan: state.studyPlan,
+    studyPlanGeneratedAt: state.studyPlanGeneratedAt,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -258,5 +276,7 @@ export function importAllData(json: string) {
     theme: data.theme ?? 'system',
     dailyGoalMinutes: data.dailyGoalMinutes ?? 60,
     rewardUnlocks: data.rewardUnlocks ?? {},
+    studyPlan: data.studyPlan ?? null,
+    studyPlanGeneratedAt: data.studyPlanGeneratedAt ?? null,
   });
 }
