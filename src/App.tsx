@@ -2,10 +2,18 @@ import { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { useThemeEffect } from './lib/useTheme';
+// Eagerly load the Supabase client (rather than only via the lazy Settings
+// chunk) so its built-in OAuth hash detection runs on every page load,
+// including the redirect landing on "/" straight after Google sign-in.
+import './lib/supabase';
+import { useCloudSync } from './lib/useCloudSync';
+import { useNativeAuthBridge } from './lib/nativeAuth';
+import { RewardCelebration } from './components/RewardCelebration';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
 const QuestionBank = lazy(() => import('./pages/QuestionBank'));
+const PYQTest = lazy(() => import('./pages/PYQTest'));
 const MockTests = lazy(() => import('./pages/MockTests'));
 const MockTestRunner = lazy(() => import('./pages/MockTestRunner'));
 const MockTestResult = lazy(() => import('./pages/MockTestResult'));
@@ -26,6 +34,8 @@ function RouteFallback() {
 
 export default function App() {
   useThemeEffect();
+  useNativeAuthBridge();
+  useCloudSync();
 
   return (
     <AppShell>
@@ -34,6 +44,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/syllabus" element={<Syllabus />} />
           <Route path="/pyq" element={<QuestionBank />} />
+          <Route path="/pyq-test" element={<PYQTest />} />
           <Route path="/mock-tests" element={<MockTests />} />
           <Route path="/mock-tests/run/:blueprintId" element={<MockTestRunner />} />
           <Route path="/mock-tests/result/:attemptId" element={<MockTestResult />} />
@@ -43,6 +54,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Suspense>
+      <RewardCelebration />
     </AppShell>
   );
 }

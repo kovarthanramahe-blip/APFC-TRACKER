@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen } from 'lucide-react';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { useAppStore } from '../lib/store';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
@@ -10,8 +11,27 @@ export default function Syllabus() {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const toggleTopic = useAppStore((s) => s.toggleTopic);
   const markSubjectTopics = useAppStore((s) => s.markSubjectTopics);
-  const [openIds, setOpenIds] = useState<string[]>([SYLLABUS[0].id]);
+
+  // Deep-link support: "Study this topic" from a PYQ review arrives as /syllabus?topicId=...
+  const [searchParams] = useSearchParams();
+  const deepLinkTopicId = searchParams.get('topicId');
+  const deepLinkSubjectId = useMemo(
+    () => (deepLinkTopicId ? SYLLABUS.find((s) => s.topics.some((t) => t.id === deepLinkTopicId))?.id : undefined),
+    [deepLinkTopicId],
+  );
+
+  const [openIds, setOpenIds] = useState<string[]>(() => (deepLinkSubjectId ? [deepLinkSubjectId] : [SYLLABUS[0].id]));
   const [query, setQuery] = useState('');
+  const highlightedRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!deepLinkSubjectId) return;
+    setOpenIds((prev) => (prev.includes(deepLinkSubjectId) ? prev : [...prev, deepLinkSubjectId]));
+    // Give the accordion's open animation a moment before scrolling to the topic.
+    const t = setTimeout(() => highlightedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSubjectId, deepLinkTopicId]);
 
   const totalTopics = getAllTopicsCount();
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
@@ -114,11 +134,19 @@ export default function Syllabus() {
                       <ul className="space-y-1">
                         {subj.topics.map((topic) => {
                           const checked = !!completedTopics[topic.id];
+                          const isDeepLinked = topic.id === deepLinkTopicId;
                           return (
-                            <li key={topic.id}>
+                            <li
+                              key={topic.id}
+                              ref={isDeepLinked ? highlightedRef : undefined}
+                              className={cx(
+                                'flex items-center gap-1 rounded-lg transition-colors',
+                                isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60',
+                              )}
+                            >
                               <button
                                 onClick={() => toggleTopic(topic.id)}
-                                className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
+                                className="flex flex-1 min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
                               >
                                 <span
                                   className={cx(
@@ -128,10 +156,17 @@ export default function Syllabus() {
                                 >
                                   {checked && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
                                 </span>
-                                <span className={cx('text-sm', checked ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-300')}>
+                                <span className={cx('text-sm truncate', checked ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-slate-300')}>
                                   {topic.title}
                                 </span>
                               </button>
+                              <Link
+                                to={`/notes?topicId=${encodeURIComponent(topic.id)}`}
+                                title="Notes for this topic"
+                                className="shrink-0 rounded-lg p-2 text-slate-300 hover:text-brand-600 dark:text-slate-600 dark:hover:text-brand-400"
+                              >
+                                <NotebookPen className="h-4 w-4" />
+                              </Link>
                             </li>
                           );
                         })}

@@ -47,6 +47,43 @@ export interface Question {
   explanation: string;
 }
 
+export type PYQVerificationStatus = 'official' | 'cross_verified' | 'provisional' | 'disputed';
+
+export interface PYQOption {
+  id: string;
+  text: string;
+}
+
+export interface PYQ {
+  id: string;
+  year: number;
+  subject: SubjectColorKey;
+  topicId: string; // FK -> SyllabusTopic.id
+  subtopic?: string;
+  question: string;
+  options: PYQOption[];
+  correctOptionId: string;
+  explanation: string;
+  verificationStatus: PYQVerificationStatus;
+  verificationNote?: string;
+  source?: string;
+}
+
+export interface PYQAttempt {
+  id: string;
+  submittedAt: string;
+  year: number | 'all'; // the selection filter used to build the test, not a per-question value
+  subject: SubjectColorKey | 'all'; // the selection filter used to build the test, not a per-question value
+  topicId: string | 'all';
+  questionIds: string[]; // preserves the exact question order used in the test
+  answers: Record<string, string | null>; // questionId -> optionId | null (unanswered)
+  correctCount: number;
+  wrongCount: number;
+  unansweredCount: number;
+  score: number;
+  accuracy: number;
+}
+
 export interface MockTestBlueprint {
   id: string;
   title: string;
@@ -78,6 +115,7 @@ export interface MockTestAttempt {
 export interface Note {
   id: string;
   subject: SubjectColorKey | 'general';
+  topicId?: string; // FK -> SyllabusTopic.id; absent = "general" notes or pre-Phase 2E notes with no topic yet
   title: string;
   content: string;
   createdAt: string;

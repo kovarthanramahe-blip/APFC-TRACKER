@@ -4,6 +4,7 @@ import type {
   MockTestAttempt,
   Note,
   PomodoroSession,
+  PYQAttempt,
   StudyLogEntry,
   ThemeMode,
 } from './types';
@@ -24,6 +25,10 @@ interface AppState {
   attempts: MockTestAttempt[];
   addAttempt: (attempt: MockTestAttempt) => void;
 
+  // PYQ practice test attempts (local-only for now — no cloud sync yet)
+  pyqAttempts: PYQAttempt[];
+  addPyqAttempt: (attempt: PYQAttempt) => void;
+
   // Pomodoro
   sessions: PomodoroSession[];
   addSession: (session: PomodoroSession) => void;
@@ -38,10 +43,30 @@ interface AppState {
   starredQuestionIds: string[];
   toggleStarredQuestion: (id: string) => void;
 
+  // Bookmarked PYQs (previous-year questions) for later revision
+  bookmarkedPyqIds: string[];
+  toggleBookmarkedPyq: (id: string) => void;
+
   // Settings
   theme: ThemeMode;
   setTheme: (t: ThemeMode) => void;
   examDate: string;
+
+  // Daily focused-study target, in minutes (gamification "today's goal")
+  dailyGoalMinutes: number;
+  setDailyGoalMinutes: (minutes: number) => void;
+
+  // Reward id -> ISO timestamp of when it was first detected as unlocked.
+  // Doubles as "already celebrated" (key present = don't toast again) and
+  // "recently unlocked" (latest timestamp), without a second reward list.
+  rewardUnlocks: Record<string, string>;
+  recordRewardUnlocks: (ids: string[]) => void;
+
+  // Device-local bookkeeping only (never synced to the cloud payload itself):
+  // which signed-in account this cached local data currently belongs to, so
+  // a different account signing in on the same device never adopts it.
+  lastSyncedUserId: string | null;
+  setLastSyncedUserId: (id: string | null) => void;
 
   // Reset
   resetAllData: () => void;
@@ -110,6 +135,17 @@ export const useAppStore = create<AppState>()(
           };
         }),
 
+      pyqAttempts: [],
+      addPyqAttempt: (attempt) =>
+        set((state) => {
+          const date = todayKey();
+          const entry = ensureLogEntry(state.studyLog, date);
+          return {
+            pyqAttempts: [attempt, ...state.pyqAttempts],
+            studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } },
+          };
+        }),
+
       sessions: [],
       addSession: (session) =>
         set((state) => ({ sessions: [session, ...state.sessions] })),
@@ -139,18 +175,47 @@ export const useAppStore = create<AppState>()(
             : [...state.starredQuestionIds, id],
         })),
 
+      bookmarkedPyqIds: [],
+      toggleBookmarkedPyq: (id) =>
+        set((state) => ({
+          bookmarkedPyqIds: state.bookmarkedPyqIds.includes(id)
+            ? state.bookmarkedPyqIds.filter((x) => x !== id)
+            : [...state.bookmarkedPyqIds, id],
+        })),
+
       theme: 'system',
       setTheme: (t) => set({ theme: t }),
       examDate: '2026-12-20',
+
+      dailyGoalMinutes: 60,
+      setDailyGoalMinutes: (minutes) => set({ dailyGoalMinutes: Math.max(5, Math.round(minutes)) }),
+
+      rewardUnlocks: {},
+      recordRewardUnlocks: (ids) =>
+        set((state) => {
+          if (ids.length === 0) return state;
+          const now = new Date().toISOString();
+          const next = { ...state.rewardUnlocks };
+          for (const id of ids) {
+            if (!next[id]) next[id] = now;
+          }
+          return { rewardUnlocks: next };
+        }),
+
+      lastSyncedUserId: null,
+      setLastSyncedUserId: (id) => set({ lastSyncedUserId: id }),
 
       resetAllData: () =>
         set({
           completedTopics: {},
           notes: [],
           attempts: [],
+          pyqAttempts: [],
           sessions: [],
           studyLog: {},
           starredQuestionIds: [],
+          bookmarkedPyqIds: [],
+          rewardUnlocks: {},
         }),
     }),
     {
@@ -166,10 +231,14 @@ export function exportAllData() {
     completedTopics: state.completedTopics,
     notes: state.notes,
     attempts: state.attempts,
+    pyqAttempts: state.pyqAttempts,
     sessions: state.sessions,
     studyLog: state.studyLog,
     starredQuestionIds: state.starredQuestionIds,
+    bookmarkedPyqIds: state.bookmarkedPyqIds,
     theme: state.theme,
+    dailyGoalMinutes: state.dailyGoalMinutes,
+    rewardUnlocks: state.rewardUnlocks,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -181,9 +250,13 @@ export function importAllData(json: string) {
     completedTopics: data.completedTopics ?? {},
     notes: data.notes ?? [],
     attempts: data.attempts ?? [],
+    pyqAttempts: data.pyqAttempts ?? [],
     sessions: data.sessions ?? [],
     studyLog: data.studyLog ?? {},
     starredQuestionIds: data.starredQuestionIds ?? [],
+    bookmarkedPyqIds: data.bookmarkedPyqIds ?? [],
     theme: data.theme ?? 'system',
+    dailyGoalMinutes: data.dailyGoalMinutes ?? 60,
+    rewardUnlocks: data.rewardUnlocks ?? {},
   });
 }

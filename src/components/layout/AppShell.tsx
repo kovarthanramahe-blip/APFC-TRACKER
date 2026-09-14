@@ -99,7 +99,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
-  const activeLabel = NAV_ITEMS.find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'APFC Tracker';
+  // Match exactly, or as a path segment prefix (e.g. "/mock-tests/run/1" matches "/mock-tests")
+  // — a plain startsWith would also match "/pyq-test" against "/pyq", which is wrong.
+  const activeLabel =
+    NAV_ITEMS.find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname === n.to || location.pathname.startsWith(`${n.to}/`)))?.label ??
+    'APFC Tracker';
 
   return (
     <div className="min-h-screen bg-grid">
@@ -140,8 +144,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="lg:pl-64">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/75 dark:bg-slate-950/60 backdrop-blur-xl">
-          <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-6">
+        <header className="sticky top-0 z-20 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/75 dark:bg-slate-950/60 backdrop-blur-xl pt-[env(safe-area-inset-top)]">
+          <div className="flex h-14 items-center justify-between gap-3 px-3 sm:h-16 sm:px-6">
             <div className="flex items-center gap-3">
               <button
                 className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden"
@@ -149,7 +153,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <Menu className="h-5 w-5" />
               </button>
-              <h2 className="font-display text-lg font-semibold text-slate-800 dark:text-slate-100">{activeLabel}</h2>
+              <h2 className="font-display text-base font-semibold text-slate-800 dark:text-slate-100 sm:text-lg">{activeLabel}</h2>
             </div>
             <div className="flex items-center gap-3">
               <CountdownChip />
@@ -158,7 +162,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="px-4 pb-24 pt-6 sm:px-6 lg:pb-10">
+        <main className="px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-6 lg:pb-10">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
@@ -175,7 +179,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 dark:border-slate-800/70 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 dark:border-slate-800/70 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] lg:hidden">
         <div className="flex items-center justify-around py-2">
           {MOBILE_NAV_ITEMS.map((item) => (
             <NavLink

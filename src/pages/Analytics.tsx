@@ -14,10 +14,13 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import { Award, Lock, Trophy, Gem, Star } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
-import { SUBJECT_COLORS, formatMinutes } from '../lib/utils';
-import { Card, PageHeader, fadeUp } from '../components/ui/Primitives';
+import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
+import { computeAggregateAccuracy } from '../lib/mockTestStats';
+import { SUBJECT_COLORS, formatMinutes, cx } from '../lib/utils';
+import { Card, Badge, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
 function lastNDays(n: number) {
   const days: string[] = [];
@@ -34,6 +37,13 @@ export default function Analytics() {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
   const studyLog = useAppStore((s) => s.studyLog);
+  const rewardUnlocks = useAppStore((s) => s.rewardUnlocks);
+  const gami = useGamification();
+  const rewards = useRewards();
+
+  const recentlyUnlocked = [...rewards.unlocked]
+    .filter((r) => rewardUnlocks[r.id])
+    .sort((a, b) => (rewardUnlocks[b.id] > rewardUnlocks[a.id] ? 1 : -1))[0];
 
   const totalTopics = getAllTopicsCount();
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
@@ -65,18 +75,13 @@ export default function Analytics() {
 
   const totalFocusMinutes = Object.values(studyLog).reduce((sum, e) => sum + e.focusMinutes, 0);
   const totalTestsTaken = attempts.length;
-  const avgAccuracy =
-    attempts.length > 0
-      ? Math.round(
-          (attempts.reduce((s, a) => s + (a.correctCount / Math.max(1, a.correctCount + a.wrongCount)) * 100, 0) / attempts.length) * 10,
-        ) / 10
-      : 0;
+  const avgAccuracy = computeAggregateAccuracy(attempts);
 
   return (
     <div>
       <PageHeader eyebrow="Insights" title="Analytics" description="Track your preparation trends across syllabus coverage, study time and test performance." />
 
-      <motion.div {...fadeUp} className="grid gap-4 sm:grid-cols-3 mb-6">
+      <motion.div {...fadeUp} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <Card className="p-5">
           <p className="text-xs text-slate-400 mb-1">Total Focused Time</p>
           <p className="font-display text-2xl font-bold text-slate-900 dark:text-white">{formatMinutes(totalFocusMinutes)}</p>
@@ -88,6 +93,12 @@ export default function Analytics() {
         <Card className="p-5">
           <p className="text-xs text-slate-400 mb-1">Average Accuracy</p>
           <p className="font-display text-2xl font-bold text-slate-900 dark:text-white">{avgAccuracy}%</p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-xs text-slate-400 mb-1">Level & XP</p>
+          <p className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+            {gami.level.level} <span className="text-sm font-medium text-slate-400">· {gami.xp} XP</span>
+          </p>
         </Card>
       </motion.div>
 
@@ -168,6 +179,99 @@ export default function Analytics() {
           </Card>
         </motion.div>
       </div>
+
+      <motion.div {...fadeUp} className="mt-6">
+        <Card className="p-5 sm:p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Rewards</h3>
+            <div className="flex items-center gap-2">
+              {rewards.currentTitle && <Badge tone="brand">{rewards.currentTitle}</Badge>}
+              <Badge tone="gold">
+                <Gem className="h-3 w-3" /> {rewards.unlocked.length}/{REWARDS.length} unlocked
+              </Badge>
+            </div>
+          </div>
+
+          {recentlyUnlocked && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl bg-gold-50 dark:bg-gold-500/10 border border-gold-200/60 dark:border-gold-500/20 px-3.5 py-2.5 text-xs text-gold-800 dark:text-gold-300">
+              <Star className="h-3.5 w-3.5 shrink-0" />
+              Most recent: <span className="font-medium">{recentlyUnlocked.title}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 mb-4">
+            {REWARDS.map((reward) => {
+              const earned = rewards.unlocked.some((r) => r.id === reward.id);
+              return (
+                <div
+                  key={reward.id}
+                  className={cx(
+                    'flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center',
+                    earned
+                      ? 'border-brand-300/60 bg-brand-50 dark:bg-brand-500/10 dark:border-brand-500/30'
+                      : 'border-slate-200 dark:border-slate-800 opacity-60',
+                  )}
+                >
+                  {earned ? (
+                    reward.kind === 'title' ? (
+                      <Star className="h-5 w-5 text-brand-500" />
+                    ) : (
+                      <Gem className="h-5 w-5 text-brand-500" />
+                    )
+                  ) : (
+                    <Lock className="h-5 w-5 text-slate-300 dark:text-slate-600" />
+                  )}
+                  <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{reward.title}</p>
+                  <p className="text-[11px] text-slate-400 leading-tight">{reward.description}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {rewards.nextReward && (
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-xs">
+                <span className="text-slate-500 dark:text-slate-400">
+                  Next: <span className="font-medium text-slate-700 dark:text-slate-200">{rewards.nextReward.title}</span>
+                </span>
+                <span className="text-slate-400">{Math.round(rewards.nextReward.progress(rewards.context))}%</span>
+              </div>
+              <ProgressBar value={rewards.nextReward.progress(rewards.context)} colorClassName="bg-brand-500" height="h-1.5" />
+            </div>
+          )}
+        </Card>
+      </motion.div>
+
+      <motion.div {...fadeUp} className="mt-6">
+        <Card className="p-5 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Achievements</h3>
+            <Badge tone="gold">
+              <Trophy className="h-3 w-3" /> {gami.earnedBadges.length}/{BADGES.length} earned
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {BADGES.map((badge) => {
+              const earned = gami.earnedBadges.some((b) => b.id === badge.id);
+              return (
+                <div
+                  key={badge.id}
+                  className={cx(
+                    'flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center',
+                    earned
+                      ? 'border-gold-300/60 bg-gold-50 dark:bg-gold-500/10 dark:border-gold-500/30'
+                      : 'border-slate-200 dark:border-slate-800 opacity-60',
+                  )}
+                >
+                  {earned ? <Award className="h-5 w-5 text-gold-500" /> : <Lock className="h-5 w-5 text-slate-300 dark:text-slate-600" />}
+                  <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{badge.title}</p>
+                  <p className="text-[11px] text-slate-400 leading-tight">{badge.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </motion.div>
     </div>
   );
 }
