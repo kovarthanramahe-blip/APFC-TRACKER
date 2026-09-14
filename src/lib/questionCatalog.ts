@@ -12,9 +12,12 @@ import { toPyqProvenance, isPyqProvenance } from './practiceQuestion';
 import { TOPIC_TITLES } from './pyqPerformance';
 
 /** The common shape both question sources are mapped into. Deliberately minimal — just what a
- * catalog listing/session screen needs regardless of source; anything source-specific beyond
- * provenance (e.g. a PYQ's subtopic, a Question's difficulty) is left on the original record for
- * whichever later stage actually renders per-source detail. */
+ * catalog listing/session screen needs regardless of source; anything else source-specific (e.g. a
+ * PYQ's subtopic) is left on the original record for whichever later stage renders per-source
+ * detail. `difficulty` is the one exception: it's optional (present only for practice-bank
+ * entries, which is all Question ever had) rather than omitted entirely, so an existing
+ * difficulty filter/display can keep working over the unified list without fabricating a
+ * difficulty for PYQs, which never had one. */
 export interface CatalogQuestion {
   id: string;
   subject: PYQ['subject'];
@@ -27,6 +30,7 @@ export interface CatalogQuestion {
   options: QuestionOption[];
   correctOptionId: string;
   explanation: string;
+  difficulty?: Question['difficulty'];
   provenance: QuestionProvenance;
 }
 
@@ -57,6 +61,7 @@ export function questionToCatalogQuestion(q: Question): CatalogQuestion {
     options: q.options,
     correctOptionId: q.correctOptionId,
     explanation: q.explanation,
+    difficulty: q.difficulty,
     provenance: { kind: 'practice_bank', tag: q.tag },
   };
 }

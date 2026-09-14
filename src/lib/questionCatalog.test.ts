@@ -68,6 +68,10 @@ describe('pyqToCatalogQuestion', () => {
     pyqToCatalogQuestion(q);
     expect(JSON.stringify(q)).toBe(snapshot);
   });
+
+  it('never carries a difficulty — PYQ never had one', () => {
+    expect(pyqToCatalogQuestion(pyq()).difficulty).toBeUndefined();
+  });
 });
 
 describe('questionToCatalogQuestion', () => {
@@ -82,8 +86,13 @@ describe('questionToCatalogQuestion', () => {
       options: q.options,
       correctOptionId: 'q-1-o0',
       explanation: 'Because Right.',
+      difficulty: 'Medium',
       provenance: { kind: 'practice_bank', tag: 'PYQ-Style' },
     });
+  });
+
+  it('carries difficulty through, unlike a PYQ entry which never has one', () => {
+    expect(questionToCatalogQuestion(question({ difficulty: 'Hard' })).difficulty).toBe('Hard');
   });
 
   it('carries the Practice tag through as-is', () => {
