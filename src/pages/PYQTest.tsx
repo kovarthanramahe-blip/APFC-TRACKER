@@ -37,27 +37,17 @@ import {
   getVerificationNotice,
   type RevisionFilter,
 } from '../lib/pyqFilters';
+import {
+  computePyqPerformance,
+  pyqQuestionStatus as statusOf,
+  TOPIC_TITLES,
+  MARKS_CORRECT,
+  MARKS_WRONG,
+  type PyqQuestionStatus as QuestionStatus,
+} from '../lib/pyqPerformance';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
-
-// APFC 2025 marking scheme: +2.5 for correct, -1/3rd (given as -0.833333) for wrong, 0 for unanswered.
-const MARKS_CORRECT = 2.5;
-const MARKS_WRONG = -0.833333;
-
-// topicId -> topic title / subject, built once from the existing syllabus (not modified).
-const TOPIC_TITLES: Record<string, string> = Object.fromEntries(SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, t.title])));
-const TOPIC_SUBJECTS: Record<string, SubjectColorKey> = Object.fromEntries(
-  SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, s.colorKey])),
-);
-
-type QuestionStatus = 'correct' | 'wrong' | 'unanswered';
-
-function statusOf(q: PYQ, answers: Record<string, string | null>): QuestionStatus {
-  const ans = answers[q.id];
-  if (!ans) return 'unanswered';
-  return ans === q.correctOptionId ? 'correct' : 'wrong';
-}
 
 // Every one of these is derived from PYQ_BANK via the pure helpers in lib/pyqFilters — no year,
 // subject or topic (or their counts) is ever hardcoded, so a future data import shows up automatically.
@@ -270,130 +260,9 @@ export default function PYQTest() {
     setPhase('testing');
   }
 
-  // Performance analytics, derived entirely from the existing PYQAttempt[] — no new
-  // persisted data. Subject/topic are resolved per-question from PYQ_BANK (the
-  // existing single source of truth), never from an attempt's own subject/topicId
-  // filter fields — those are just the selection used to build the test and are
-  // 'all' for mixed/full tests, so using them directly would misattribute every
-  // question in a mixed test to one subject/topic.
-  const performance = useMemo(() => {
-    if (pyqAttempts.length === 0) return null;
-
-    let totalQuestions = 0;
-    let totalCorrect = 0;
-    let totalWrong = 0;
-    let totalUnanswered = 0;
-    let totalScore = 0;
-
-    const subjectAgg = new Map<SubjectColorKey, { attempted: number; correct: number; wrong: number; testIds: Set<string> }>();
-    const topicAgg = new Map<string, { attempted: number; correct: number; wrong: number }>();
-    const yearAgg = new Map<number, { attempted: number; correct: number; wrong: number; testIds: Set<string> }>();
-
-    for (const attempt of pyqAttempts) {
-      totalQuestions += attempt.questionIds.length;
-      totalCorrect += attempt.correctCount;
-      totalWrong += attempt.wrongCount;
-      totalUnanswered += attempt.unansweredCount;
-      totalScore += attempt.score;
-
-      for (const qid of attempt.questionIds) {
-        const pyq = PYQ_BANK.find((p) => p.id === qid);
-        if (!pyq) continue; // defensive: skip if a question id can't be resolved
-        const ans = attempt.answers[qid];
-        const status: QuestionStatus = !ans ? 'unanswered' : ans === pyq.correctOptionId ? 'correct' : 'wrong';
-
-        const subjEntry = subjectAgg.get(pyq.subject) ?? { attempted: 0, correct: 0, wrong: 0, testIds: new Set<string>() };
-        subjEntry.testIds.add(attempt.id);
-        if (status !== 'unanswered') {
-          subjEntry.attempted += 1;
-          if (status === 'correct') subjEntry.correct += 1;
-          else subjEntry.wrong += 1;
-        }
-        subjectAgg.set(pyq.subject, subjEntry);
-
-        if (status !== 'unanswered') {
-          const topicEntry = topicAgg.get(pyq.topicId) ?? { attempted: 0, correct: 0, wrong: 0 };
-          topicEntry.attempted += 1;
-          if (status === 'correct') topicEntry.correct += 1;
-          else topicEntry.wrong += 1;
-          topicAgg.set(pyq.topicId, topicEntry);
-        }
-
-        // Resolved from PYQ_BANK, never from attempt.year — attempt.year is only the
-        // selection filter used to build the test (it's 'all' for a mixed-year test),
-        // so trusting it directly would misattribute every question in such a test to
-        // one year, exactly the bug the subject/topic aggregates above already avoid.
-        const yearEntry = yearAgg.get(pyq.year) ?? { attempted: 0, correct: 0, wrong: 0, testIds: new Set<string>() };
-        yearEntry.testIds.add(attempt.id);
-        if (status !== 'unanswered') {
-          yearEntry.attempted += 1;
-          if (status === 'correct') yearEntry.correct += 1;
-          else yearEntry.wrong += 1;
-        }
-        yearAgg.set(pyq.year, yearEntry);
-      }
-    }
-
-    const totalAttempted = totalCorrect + totalWrong;
-
-    const overall = {
-      testsCompleted: pyqAttempts.length,
-      totalQuestions,
-      totalAttempted,
-      totalCorrect,
-      totalWrong,
-      totalUnanswered,
-      overallAccuracy: totalAttempted > 0 ? (totalCorrect / totalAttempted) * 100 : 0,
-      averageScore: totalScore / pyqAttempts.length,
-    };
-
-    const subjects = Array.from(subjectAgg.entries())
-      .map(([subj, v]) => ({
-        subject: subj,
-        subjectTitle: SYLLABUS.find((s) => s.colorKey === subj)?.shortTitle ?? subj,
-        attempted: v.attempted,
-        correct: v.correct,
-        wrong: v.wrong,
-        accuracy: v.attempted > 0 ? (v.correct / v.attempted) * 100 : 0,
-        testCount: v.testIds.size,
-      }))
-      .sort((a, b) => a.subjectTitle.localeCompare(b.subjectTitle));
-
-    const allTopics = Array.from(topicAgg.entries()).map(([topicId, v]) => {
-      const subj = TOPIC_SUBJECTS[topicId];
-      return {
-        topicId,
-        topicTitle: TOPIC_TITLES[topicId] ?? topicId,
-        subject: subj,
-        subjectTitle: subj ? SYLLABUS.find((s) => s.colorKey === subj)?.shortTitle ?? subj : '—',
-        attempted: v.attempted,
-        correct: v.correct,
-        wrong: v.wrong,
-        accuracy: v.attempted > 0 ? (v.correct / v.attempted) * 100 : 0,
-      };
-    });
-
-    const topics = [...allTopics].sort((a, b) => a.topicTitle.localeCompare(b.topicTitle));
-
-    // Weakest first; ties broken alphabetically by topic title for a stable, deterministic order.
-    const weakTopics = [...allTopics].sort((a, b) => a.accuracy - b.accuracy || a.topicTitle.localeCompare(b.topicTitle)).slice(0, 6);
-    // Strongest first; same tie-break, same "must have at least one attempted question" pool as weakTopics.
-    const strongestTopics = [...allTopics].sort((a, b) => b.accuracy - a.accuracy || a.topicTitle.localeCompare(b.topicTitle)).slice(0, 6);
-
-    const years = Array.from(yearAgg.entries())
-      .map(([y, v]) => ({
-        year: y,
-        attempted: v.attempted,
-        correct: v.correct,
-        wrong: v.wrong,
-        accuracy: v.attempted > 0 ? (v.correct / v.attempted) * 100 : 0,
-        score: v.correct * MARKS_CORRECT + v.wrong * MARKS_WRONG,
-        testCount: v.testIds.size,
-      }))
-      .sort((a, b) => a.year - b.year);
-
-    return { overall, subjects, topics, weakTopics, strongestTopics, years };
-  }, [pyqAttempts]);
+  // Performance analytics — delegates to the shared lib/pyqPerformance helper so this view and
+  // the Analytics page's "PYQ Performance" section always agree (see computePyqPerformance).
+  const performance = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
 
   if (phase === 'select') {
     return (

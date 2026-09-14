@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import {
   LineChart,
   Line,
@@ -14,13 +15,15 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { Award, Lock, Trophy, Gem, Star } from 'lucide-react';
+import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
 import { computeAggregateAccuracy } from '../lib/mockTestStats';
+import { computePyqPerformance } from '../lib/pyqPerformance';
 import { SUBJECT_COLORS, formatMinutes, cx } from '../lib/utils';
-import { Card, Badge, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
+import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
 function lastNDays(n: number) {
   const days: string[] = [];
@@ -36,10 +39,15 @@ function lastNDays(n: number) {
 export default function Analytics() {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
+  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const studyLog = useAppStore((s) => s.studyLog);
   const rewardUnlocks = useAppStore((s) => s.rewardUnlocks);
   const gami = useGamification();
   const rewards = useRewards();
+
+  // Same computePyqPerformance helper PYQTest.tsx's own "Performance" view uses — one source of
+  // truth for PYQ aggregation, so the two views can never disagree.
+  const pyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
 
   const recentlyUnlocked = [...rewards.unlocked]
     .filter((r) => rewardUnlocks[r.id])
@@ -183,6 +191,112 @@ export default function Analytics() {
       <motion.div {...fadeUp} className="mt-6">
         <Card className="p-5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">PYQ Performance</h3>
+            </div>
+            <Link to="/pyq-test">
+              <Button variant="secondary" size="sm">
+                Practice PYQs <ArrowUpRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          </div>
+
+          {!pyqPerf ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <ListChecks className="h-8 w-8 text-slate-300 dark:text-slate-700 mb-2" />
+              <p className="text-sm text-slate-400">Take a PYQ test to see your performance here.</p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <PyqStat label="Attempted" value={`${pyqPerf.overall.totalAttempted}`} />
+                <PyqStat label="Accuracy" value={`${pyqPerf.overall.overallAccuracy.toFixed(1)}%`} tone="brand" />
+                <PyqStat label="Tests Taken" value={`${pyqPerf.overall.testsCompleted}`} />
+                <PyqStat label="Remaining" value={`${pyqPerf.unattemptedCount}`} />
+                <PyqStat label="Best Subject" value={pyqPerf.strongestSubject?.subjectTitle ?? '—'} tone="success" small />
+                <PyqStat label="Weakest Subject" value={pyqPerf.weakestSubject?.subjectTitle ?? '—'} tone="danger" small />
+              </div>
+
+              {pyqPerf.years.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">By Year</p>
+                  <div className="space-y-2">
+                    {pyqPerf.years.map((y) => (
+                      <div
+                        key={y.year}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 text-xs"
+                      >
+                        <Badge tone="neutral">{y.year}</Badge>
+                        <div className="flex flex-wrap items-center gap-3 text-slate-500 dark:text-slate-400">
+                          <span>{y.attempted} attempted</span>
+                          <span className="text-emerald-600 dark:text-emerald-400">{y.correct} correct</span>
+                          <span className="text-rose-600 dark:text-rose-400">{y.wrong} wrong</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{y.accuracy.toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {pyqPerf.subjects.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">By Subject</p>
+                  <div className="space-y-2">
+                    {pyqPerf.subjects.map((s) => (
+                      <div key={s.subject} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{s.subjectTitle}</span>
+                        <div className="flex shrink-0 items-center gap-3 text-slate-400">
+                          <span>{s.attempted} attempted</span>
+                          <Badge tone={s.accuracy >= 60 ? 'success' : s.accuracy > 0 ? 'danger' : 'neutral'}>
+                            {s.attempted > 0 ? `${s.accuracy.toFixed(1)}%` : '—'}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(pyqPerf.weakTopics.length > 0 || pyqPerf.strongestTopics.length > 0) && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <TrendingDown className="h-3.5 w-3.5 text-rose-500" /> Needs Improvement
+                    </div>
+                    <ul className="space-y-2">
+                      {pyqPerf.weakTopics.slice(0, 4).map((t) => (
+                        <li key={t.topicId} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{t.topicTitle}</span>
+                          <Badge tone="danger">{t.accuracy.toFixed(0)}%</Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <TrendingUp className="h-3.5 w-3.5 text-emerald-500" /> Strongest
+                    </div>
+                    <ul className="space-y-2">
+                      {pyqPerf.strongestTopics.slice(0, 4).map((t) => (
+                        <li key={t.topicId} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{t.topicTitle}</span>
+                          <Badge tone="success">{t.accuracy.toFixed(0)}%</Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      </motion.div>
+
+      <motion.div {...fadeUp} className="mt-6">
+        <Card className="p-5 sm:p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Rewards</h3>
             <div className="flex items-center gap-2">
               {rewards.currentTitle && <Badge tone="brand">{rewards.currentTitle}</Badge>}
@@ -272,6 +386,31 @@ export default function Analytics() {
           </div>
         </Card>
       </motion.div>
+    </div>
+  );
+}
+
+function PyqStat({
+  label,
+  value,
+  tone = 'neutral',
+  small = false,
+}: {
+  label: string;
+  value: string;
+  tone?: 'neutral' | 'brand' | 'success' | 'danger';
+  small?: boolean;
+}) {
+  const tones: Record<string, string> = {
+    neutral: 'text-slate-800 dark:text-slate-100',
+    brand: 'text-brand-600 dark:text-brand-400',
+    success: 'text-emerald-600 dark:text-emerald-400',
+    danger: 'text-rose-600 dark:text-rose-400',
+  };
+  return (
+    <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
+      <p className={cx('font-display font-bold leading-tight truncate', small ? 'text-sm' : 'text-lg', tones[tone])}>{value}</p>
+      <p className="text-[11px] text-slate-400 mt-1">{label}</p>
     </div>
   );
 }
