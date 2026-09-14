@@ -1,16 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle } from 'lucide-react';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
+import { PYQ_BANK } from '../data/pyq';
 import { useAppStore } from '../lib/store';
+import { computePyqPerformance } from '../lib/pyqPerformance';
+import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, ProgressBar, Button, PageHeader } from '../components/ui/Primitives';
 
 export default function Syllabus() {
   const completedTopics = useAppStore((s) => s.completedTopics);
+  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const toggleTopic = useAppStore((s) => s.toggleTopic);
   const markSubjectTopics = useAppStore((s) => s.markSubjectTopics);
+
+  // Same unified topic-status source of truth as Dashboard/Analytics (lib/topicStatus) — a topic
+  // covered here but flagged elsewhere as weak from real PYQ performance must show that here too,
+  // otherwise the checkmark alone would misleadingly read as "done".
+  const needsRevisionTopicIds = useMemo(() => {
+    const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
+    const statuses = computeUnifiedTopicStatus(SYLLABUS, completedTopics, pyqPerf);
+    return new Set(statuses.filter((t) => t.status === 'needs_revision').map((t) => t.topicId));
+  }, [completedTopics, pyqAttempts]);
 
   // Deep-link support: "Study this topic" from a PYQ review arrives as /syllabus?topicId=...
   const [searchParams] = useSearchParams();
@@ -160,6 +173,14 @@ export default function Syllabus() {
                                   {topic.title}
                                 </span>
                               </button>
+                              {needsRevisionTopicIds.has(topic.id) && (
+                                <span
+                                  title="Covered, but recent PYQ accuracy on this topic is weak — worth revising"
+                                  className="shrink-0 rounded-lg p-2 text-amber-500 dark:text-amber-400"
+                                >
+                                  <AlertTriangle className="h-4 w-4" />
+                                </span>
+                              )}
                               <Link
                                 to={`/notes?topicId=${encodeURIComponent(topic.id)}`}
                                 title="Notes for this topic"

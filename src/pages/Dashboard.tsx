@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy, Quote as QuoteIcon, RefreshCcw, ListChecks } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { useGamification, useRewards, getEncouragementMessage } from '../lib/gamification';
+import { computePyqPerformance } from '../lib/pyqPerformance';
+import { computeUnifiedTopicStatus, sortByAttentionPriority, type TopicStatus } from '../lib/topicStatus';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
@@ -49,12 +52,16 @@ export default function Dashboard() {
 
   const totalFocusMinutes = sessions.filter((s) => s.mode === 'focus').reduce((sum, s) => sum + s.durationMinutes, 0);
 
-  const weakSubjects = SYLLABUS.map((subj) => {
-    const done = subj.topics.filter((t) => completedTopics[t.id]).length;
-    return { subj, pct: subj.topics.length ? done / subj.topics.length : 0 };
-  })
-    .sort((a, b) => a.pct - b.pct)
-    .slice(0, 4);
+  // Unified topic status: combines syllabus coverage + real PYQ performance (lib/topicStatus),
+  // the same single source of truth used by Analytics and Syllabus, so "Needs Attention" here
+  // never disagrees with what those pages show for the same topic.
+  const pyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
+  const attentionTopics = useMemo(() => {
+    const statuses = computeUnifiedTopicStatus(SYLLABUS, completedTopics, pyqPerf);
+    return sortByAttentionPriority(statuses)
+      .filter((t) => t.status !== 'strong')
+      .slice(0, 5);
+  }, [completedTopics, pyqPerf]);
 
   const recentAttempts = attempts.slice(0, 3);
 
@@ -169,7 +176,7 @@ export default function Dashboard() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Subject progress */}
-        <motion.div {...fadeUp} className="lg:col-span-2">
+        <motion.div {...fadeUp} className="min-w-0 lg:col-span-2">
           <Card className="p-5 sm:p-6 h-full">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Subject-wise Progress</h3>
@@ -202,7 +209,7 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Focus + weak areas */}
-        <motion.div {...fadeUp} className="space-y-6">
+        <motion.div {...fadeUp} className="min-w-0 space-y-6">
           <Card className="p-5 sm:p-6">
             <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Study Time</h3>
             <div className="flex items-baseline gap-2">
@@ -215,15 +222,39 @@ export default function Dashboard() {
           </Card>
 
           <Card className="p-5 sm:p-6">
-            <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Needs Attention</h3>
-            <ul className="space-y-3">
-              {weakSubjects.map(({ subj, pct }) => (
-                <li key={subj.id} className="flex items-center justify-between text-sm">
-                  <span className="text-slate-600 dark:text-slate-300">{subj.shortTitle}</span>
-                  <Badge tone={pct < 0.3 ? 'danger' : 'neutral'}>{Math.round(pct * 100)}%</Badge>
-                </li>
-              ))}
-            </ul>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Needs Attention</h3>
+              <Link to="/syllabus" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                Study topics
+              </Link>
+            </div>
+            {attentionTopics.length === 0 ? (
+              <p className="text-sm text-slate-400 dark:text-slate-500">
+                {getAllTopicsCount() > 0 ? 'Nice work — every topic is in good shape.' : 'Add syllabus topics to see this here.'}
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {attentionTopics.map((t) => (
+                  <li key={t.topicId}>
+                    <Link
+                      to={`/syllabus?topicId=${encodeURIComponent(t.topicId)}`}
+                      className="block rounded-lg -mx-1.5 px-1.5 py-1 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-sm text-slate-600 dark:text-slate-300">{t.topicTitle}</span>
+                        <Badge tone={ATTENTION_TONE[t.status]} className="shrink-0">
+                          {ATTENTION_LABEL[t.status]}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {t.covered ? 'Covered' : 'Not covered'}
+                        {t.pyqAttempted > 0 ? ` · ${t.pyqAccuracy!.toFixed(0)}% PYQ accuracy (${t.pyqAttempted} attempted)` : ' · No PYQ practice yet'}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </motion.div>
       </div>
@@ -263,6 +294,22 @@ export default function Dashboard() {
     </div>
   );
 }
+
+const ATTENTION_LABEL: Record<TopicStatus, string> = {
+  needs_coverage: 'Needs Coverage',
+  not_started: 'Not Started',
+  needs_practice: 'Needs Practice',
+  needs_revision: 'Needs Revision',
+  strong: 'Strong',
+};
+
+const ATTENTION_TONE: Record<TopicStatus, 'danger' | 'neutral' | 'warning' | 'success'> = {
+  needs_coverage: 'danger',
+  not_started: 'neutral',
+  needs_practice: 'warning',
+  needs_revision: 'warning',
+  strong: 'success',
+};
 
 function StatTile({
   icon: Icon,

@@ -22,6 +22,7 @@ import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
 import { computeAggregateAccuracy } from '../lib/mockTestStats';
 import { computePyqPerformance } from '../lib/pyqPerformance';
+import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { SUBJECT_COLORS, formatMinutes, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
@@ -48,6 +49,14 @@ export default function Analytics() {
   // Same computePyqPerformance helper PYQTest.tsx's own "Performance" view uses — one source of
   // truth for PYQ aggregation, so the two views can never disagree.
   const pyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
+
+  // Connects the "Needs Improvement" ranking (pure PYQ accuracy, unchanged) to the unified
+  // topic-status verdict (lib/topicStatus) — a low accuracy from only 1-2 questions isn't the
+  // same actionable signal as a genuinely low accuracy over many, so the two are labeled distinctly.
+  const unifiedByTopic = useMemo(() => {
+    const statuses = computeUnifiedTopicStatus(SYLLABUS, completedTopics, pyqPerf);
+    return new Map(statuses.map((t) => [t.topicId, t.status]));
+  }, [completedTopics, pyqPerf]);
 
   const recentlyUnlocked = [...rewards.unlocked]
     .filter((r) => rewardUnlocks[r.id])
@@ -266,12 +275,21 @@ export default function Analytics() {
                       <TrendingDown className="h-3.5 w-3.5 text-rose-500" /> Needs Improvement
                     </div>
                     <ul className="space-y-2">
-                      {pyqPerf.weakTopics.slice(0, 4).map((t) => (
-                        <li key={t.topicId} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{t.topicTitle}</span>
-                          <Badge tone="danger">{t.accuracy.toFixed(0)}%</Badge>
-                        </li>
-                      ))}
+                      {pyqPerf.weakTopics.slice(0, 4).map((t) => {
+                        const unified = unifiedByTopic.get(t.topicId);
+                        const lowSample = unified === 'needs_practice';
+                        return (
+                          <li key={t.topicId}>
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{t.topicTitle}</span>
+                              <Badge tone={lowSample ? 'warning' : 'danger'}>{t.accuracy.toFixed(0)}%</Badge>
+                            </div>
+                            <p className="mt-0.5 text-[11px] text-slate-400">
+                              {lowSample ? `Low sample (${t.attempted} attempted) — practice more before judging` : 'Needs revision'}
+                            </p>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                   <div>
