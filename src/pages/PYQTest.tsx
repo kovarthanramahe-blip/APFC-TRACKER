@@ -48,6 +48,8 @@ import {
   type PyqQuestionStatus as QuestionStatus,
 } from '../lib/pyqPerformance';
 import { getDueItems } from '../lib/revisionQueue';
+import { computeUnifiedTopicStatus } from '../lib/topicStatus';
+import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
@@ -92,6 +94,7 @@ export default function PYQTest() {
   const revisionQueue = useAppStore((s) => s.revisionQueue);
   const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
   const recordRevisionIncorrect = useAppStore((s) => s.recordRevisionIncorrect);
+  const completedTopics = useAppStore((s) => s.completedTopics);
 
   const [phase, setPhase] = useState<Phase>('select');
 
@@ -108,6 +111,9 @@ export default function PYQTest() {
   // Guards against saving more than one attempt record per submitted test,
   // even if the results screen is somehow re-entered/re-rendered.
   const submittedRef = useRef(false);
+  // Weak-Topic Practice (Stage 2) — purely a display flag so the shared testing/results screens
+  // can show "Weak Topics Practice"; it never changes what those screens do, only what they show.
+  const [isWeakTopicSession, setIsWeakTopicSession] = useState(false);
 
   // Per-question revision status, derived entirely from the existing PYQAttempt[] — no new
   // persisted data. See computeRevisionStatusMap in lib/pyqFilters for the exact rule (most
@@ -164,6 +170,7 @@ export default function PYQTest() {
     const n = countChoice === 'all' ? filtered.length : Math.min(countChoice, filtered.length);
     const selected = shuffle(filtered).slice(0, n);
     submittedRef.current = false;
+    setIsWeakTopicSession(false);
     setQuestions(selected);
     setAnswers({});
     setCurrent(0);
@@ -214,6 +221,7 @@ export default function PYQTest() {
     setAnswers({});
     setCurrent(0);
     setReviewIndex(0);
+    setIsWeakTopicSession(false);
     setPhase('select');
   }
 
@@ -223,6 +231,7 @@ export default function PYQTest() {
   function openAttempt(attempt: PYQAttempt) {
     const qs = attempt.questionIds.map((id) => PYQ_BANK.find((p) => p.id === id)).filter((q): q is PYQ => !!q);
     submittedRef.current = true;
+    setIsWeakTopicSession(false);
     setQuestions(qs);
     setAnswers(attempt.answers);
     setCurrent(0);
@@ -260,6 +269,7 @@ export default function PYQTest() {
   function practiceBookmarked() {
     if (bookmarkedQuestions.length === 0) return;
     submittedRef.current = false;
+    setIsWeakTopicSession(false);
     setQuestions(bookmarkedQuestions);
     setAnswers({});
     setCurrent(0);
@@ -269,6 +279,32 @@ export default function PYQTest() {
   // Performance analytics — delegates to the shared lib/pyqPerformance helper so this view and
   // the Analytics page's "PYQ Performance" section always agree (see computePyqPerformance).
   const performance = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
+
+  // Weak-Topic Practice (Stage 2) — reuses the exact same unified topic-status engine
+  // (lib/topicStatus) Dashboard/Analytics/Exam Readiness already use, and the pure
+  // selectWeakTopicPracticeIds selector (lib/weakTopicPractice, Stage 1) verbatim — no second
+  // topic-strength or selection calculation happens here.
+  const topicStatuses = useMemo(() => computeUnifiedTopicStatus(SYLLABUS, completedTopics, performance), [completedTopics, performance]);
+  const weakTopicPracticeIds = useMemo(() => selectWeakTopicPracticeIds(topicStatuses, PYQ_BANK), [topicStatuses]);
+  const weakTopicQuestions = useMemo(
+    () => weakTopicPracticeIds.map((id) => PYQ_BANK.find((p) => p.id === id)).filter((q): q is PYQ => !!q),
+    [weakTopicPracticeIds],
+  );
+
+  // Frozen snapshot at click time — the selector isn't re-run as answers come in, same
+  // "freeze at session start" convention Revise Now already established for its own due list.
+  // Reuses the exact same testing/results/review engine as every other entry point below (normal
+  // tests, Retry Wrong, Practice Bookmarked) — no second question/session engine, and the resulting
+  // PYQAttempt is saved through the same handleSubmit path with unchanged attempt semantics.
+  function practiceWeakTopics() {
+    if (weakTopicQuestions.length === 0) return;
+    submittedRef.current = false;
+    setIsWeakTopicSession(true);
+    setQuestions(weakTopicQuestions);
+    setAnswers({});
+    setCurrent(0);
+    setPhase('testing');
+  }
 
   // Revision queue (Stage 2) — eligibility (incorrect OR bookmarked) is derived live here, never
   // stored: as soon as a question becomes incorrect or gets bookmarked it's automatically
@@ -348,6 +384,9 @@ export default function PYQTest() {
               <Button variant="secondary" onClick={() => setPhase('bookmarks')}>
                 <Star className={cx('h-4 w-4', bookmarkedQuestions.length > 0 && 'fill-gold-400 text-gold-500')} />
                 Bookmarked PYQs{bookmarkedQuestions.length > 0 ? ` (${bookmarkedQuestions.length})` : ''}
+              </Button>
+              <Button variant="secondary" onClick={practiceWeakTopics} disabled={weakTopicQuestions.length === 0}>
+                <TrendingDown className="h-4 w-4" /> Practice Weak Topics{weakTopicQuestions.length > 0 ? ` (${weakTopicQuestions.length})` : ''}
               </Button>
               <Button onClick={startRevision} disabled={dueRevisionItems.length === 0}>
                 <Brain className="h-4 w-4" /> Revise Now{dueRevisionItems.length > 0 ? ` (${dueRevisionItems.length})` : ''}
@@ -795,6 +834,14 @@ export default function PYQTest() {
       <div className="mx-auto max-w-2xl">
         <PageHeader eyebrow="Previous Year Questions" title="Results" description="Here's how your PYQ practice session went." />
 
+        {isWeakTopicSession && (
+          <div className="mb-3">
+            <Badge tone="brand">
+              <TrendingDown className="h-3 w-3" /> Weak Topics Practice
+            </Badge>
+          </div>
+        )}
+
         <Card className="mb-5 p-5 sm:p-6 text-center">
           <Trophy className="mx-auto h-8 w-8 text-gold-500" />
           <p className="mt-2 text-xs text-slate-400">Score</p>
@@ -963,6 +1010,13 @@ export default function PYQTest() {
 
   return (
     <div className="mx-auto max-w-2xl">
+      {isWeakTopicSession && (
+        <div className="mb-3">
+          <Badge tone="brand">
+            <TrendingDown className="h-3 w-3" /> Weak Topics Practice
+          </Badge>
+        </div>
+      )}
       <div className="mb-4 flex items-center justify-between">
         <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
           Question {current + 1} of {questions.length}
