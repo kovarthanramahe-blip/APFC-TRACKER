@@ -30,6 +30,7 @@ import { computeDailyStudyQueue, type DailyQueueInput, type DailyQueueItem, type
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from '../lib/pyqFilters';
 import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
 import { computeExamReadiness, type ExamReadinessReport, type DimensionScore, type ExamReadinessVerdict } from '../lib/examReadiness';
+import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
@@ -85,12 +86,17 @@ export default function Dashboard() {
   // the same single source of truth used by Analytics and Syllabus, so "Needs Attention" here
   // never disagrees with what those pages show for the same topic.
   const pyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
-  const attentionTopics = useMemo(() => {
-    const statuses = computeUnifiedTopicStatus(SYLLABUS, completedTopics, pyqPerf);
-    return sortByAttentionPriority(statuses)
-      .filter((t) => t.status !== 'strong')
-      .slice(0, 5);
-  }, [completedTopics, pyqPerf]);
+  const topicStatuses = useMemo(() => computeUnifiedTopicStatus(SYLLABUS, completedTopics, pyqPerf), [completedTopics, pyqPerf]);
+  const attentionTopics = useMemo(
+    () => sortByAttentionPriority(topicStatuses).filter((t) => t.status !== 'strong').slice(0, 5),
+    [topicStatuses],
+  );
+
+  // Weak-Topic Practice (Stage 3 entry points) — reuses lib/weakTopicPractice's
+  // selectWeakTopicPracticeIds (Stage 1) verbatim against the same topicStatuses computed above;
+  // no second weak-topic selection logic. Just a count, used to show/hide the "Practice Weak
+  // Topics" links below — the actual session lives entirely on the PYQs page.
+  const weakTopicPracticeIds = useMemo(() => selectWeakTopicPracticeIds(topicStatuses, PYQ_BANK), [topicStatuses]);
 
   const recentAttempts = attempts.slice(0, 3);
 
@@ -216,7 +222,7 @@ export default function Dashboard() {
 
       {/* Exam Readiness (Stage 2) */}
       <motion.div {...fadeUp}>
-        <ExamReadinessCard report={examReadiness} />
+        <ExamReadinessCard report={examReadiness} hasWeakTopicPractice={weakTopicPracticeIds.length > 0} />
       </motion.div>
 
       {/* Study progress / gamification */}
@@ -323,11 +329,18 @@ export default function Dashboard() {
           </Card>
 
           <Card className="p-5 sm:p-6">
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Needs Attention</h3>
-              <Link to="/syllabus" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
-                Study topics
-              </Link>
+              <div className="flex items-center gap-3">
+                {weakTopicPracticeIds.length > 0 && (
+                  <Link to="/pyq-test?mode=weak_topics" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                    Practice Weak Topics
+                  </Link>
+                )}
+                <Link to="/syllabus" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                  Study topics
+                </Link>
+              </div>
             </div>
             {attentionTopics.length === 0 ? (
               <p className="text-sm text-slate-400 dark:text-slate-500">
@@ -541,8 +554,13 @@ const VERDICT_META: Record<ExamReadinessVerdict, { label: string; tone: 'danger'
 /** Exam Readiness Stage 2 — a read-only capstone summary over lib/examReadiness's composite score.
  * All scoring/weighting happens in that module; this component only renders its already-computed
  * output (overallScore, verdict, weakestDimension, dimensions) — it never recomputes a score. */
-function ExamReadinessCard({ report }: { report: ExamReadinessReport }) {
+function ExamReadinessCard({ report, hasWeakTopicPractice }: { report: ExamReadinessReport; hasWeakTopicPractice: boolean }) {
   const meta = VERDICT_META[report.verdict];
+  // Stage 3 — only the 'syllabus' dimension is built from topic-strength status (lib/topicStatus),
+  // the exact same signal lib/weakTopicPractice selects PYQs from; the other four dimensions
+  // (PYQ accuracy, mock tests, plan execution, revision mastery) aren't "topic weakness" in that
+  // sense, so no practice link is shown when one of those is the weakest area.
+  const canPracticeWeakestArea = report.weakestDimension.dimension === 'syllabus' && hasWeakTopicPractice;
   return (
     <Card className="p-5 sm:p-6">
       <div className="mb-4 flex items-center justify-between">
@@ -564,6 +582,12 @@ function ExamReadinessCard({ report }: { report: ExamReadinessReport }) {
       <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
         Weakest area: <span className="font-medium text-slate-700 dark:text-slate-200">{report.weakestDimension.label}</span> — {report.weakestDimension.reason}
       </p>
+
+      {canPracticeWeakestArea && (
+        <Link to="/pyq-test?mode=weak_topics" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+          Practice Weak Topics <ArrowUpRight className="h-3 w-3" />
+        </Link>
+      )}
 
       <div className="mt-4 grid grid-cols-1 gap-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 sm:grid-cols-2">
         {report.dimensions.map((d) => (

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -97,6 +97,13 @@ export default function PYQTest() {
   const completedTopics = useAppStore((s) => s.completedTopics);
 
   const [phase, setPhase] = useState<Phase>('select');
+
+  // Deep-link support: Dashboard/Analytics/Exam Readiness link here as /pyq-test?mode=weak_topics
+  // to open the existing Practice Weak Topics session directly (see the effect below, right after
+  // weakTopicQuestions/practiceWeakTopics are defined) — reuses practiceWeakTopics() as-is, no
+  // second entry path.
+  const [searchParams] = useSearchParams();
+  const autoStartWeakTopicsRef = useRef(false);
 
   const [year, setYear] = useState<number | 'all'>(AVAILABLE_YEARS[0]);
   const [subject, setSubject] = useState<SubjectColorKey | 'all'>('all');
@@ -305,6 +312,18 @@ export default function PYQTest() {
     setCurrent(0);
     setPhase('testing');
   }
+
+  // Weak-Topic Practice (Stage 3) — /pyq-test?mode=weak_topics auto-starts the same session as the
+  // "Practice Weak Topics" button, once per page load. If there's nothing eligible yet, this simply
+  // does nothing and the user lands on the select screen, where the button itself is disabled —
+  // the same "no eligible questions" empty state as clicking it manually.
+  useEffect(() => {
+    if (autoStartWeakTopicsRef.current) return;
+    if (searchParams.get('mode') !== 'weak_topics') return;
+    autoStartWeakTopicsRef.current = true;
+    if (weakTopicQuestions.length > 0) practiceWeakTopics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, weakTopicQuestions]);
 
   // Revision queue (Stage 2) — eligibility (incorrect OR bookmarked) is derived live here, never
   // stored: as soon as a question becomes incorrect or gets bookmarked it's automatically
