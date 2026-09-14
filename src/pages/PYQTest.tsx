@@ -23,6 +23,7 @@ import { SYLLABUS } from '../data/syllabus';
 import { useAppStore } from '../lib/store';
 import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, ProgressBar } from '../components/ui/Primitives';
+import { FormattedText } from '../components/ui/FormattedText';
 import type { PYQ, PYQAttempt, SubjectColorKey } from '../lib/types';
 import {
   getAvailableYears,
@@ -806,7 +807,7 @@ export default function PYQTest() {
             </div>
             <BookmarkButton pyqId={q.id} />
           </div>
-          <p className="whitespace-pre-line text-base font-medium text-slate-800 dark:text-slate-100">{q.question}</p>
+          <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
 
           <div className="mt-5 space-y-2.5">
             {q.options.map((opt) => {
@@ -824,7 +825,7 @@ export default function PYQTest() {
                       : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300',
                   )}
                 >
-                  <span>{opt.text}</span>
+                  <FormattedText text={opt.text} className="min-w-0 flex-1" />
                   {isCorrectOpt && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />}
                   {isUserChoice && !isCorrectOpt && <XCircle className="h-4 w-4 shrink-0 text-rose-500" />}
                 </div>
@@ -834,7 +835,7 @@ export default function PYQTest() {
 
           <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-3">
             <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Explanation</p>
-            <p className="text-sm text-slate-600 dark:text-slate-300">{q.explanation}</p>
+            <FormattedText text={q.explanation} className="text-sm text-slate-600 dark:text-slate-300" />
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800 pt-4">
@@ -919,15 +920,14 @@ export default function PYQTest() {
           <Badge className={cx(colors.bg, colors.text)}>{TOPIC_TITLES[q.topicId] ?? q.subject}</Badge>
           <BookmarkButton pyqId={q.id} />
         </div>
-        <motion.p
+        <motion.div
           key={q.id}
           initial={{ opacity: 0, x: 12 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.2 }}
-          className="whitespace-pre-line text-base font-medium text-slate-800 dark:text-slate-100"
         >
-          {q.question}
-        </motion.p>
+          <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
+        </motion.div>
 
         <div className="mt-5 space-y-2.5">
           {q.options.map((opt) => {
@@ -951,7 +951,7 @@ export default function PYQTest() {
                 >
                   ●
                 </span>
-                {opt.text}
+                <FormattedText text={opt.text} className="min-w-0 flex-1" />
               </button>
             );
           })}
