@@ -13,6 +13,7 @@ import {
   Trash2,
   Plus,
   Shuffle,
+  Activity,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
@@ -40,6 +41,7 @@ import {
   MAX_TASK_MINUTES,
   type PersonalPlanTask,
 } from '../lib/studyPlanEditing';
+import { computePlanHealth, type PlanHealthReport, type PlanHealthVerdict } from '../lib/studyPlanHealth';
 import { formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 
@@ -267,6 +269,14 @@ export default function StudyPlan() {
     [plan, personalTasks],
   );
 
+  // Plan Health (Stage 5) — purely derived from current state on every render, never persisted
+  // (see lib/studyPlanHealth). Recomputed the same way generate/adapt gather their inputs.
+  const planHealth = useMemo(() => {
+    if (!plan) return null;
+    const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
+    return computePlanHealth({ plan, personalTasks, syllabus: SYLLABUS, completedTopics, pyqPerf, currentDate: todayStr() });
+  }, [plan, personalTasks, pyqAttempts, completedTopics]);
+
   const tasksByDate = useMemo(() => {
     if (!plan) return [];
     const dates = new Set([...plan.tasks.map((t) => t.date), ...personalTasks.map((t) => t.date)]);
@@ -371,6 +381,7 @@ export default function StudyPlan() {
             </div>
           )}
           {editedCapacity && <CapacitySummary plan={plan} edited={editedCapacity} generatedAt={studyPlanGeneratedAt} />}
+          {planHealth && <PlanHealthCard health={planHealth} />}
           {plan.phases.length > 0 && <PhaseList phases={plan.phases} />}
           <AddPersonalTask show={showAddPersonal} onToggle={() => setShowAddPersonal((v) => !v)} onAdd={handleAddPersonal} />
           <TaskList
@@ -512,6 +523,50 @@ function Stat({ label, value, tone = 'neutral' }: { label: string; value: string
       <p className={cx('font-display text-base font-bold', tone === 'danger' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white')}>{value}</p>
       <p className="text-[11px] text-slate-400 mt-0.5">{label}</p>
     </div>
+  );
+}
+
+const HEALTH_VERDICT_META: Record<PlanHealthVerdict, { label: string; tone: 'success' | 'warning' | 'danger' }> = {
+  on_track: { label: 'On Track', tone: 'success' },
+  tight: { label: 'Tight', tone: 'warning' },
+  at_risk: { label: 'At Risk', tone: 'warning' },
+  over_capacity: { label: 'Over Capacity', tone: 'danger' },
+  completed: { label: 'Completed', tone: 'success' },
+};
+
+function PlanHealthCard({ health }: { health: PlanHealthReport }) {
+  const meta = HEALTH_VERDICT_META[health.verdict];
+  const topBottleneck = health.bottlenecks[0]; // already sorted most-severe-first
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Activity className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Plan Health</h3>
+        </div>
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{health.message}</p>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Required/Day" value={formatMinutes(health.required.requiredMinutesPerStudyDay)} />
+        <Stat label="Available/Day" value={formatMinutes(health.required.configuredMinutesPerStudyDay)} />
+        <Stat label="Topics Remaining" value={`${health.syllabus.remainingTopics}/${health.syllabus.totalTopics}`} />
+        <Stat label="Planned Work Left" value={formatMinutes(health.required.remainingTaskMinutes)} />
+      </div>
+
+      {topBottleneck && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2.5">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{topBottleneck.title}</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">{topBottleneck.detail}</p>
+          </div>
+        </div>
+      )}
+
+      {health.recommendations[0] && <p className="mt-3 text-xs text-brand-700 dark:text-brand-300">{health.recommendations[0]}</p>}
+    </Card>
   );
 }
 
