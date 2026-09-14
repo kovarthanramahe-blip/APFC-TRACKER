@@ -24,6 +24,16 @@ import { useAppStore } from '../lib/store';
 import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, ProgressBar } from '../components/ui/Primitives';
 import type { PYQ, PYQAttempt, SubjectColorKey } from '../lib/types';
+import {
+  getAvailableYears,
+  getYearCounts,
+  formatYearLabel,
+  getSubjectCounts,
+  getTopicCounts,
+  computeRevisionStatusMap,
+  filterPYQs,
+  type RevisionFilter,
+} from '../lib/pyqFilters';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
@@ -46,18 +56,10 @@ function statusOf(q: PYQ, answers: Record<string, string | null>): QuestionStatu
   return ans === q.correctOptionId ? 'correct' : 'wrong';
 }
 
-const AVAILABLE_YEARS = Array.from(new Set(PYQ_BANK.map((p) => p.year))).sort((a, b) => a - b);
-const SUBJECTS_IN_BANK: SubjectColorKey[] = SYLLABUS.map((s) => s.colorKey).filter((key) => PYQ_BANK.some((p) => p.subject === key));
-// Per-year question counts, built once from PYQ_BANK — the year picker and analytics
-// never hardcode a year or a count, so a future year's data shows up automatically.
-const YEAR_COUNTS: Record<number, number> = Object.fromEntries(AVAILABLE_YEARS.map((y) => [y, PYQ_BANK.filter((p) => p.year === y).length]));
-
-function formatYearLabel(y: number | 'all') {
-  return y === 'all' ? 'All Years' : String(y);
-}
-
-type RevisionStatus = 'correct' | 'incorrect' | 'unattempted';
-type RevisionFilter = 'all' | RevisionStatus;
+// Every one of these is derived from PYQ_BANK via the pure helpers in lib/pyqFilters — no year,
+// subject or topic (or their counts) is ever hardcoded, so a future data import shows up automatically.
+const AVAILABLE_YEARS = getAvailableYears(PYQ_BANK);
+const YEAR_COUNTS = getYearCounts(PYQ_BANK);
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -109,46 +111,39 @@ export default function PYQTest() {
   const submittedRef = useRef(false);
 
   // Per-question revision status, derived entirely from the existing PYQAttempt[] — no new
-  // persisted data. For each question, the MOST RECENT attempt that included it decides its
-  // status: a null/skipped answer in that attempt still counts as 'unattempted' (it wasn't
-  // actually answered), and a question that has never appeared in any attempt is 'unattempted'.
-  const questionRevisionStatus = useMemo(() => {
-    const map = new Map<string, RevisionStatus>();
-    const sorted = [...pyqAttempts].sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-    for (const attempt of sorted) {
-      for (const qid of attempt.questionIds) {
-        if (map.has(qid)) continue; // already resolved by a more recent attempt
-        const ans = attempt.answers[qid];
-        if (!ans) {
-          map.set(qid, 'unattempted');
-          continue;
-        }
-        const pyq = PYQ_BANK.find((p) => p.id === qid);
-        if (!pyq) continue;
-        map.set(qid, ans === pyq.correctOptionId ? 'correct' : 'incorrect');
-      }
-    }
-    return map;
-  }, [pyqAttempts]);
+  // persisted data. See computeRevisionStatusMap in lib/pyqFilters for the exact rule (most
+  // recent attempt touching a question wins; a skipped/unanswered question stays 'unattempted').
+  const questionRevisionStatus = useMemo(() => computeRevisionStatusMap(PYQ_BANK, pyqAttempts), [pyqAttempts]);
 
-  const filtered = useMemo(() => {
-    return PYQ_BANK.filter((p) => {
-      if (year !== 'all' && p.year !== year) return false;
-      if (subject !== 'all' && p.subject !== subject) return false;
-      if (topicId !== 'all' && p.topicId !== topicId) return false;
-      if (revisionFilter !== 'all' && (questionRevisionStatus.get(p.id) ?? 'unattempted') !== revisionFilter) return false;
-      return true;
-    });
-  }, [year, subject, topicId, revisionFilter, questionRevisionStatus]);
+  const filtered = useMemo(
+    () => filterPYQs(PYQ_BANK, { year, subject, topicId, revisionFilter, revisionStatusMap: questionRevisionStatus }),
+    [year, subject, topicId, revisionFilter, questionRevisionStatus],
+  );
 
-  const topicsForSubject = useMemo(() => {
-    const byYear = year === 'all' ? PYQ_BANK : PYQ_BANK.filter((p) => p.year === year);
-    const pool = subject === 'all' ? byYear : byYear.filter((p) => p.subject === subject);
-    const ids = Array.from(new Set(pool.map((p) => p.topicId)));
-    return ids
-      .map((id) => ({ id, title: TOPIC_TITLES[id] ?? id }))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }, [subject, year]);
+  // Subject counts scoped to the active year only (per spec: not narrowed by subject/topic/revision) —
+  // and, since getSubjectCounts only keys subjects actually present in that year's pool, the subject
+  // chip row itself is dynamic: a subject absent from a given year's paper simply doesn't render.
+  const subjectCounts = useMemo(() => getSubjectCounts(PYQ_BANK, year), [year]);
+  const subjectsForYear = useMemo(
+    () => (Object.keys(subjectCounts) as SubjectColorKey[]).sort((a, b) => {
+      const aTitle = SYLLABUS.find((s) => s.colorKey === a)?.shortTitle ?? a;
+      const bTitle = SYLLABUS.find((s) => s.colorKey === b)?.shortTitle ?? b;
+      return aTitle.localeCompare(bTitle);
+    }),
+    [subjectCounts],
+  );
+  const yearPoolCount = year === 'all' ? PYQ_BANK.length : (YEAR_COUNTS[year] ?? 0);
+
+  // Topic counts scoped to the active year + subject (per spec) — same "only what's present" dynamism.
+  const topicCounts = useMemo(() => getTopicCounts(PYQ_BANK, year, subject), [year, subject]);
+  const topicsForSubject = useMemo(
+    () =>
+      topicCounts
+        .map(({ id, count }) => ({ id, count, title: TOPIC_TITLES[id] ?? id }))
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [topicCounts],
+  );
+  const subjectPoolCount = topicCounts.reduce((sum, t) => sum + t.count, 0);
 
   // Reset topic whenever the subject (or year) changes, since the old topic may no longer apply.
   useEffect(() => {
@@ -436,13 +431,13 @@ export default function PYQTest() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Subject</p>
             <div className="flex flex-wrap gap-2">
               <SelectChip active={subject === 'all'} onClick={() => setSubject('all')}>
-                All Subjects
+                All Subjects ({yearPoolCount})
               </SelectChip>
-              {SUBJECTS_IN_BANK.map((key) => {
+              {subjectsForYear.map((key) => {
                 const s = SYLLABUS.find((sub) => sub.colorKey === key);
                 return (
                   <SelectChip key={key} active={subject === key} onClick={() => setSubject(key)}>
-                    {s?.shortTitle ?? key}
+                    {s?.shortTitle ?? key} ({subjectCounts[key] ?? 0})
                   </SelectChip>
                 );
               })}
@@ -453,11 +448,11 @@ export default function PYQTest() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Topic</p>
             <div className="flex flex-wrap gap-2">
               <SelectChip active={topicId === 'all'} onClick={() => setTopicId('all')}>
-                All Topics
+                All Topics ({subjectPoolCount})
               </SelectChip>
               {topicsForSubject.map((t) => (
                 <SelectChip key={t.id} active={topicId === t.id} onClick={() => setTopicId(t.id)}>
-                  {t.title}
+                  {t.title} ({t.count})
                 </SelectChip>
               ))}
             </div>
@@ -467,7 +462,7 @@ export default function PYQTest() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Revision</p>
             <div className="flex flex-wrap gap-2">
               <SelectChip active={revisionFilter === 'all'} onClick={() => setRevisionFilter('all')}>
-                All
+                All Questions
               </SelectChip>
               <SelectChip active={revisionFilter === 'unattempted'} onClick={() => setRevisionFilter('unattempted')}>
                 Unattempted
