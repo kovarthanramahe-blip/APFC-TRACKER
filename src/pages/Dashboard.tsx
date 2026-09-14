@@ -1,13 +1,30 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy, Quote as QuoteIcon, RefreshCcw, ListChecks } from 'lucide-react';
+import {
+  Flame,
+  Target,
+  BookOpenCheck,
+  Timer,
+  ArrowUpRight,
+  TrendingUp,
+  CalendarClock,
+  Sparkles,
+  Trophy,
+  Quote as QuoteIcon,
+  RefreshCcw,
+  ListChecks,
+  ListTodo,
+  Check,
+} from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { useGamification, useRewards, getEncouragementMessage } from '../lib/gamification';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus, sortByAttentionPriority, type TopicStatus } from '../lib/topicStatus';
+import { completeStudyPlanTask } from '../lib/studyPlanEditing';
+import { computeDailyStudyQueue, type DailyQueueInput, type DailyQueueItem, type DailyQueueResult } from '../lib/studyPlanDailyQueue';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
@@ -20,6 +37,10 @@ export default function Dashboard() {
   const examDate = useAppStore((s) => s.examDate);
   const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
   const studyLog = useAppStore((s) => s.studyLog);
+  const studyPlan = useAppStore((s) => s.studyPlan);
+  const personalStudyPlanTasks = useAppStore((s) => s.personalStudyPlanTasks);
+  const setStudyPlanTasks = useAppStore((s) => s.setStudyPlanTasks);
+  const setPersonalStudyPlanTasks = useAppStore((s) => s.setPersonalStudyPlanTasks);
   const gami = useGamification();
   const rewards = useRewards();
   const streak = gami.streaks.current;
@@ -64,6 +85,33 @@ export default function Dashboard() {
   }, [completedTopics, pyqPerf]);
 
   const recentAttempts = attempts.slice(0, 3);
+
+  // Today's Study (Stage 7) — a read-only daily VIEW over the existing plan (lib/studyPlanDailyQueue),
+  // recomputed from current store state on every render. Never persisted, never mutates the plan.
+  const dailyQueue = useMemo<DailyQueueResult>(() => {
+    const dailyQueueInput: DailyQueueInput = {
+      plan: studyPlan,
+      personalTasks: personalStudyPlanTasks,
+      syllabus: SYLLABUS,
+      completedTopics,
+      pyqPerf,
+      currentDate: todayKey,
+    };
+    return computeDailyStudyQueue(dailyQueueInput);
+  }, [studyPlan, personalStudyPlanTasks, completedTopics, pyqPerf, todayKey]);
+
+  // Completing an item reuses the exact same pure function + store setters StudyPlan.tsx's own
+  // Complete action uses — no second task-mutation code path.
+  function handleCompleteDailyItem(item: DailyQueueItem) {
+    if (item.source === 'study_plan') {
+      if (!studyPlan) return;
+      const result = completeStudyPlanTask(studyPlan.tasks, item.task.id);
+      if (result.ok) setStudyPlanTasks(result.tasks);
+    } else {
+      const result = completeStudyPlanTask(personalStudyPlanTasks, item.task.id);
+      if (result.ok) setPersonalStudyPlanTasks(result.tasks);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -172,6 +220,11 @@ export default function Dashboard() {
             </div>
           )}
         </Card>
+      </motion.div>
+
+      {/* Today's Study (Stage 7) */}
+      <motion.div {...fadeUp}>
+        <TodayStudyCard queue={dailyQueue} onComplete={handleCompleteDailyItem} />
       </motion.div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -291,6 +344,112 @@ export default function Dashboard() {
           )}
         </Card>
       </motion.div>
+    </div>
+  );
+}
+
+const TODAY_STATE_MESSAGE: Record<Extract<DailyQueueResult, { status: 'active' }>['todayState'], string | null> = {
+  rest_day: "Today's a rest day — no study tasks are scheduled.",
+  no_tasks_scheduled: "Nothing scheduled today — here's what's coming up.",
+  all_completed: "All of today's tasks are done — nice work.",
+  pending: null,
+};
+
+/** Stage 7 — a compact daily view over the existing plan (lib/studyPlanDailyQueue). Purely
+ * derived from current store state on every render; nothing here is persisted, and the "Complete"
+ * action reuses the same pure completeStudyPlanTask + store setters the Study Plan page itself
+ * uses — this component never mutates a task's date or generates a second schedule. */
+function TodayStudyCard({ queue, onComplete }: { queue: DailyQueueResult; onComplete: (item: DailyQueueItem) => void }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ListTodo className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Today's Study</h3>
+        </div>
+        <Link to="/study-plan" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+          Open Study Plan
+        </Link>
+      </div>
+
+      {queue.status === 'no_plan' && (
+        <p className="text-sm text-slate-400 dark:text-slate-500">No study plan yet — generate one to see what to study today.</p>
+      )}
+
+      {queue.status === 'plan_completed' && (
+        <p className="text-sm text-emerald-600 dark:text-emerald-400">Your study plan is fully complete — nothing left to do.</p>
+      )}
+
+      {queue.status === 'active' && (
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MiniStat label="Planned" value={formatMinutes(queue.capacity.plannedMinutes)} />
+            <MiniStat label="Completed" value={formatMinutes(queue.capacity.completedMinutes)} />
+            <MiniStat label="Remaining" value={formatMinutes(queue.capacity.remainingMinutes)} />
+            <MiniStat label="Overdue" value={`${queue.overdueTasks.length}`} tone={queue.overdueTasks.length > 0 ? 'danger' : 'neutral'} />
+          </div>
+
+          <div className="mt-3">
+            <ProgressBar
+              value={queue.capacity.plannedMinutes > 0 ? (queue.capacity.completedMinutes / queue.capacity.plannedMinutes) * 100 : 0}
+              colorClassName="bg-brand-500"
+              height="h-1.5"
+            />
+          </div>
+
+          {queue.capacity.overCapacity && (
+            <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">Today's scheduled work exceeds your configured daily time.</p>
+          )}
+
+          {TODAY_STATE_MESSAGE[queue.todayState] && <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{TODAY_STATE_MESSAGE[queue.todayState]}</p>}
+
+          <DoNextList queue={queue} onComplete={onComplete} />
+        </>
+      )}
+    </Card>
+  );
+}
+
+function MiniStat({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'danger' }) {
+  return (
+    <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
+      <p className={cx('font-display text-base font-bold', tone === 'danger' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white')}>{value}</p>
+      <p className="text-[11px] text-slate-400 mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+/** The "Do Next" list — recommendedOrder (overdue + today's pending, reordered by priority only)
+ * when there's anything to show; falls back to the small nextUp preview when today has nothing
+ * outstanding (rest day / nothing scheduled / today fully done), so "what should I do next?"
+ * always has an answer when there's any upcoming work at all. */
+function DoNextList({ queue, onComplete }: { queue: Extract<DailyQueueResult, { status: 'active' }>; onComplete: (item: DailyQueueItem) => void }) {
+  const items = queue.recommendedOrder.length > 0 ? queue.recommendedOrder.slice(0, 5) : queue.nextUp;
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Do Next</p>
+      <ul className="space-y-1.5">
+        {items.map((item) => (
+          <li key={item.id} className="flex items-center justify-between gap-2 rounded-lg -mx-1.5 px-1.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/60">
+            <div className="min-w-0">
+              <p className="truncate text-sm text-slate-700 dark:text-slate-200">{item.task.title}</p>
+              <p className="truncate text-[11px] text-slate-400">
+                {item.reason} · {item.estimatedMinutes} min
+              </p>
+            </div>
+            <button
+              type="button"
+              title="Mark complete"
+              onClick={() => onComplete(item)}
+              className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
