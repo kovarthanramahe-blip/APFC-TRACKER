@@ -18,11 +18,12 @@ import {
   TrendingDown,
   TrendingUp,
   AlertTriangle,
+  Brain,
 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
 import { useAppStore } from '../lib/store';
-import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
+import { SUBJECT_COLORS, getLocalDateString, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, ProgressBar } from '../components/ui/Primitives';
 import { FormattedText } from '../components/ui/FormattedText';
 import type { PYQ, PYQAttempt, SubjectColorKey } from '../lib/types';
@@ -33,6 +34,7 @@ import {
   getSubjectCounts,
   getTopicCounts,
   computeRevisionStatusMap,
+  computeEligibleRevisionIds,
   filterPYQs,
   getVerificationNotice,
   type RevisionFilter,
@@ -45,6 +47,7 @@ import {
   MARKS_WRONG,
   type PyqQuestionStatus as QuestionStatus,
 } from '../lib/pyqPerformance';
+import { getDueItems } from '../lib/revisionQueue';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
@@ -63,7 +66,7 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-type Phase = 'select' | 'testing' | 'results' | 'review' | 'bookmarks' | 'analytics';
+type Phase = 'select' | 'testing' | 'results' | 'review' | 'bookmarks' | 'analytics' | 'revise';
 
 function BookmarkButton({ pyqId }: { pyqId: string }) {
   const isBookmarked = useAppStore((s) => s.bookmarkedPyqIds.includes(pyqId));
@@ -86,6 +89,9 @@ export default function PYQTest() {
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const addPyqAttempt = useAppStore((s) => s.addPyqAttempt);
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
+  const revisionQueue = useAppStore((s) => s.revisionQueue);
+  const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
+  const recordRevisionIncorrect = useAppStore((s) => s.recordRevisionIncorrect);
 
   const [phase, setPhase] = useState<Phase>('select');
 
@@ -264,6 +270,69 @@ export default function PYQTest() {
   // the Analytics page's "PYQ Performance" section always agree (see computePyqPerformance).
   const performance = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
 
+  // Revision queue (Stage 2) — eligibility (incorrect OR bookmarked) is derived live here, never
+  // stored: as soon as a question becomes incorrect or gets bookmarked it's automatically
+  // eligible, and nothing needs to be added/removed from anywhere when that changes. Only
+  // scheduling state (lib/revisionQueue) is persisted, keyed by pyqId — never all 458 questions.
+  const eligibleRevisionIds = useMemo(
+    () => computeEligibleRevisionIds(PYQ_BANK, questionRevisionStatus, bookmarkedPyqIds),
+    [questionRevisionStatus, bookmarkedPyqIds],
+  );
+  const dueRevisionItems = useMemo(
+    () => getDueItems(revisionQueue, eligibleRevisionIds, getLocalDateString()),
+    [revisionQueue, eligibleRevisionIds],
+  );
+
+  const [reviseQuestions, setReviseQuestions] = useState<PYQ[]>([]);
+  const [reviseIndex, setReviseIndex] = useState(0);
+  const [reviseAnswer, setReviseAnswer] = useState<string | null>(null);
+  const [reviseChecked, setReviseChecked] = useState(false);
+  const [reviseCorrectCount, setReviseCorrectCount] = useState(0);
+  const [reviseComplete, setReviseComplete] = useState(false);
+  // Guards against recording the same question's answer twice (e.g. a double click) — recording
+  // twice would incorrectly advance/reset its box an extra time within one session.
+  const reviseRecordedRef = useRef<Set<string>>(new Set());
+
+  // The due list is frozen at session start (a plain snapshot, not re-derived from live state as
+  // answers come in) — so a question rescheduled by THIS session's own recordCorrect/Incorrect
+  // call can never reappear later in the SAME session.
+  function startRevision() {
+    if (dueRevisionItems.length === 0) return;
+    const qs = dueRevisionItems.map((item) => PYQ_BANK.find((p) => p.id === item.pyqId)).filter((q): q is PYQ => !!q);
+    reviseRecordedRef.current = new Set();
+    setReviseQuestions(qs);
+    setReviseIndex(0);
+    setReviseAnswer(null);
+    setReviseChecked(false);
+    setReviseCorrectCount(0);
+    setReviseComplete(false);
+    setPhase('revise');
+  }
+
+  function checkRevisionAnswer() {
+    const q = reviseQuestions[reviseIndex];
+    if (!q || reviseChecked || reviseRecordedRef.current.has(q.id)) return;
+    reviseRecordedRef.current.add(q.id);
+    const today = getLocalDateString();
+    if (reviseAnswer === q.correctOptionId) {
+      recordRevisionCorrect(q.id, today);
+      setReviseCorrectCount((c) => c + 1);
+    } else {
+      recordRevisionIncorrect(q.id, today);
+    }
+    setReviseChecked(true);
+  }
+
+  function nextRevisionQuestion() {
+    if (reviseIndex >= reviseQuestions.length - 1) {
+      setReviseComplete(true);
+      return;
+    }
+    setReviseIndex((i) => i + 1);
+    setReviseAnswer(null);
+    setReviseChecked(false);
+  }
+
   if (phase === 'select') {
     return (
       <div>
@@ -279,6 +348,9 @@ export default function PYQTest() {
               <Button variant="secondary" onClick={() => setPhase('bookmarks')}>
                 <Star className={cx('h-4 w-4', bookmarkedQuestions.length > 0 && 'fill-gold-400 text-gold-500')} />
                 Bookmarked PYQs{bookmarkedQuestions.length > 0 ? ` (${bookmarkedQuestions.length})` : ''}
+              </Button>
+              <Button onClick={startRevision} disabled={dueRevisionItems.length === 0}>
+                <Brain className="h-4 w-4" /> Revise Now{dueRevisionItems.length > 0 ? ` (${dueRevisionItems.length})` : ''}
               </Button>
             </div>
           }
@@ -463,6 +535,122 @@ export default function PYQTest() {
             })}
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (phase === 'revise') {
+    if (reviseComplete) {
+      return (
+        <div className="mx-auto max-w-2xl">
+          <Card className="p-5 sm:p-6 text-center">
+            <Brain className="mx-auto h-8 w-8 text-brand-500" />
+            <p className="mt-2 text-xs text-slate-400">Revision session complete</p>
+            <p className="font-display text-3xl font-bold text-slate-900 dark:text-white">
+              {reviseCorrectCount} <span className="text-lg font-medium text-slate-400">/ {reviseQuestions.length} correct</span>
+            </p>
+            <Button className="mt-5" onClick={() => setPhase('select')}>
+              Done
+            </Button>
+          </Card>
+        </div>
+      );
+    }
+
+    if (reviseQuestions.length === 0) {
+      return (
+        <div className="mx-auto max-w-2xl">
+          <button
+            className="mb-4 flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            onClick={() => setPhase('select')}
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <Brain className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
+            <p className="text-slate-400 text-sm">Nothing due for revision right now.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const q = reviseQuestions[reviseIndex];
+    const colors = SUBJECT_COLORS[q.subject];
+    const isLastRevision = reviseIndex === reviseQuestions.length - 1;
+
+    return (
+      <div className="mx-auto max-w-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+            Revision {reviseIndex + 1} of {reviseQuestions.length}
+          </p>
+          <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <Brain className="h-3.5 w-3.5" /> {reviseCorrectCount} correct so far
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <ProgressBar value={reviseIndex + 1} max={reviseQuestions.length} />
+        </div>
+
+        <Card className="p-5 sm:p-6">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <Badge className={cx(colors.bg, colors.text)}>{TOPIC_TITLES[q.topicId] ?? q.subject}</Badge>
+            <BookmarkButton pyqId={q.id} />
+          </div>
+          <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
+
+          <div className="mt-5 space-y-2.5">
+            {q.options.map((opt) => {
+              const isCorrectOpt = opt.id === q.correctOptionId;
+              const isUserChoice = opt.id === reviseAnswer;
+              const selected = reviseAnswer === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  disabled={reviseChecked}
+                  onClick={() => setReviseAnswer(opt.id)}
+                  className={cx(
+                    'flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
+                    reviseChecked
+                      ? isCorrectOpt
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-600/50 dark:bg-emerald-500/10 dark:text-emerald-300'
+                        : isUserChoice
+                        ? 'border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-600/50 dark:bg-rose-500/10 dark:text-rose-300'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+                      : selected
+                      ? 'border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-500/10 dark:text-brand-200'
+                      : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-brand-300',
+                  )}
+                >
+                  <FormattedText text={opt.text} className="min-w-0 flex-1" />
+                  {reviseChecked && isCorrectOpt && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />}
+                  {reviseChecked && isUserChoice && !isCorrectOpt && <XCircle className="h-4 w-4 shrink-0 text-rose-500" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {reviseChecked && (
+            <>
+              <VerificationBanner question={q} />
+              <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-3">
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Explanation</p>
+                <FormattedText text={q.explanation} className="text-sm text-slate-600 dark:text-slate-300" />
+              </div>
+            </>
+          )}
+        </Card>
+
+        <div className="mt-4 flex justify-end">
+          {!reviseChecked ? (
+            <Button onClick={checkRevisionAnswer} disabled={!reviseAnswer}>
+              Check Answer
+            </Button>
+          ) : (
+            <Button onClick={nextRevisionQuestion}>{isLastRevision ? 'Finish' : 'Next'}</Button>
+          )}
+        </div>
       </div>
     );
   }

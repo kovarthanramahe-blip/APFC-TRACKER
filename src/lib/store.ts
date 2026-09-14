@@ -14,6 +14,7 @@ import { adaptStudyPlan as runAdaptStudyPlan, type AdaptiveResult } from './stud
 import type { SyllabusSubject } from './types';
 import type { PyqPerformanceSnapshot } from './pyqPerformance';
 import { getLocalDateString } from './utils';
+import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -102,6 +103,15 @@ interface AppState {
   // do — the store holds no app-content or "today" logic of its own. Returns the result so the
   // UI can show what changed; returns null (no-op) when there is no plan to adapt.
   adaptStudyPlan: (syllabus: SyllabusSubject[], pyqPerf: PyqPerformanceSnapshot | null, currentDate: string) => AdaptiveResult | null;
+
+  // Revision queue (Stage 2 of the spaced-repetition feature): pure scheduling state only
+  // (lib/revisionQueue's box/dueDate/lastReviewedDate/reviewCount per pyqId) — which PYQ ids are
+  // even eligible (incorrect or bookmarked) is derived live by the caller from pyqAttempts/
+  // bookmarkedPyqIds, never stored here, so an id never needs to be added/removed as its
+  // eligibility changes. `today` is always supplied by the caller (yyyy-mm-dd, local date).
+  revisionQueue: RevisionQueue;
+  recordRevisionCorrect: (pyqId: string, today: string) => void;
+  recordRevisionIncorrect: (pyqId: string, today: string) => void;
 
   // Reset
   resetAllData: () => void;
@@ -276,6 +286,12 @@ export const useAppStore = create<AppState>()(
         return result;
       },
 
+      revisionQueue: createRevisionQueue(),
+      recordRevisionCorrect: (pyqId, today) =>
+        set((state) => ({ revisionQueue: recordRevisionCorrectItem(state.revisionQueue, pyqId, today) })),
+      recordRevisionIncorrect: (pyqId, today) =>
+        set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, pyqId, today) })),
+
       resetAllData: () =>
         set({
           completedTopics: {},
@@ -290,6 +306,7 @@ export const useAppStore = create<AppState>()(
           studyPlan: null,
           studyPlanGeneratedAt: null,
           personalStudyPlanTasks: [],
+          revisionQueue: createRevisionQueue(),
         }),
     }),
     {
@@ -316,6 +333,7 @@ export function exportAllData() {
     studyPlan: state.studyPlan,
     studyPlanGeneratedAt: state.studyPlanGeneratedAt,
     personalStudyPlanTasks: state.personalStudyPlanTasks,
+    revisionQueue: state.revisionQueue,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -338,5 +356,6 @@ export function importAllData(json: string) {
     studyPlan: data.studyPlan ?? null,
     studyPlanGeneratedAt: data.studyPlanGeneratedAt ?? null,
     personalStudyPlanTasks: data.personalStudyPlanTasks ?? [],
+    revisionQueue: data.revisionQueue ?? createRevisionQueue(),
   });
 }

@@ -99,6 +99,18 @@ export function filterPYQs(bank: PYQ[], opts: PYQFilterOptions): PYQ[] {
   });
 }
 
+/**
+ * PYQ ids eligible for the spaced-repetition revision queue (lib/revisionQueue): incorrect (per
+ * the existing revision-status map — never a second accuracy calculation) OR bookmarked. Never
+ * "every question in the bank" — eligibility grows automatically the moment a question becomes
+ * incorrect or gets bookmarked, and shrinks back out on its own once neither is true anymore, with
+ * no separate bookkeeping required.
+ */
+export function computeEligibleRevisionIds(bank: PYQ[], revisionStatusMap: Map<string, RevisionStatus>, bookmarkedPyqIds: string[]): string[] {
+  const incorrectIds = bank.filter((p) => revisionStatusOf(revisionStatusMap, p.id) === 'incorrect').map((p) => p.id);
+  return [...new Set([...incorrectIds, ...bookmarkedPyqIds])];
+}
+
 export interface VerificationNotice {
   label: string;
   note?: string;

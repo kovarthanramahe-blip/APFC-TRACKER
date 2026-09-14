@@ -9,6 +9,7 @@ import {
   getTopicCounts,
   computeRevisionStatusMap,
   revisionStatusOf,
+  computeEligibleRevisionIds,
   filterPYQs,
   getVerificationNotice,
 } from './pyqFilters';
@@ -302,5 +303,46 @@ describe('getVerificationNotice', () => {
     for (const p of flagged) {
       expect(getVerificationNotice(p)).not.toBeNull();
     }
+  });
+});
+
+// --- Stage 2 revision-queue eligibility: incorrect OR bookmarked -----------------------------
+describe('computeEligibleRevisionIds', () => {
+  it('includes a question answered incorrectly', () => {
+    const attempts = [attempt({ questionIds: ['q1'], answers: { q1: 'q1-o1' } })]; // wrong
+    const statusMap = computeRevisionStatusMap(bank, attempts);
+    expect(computeEligibleRevisionIds(bank, statusMap, [])).toEqual(['q1']);
+  });
+
+  it('excludes a question answered correctly', () => {
+    const attempts = [attempt({ questionIds: ['q1'], answers: { q1: 'q1-o0' } })]; // correct
+    const statusMap = computeRevisionStatusMap(bank, attempts);
+    expect(computeEligibleRevisionIds(bank, statusMap, [])).toEqual([]);
+  });
+
+  it('includes a bookmarked question even with no attempts at all', () => {
+    const statusMap = computeRevisionStatusMap(bank, []);
+    expect(computeEligibleRevisionIds(bank, statusMap, ['q3'])).toEqual(['q3']);
+  });
+
+  it('never includes every question in the bank by default', () => {
+    const statusMap = computeRevisionStatusMap(bank, []);
+    expect(computeEligibleRevisionIds(bank, statusMap, [])).toEqual([]);
+  });
+
+  it('unions incorrect and bookmarked without duplicating an id that is both', () => {
+    const attempts = [attempt({ questionIds: ['q1'], answers: { q1: 'q1-o1' } })]; // q1 wrong
+    const statusMap = computeRevisionStatusMap(bank, attempts);
+    const ids = computeEligibleRevisionIds(bank, statusMap, ['q1', 'q2']); // q1 also bookmarked
+    expect(ids.sort()).toEqual(['q1', 'q2']);
+  });
+
+  it('a question that becomes incorrect is picked up without any separate bookkeeping', () => {
+    const statusMap = computeRevisionStatusMap(bank, []);
+    expect(computeEligibleRevisionIds(bank, statusMap, [])).not.toContain('q1');
+
+    const attempts = [attempt({ questionIds: ['q1'], answers: { q1: 'q1-o1' } })];
+    const statusMapAfter = computeRevisionStatusMap(bank, attempts);
+    expect(computeEligibleRevisionIds(bank, statusMapAfter, [])).toContain('q1');
   });
 });
