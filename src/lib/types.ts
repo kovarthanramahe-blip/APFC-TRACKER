@@ -78,15 +78,48 @@ export interface PyqProvenance {
   source?: string;
 }
 
-/** A future source-backed generated question's provenance (e.g. calibrated against PIB, India
- * Code, Ministry of Labour, EPFO, RBI material) — no generated questions exist yet; this only
- * reserves the shape so a later question type can be added without another provenance redesign. */
+/** A source-backed generated question's lifecycle state — deliberately distinct from
+ * PYQVerificationStatus, which is about trust in a REAL historical question's answer key, not
+ * about where a generated candidate sits in an authoring/review pipeline. */
+export type GeneratedVerificationStatus = 'draft' | 'verified' | 'published' | 'retired';
+
+/** A source-backed generated question's provenance (e.g. calibrated against PIB, India Code,
+ * Ministry of Labour, EPFO, RBI material) — Stage 6A (type-level + validation only; see
+ * lib/generatedQuestionValidation.ts). No generated questions exist yet and none are created by
+ * this stage; this only gives a future generation pipeline a shape to produce and validate
+ * against, so it can be added without another provenance redesign. */
 export interface GeneratedProvenance {
   kind: 'generated';
-  sourceAuthority: string; // e.g. 'PIB' | 'India Code' | 'Ministry of Labour' | 'EPFO' | 'RBI'
-  sourceReference: string; // citation/URL/document identifying the specific source material
-  generatedAt: string; // ISO timestamp
-  calibratedAgainstPyqIds?: string[]; // PYQ ids this question's pattern/difficulty was calibrated against
+  /** e.g. 'PIB' | 'India Code' | 'Ministry of Labour' | 'EPFO' | 'RBI' */
+  sourceAuthority: string;
+  /** Human-readable title/citation of the specific source document (e.g. "PIB Press Release:
+   * EPFO Raises Wage Ceiling, dated 12 Mar 2025") — distinct from sourceReference, which
+   * identifies WHERE to find it, not what it's called. */
+  sourceTitle: string;
+  /** URL or official document reference identifying the specific source material. Not required to
+   * be a URL — an official document reference (e.g. a Gazette notification number) is equally
+   * valid, since not every authoritative source is web-hosted. */
+  sourceReference: string;
+  /** The SOURCE's own publication/effective date (ISO date), when known — distinct from
+   * `generatedAt` below, which is when THIS question was generated from that source. */
+  sourcePublishedAt?: string;
+  /** FK -> SyllabusTopic.id — the syllabus concept/topic this question was generated for. */
+  topicId: string;
+  /** PYQ ids this question's pattern/difficulty was calibrated against. */
+  calibratedAgainstPyqIds?: string[];
+  verificationStatus: GeneratedVerificationStatus;
+  /** ISO timestamp of when this question was generated. */
+  generatedAt: string;
+}
+
+/** A candidate source-backed generated question — not yet part of QUESTION_BANK, PYQ_BANK, or any
+ * catalog. Structurally the same "PracticeQuestion + its own provenance" shape PYQ already
+ * establishes, but for generated content and always GeneratedProvenance specifically (narrower
+ * than the general QuestionProvenance union), since this type exists purely so
+ * lib/generatedQuestionValidation.ts has something concrete to validate ahead of any real
+ * generation pipeline. */
+export interface GeneratedQuestionDraft extends PracticeQuestion {
+  provenance: GeneratedProvenance;
 }
 
 /** The existing hand-authored practice bank's (data/questionBank.ts) own provenance — distinct from

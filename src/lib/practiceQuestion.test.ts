@@ -57,7 +57,10 @@ describe('isPyqProvenance', () => {
     const generated: GeneratedProvenance = {
       kind: 'generated',
       sourceAuthority: 'PIB',
+      sourceTitle: 'PIB Press Release: Example',
       sourceReference: 'https://pib.gov.in/example',
+      topicId: 't-1',
+      verificationStatus: 'draft',
       generatedAt: '2026-01-01T00:00:00.000Z',
     };
     expect(isPyqProvenance(generated)).toBe(false);
