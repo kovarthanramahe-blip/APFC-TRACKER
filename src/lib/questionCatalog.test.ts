@@ -1,10 +1,51 @@
 import { describe, it, expect } from 'vitest';
-import type { PYQ, Question } from './types';
+import type { PYQ, Question, GeneratedQuestionDraft, GeneratedProvenance } from './types';
 import { SYLLABUS } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
 import { QUESTION_BANK } from '../data/questionBank';
-import { pyqToCatalogQuestion, questionToCatalogQuestion, buildQuestionCatalog, isAuthenticPyq } from './questionCatalog';
+import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
+import {
+  pyqToCatalogQuestion,
+  questionToCatalogQuestion,
+  generatedQuestionToCatalogQuestion,
+  buildQuestionCatalog,
+  isAuthenticPyq,
+  isGeneratedQuestion,
+} from './questionCatalog';
 import { startSession, selectAnswer, computeSessionResults, type QuestionSessionScoring } from './questionSessionEngine';
+
+const REAL_TOPIC_ID = SYLLABUS[0].topics[0].id;
+
+function generatedProvenance(overrides: Partial<GeneratedProvenance> = {}): GeneratedProvenance {
+  return {
+    kind: 'generated',
+    sourceAuthority: 'Source Authority',
+    sourceTitle: 'Source Title',
+    sourceReference: 'Source Reference',
+    sourcePublishedAt: '2026-01-01',
+    topicId: REAL_TOPIC_ID,
+    verificationStatus: 'verified',
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function generatedDraft(overrides: Partial<GeneratedQuestionDraft> = {}): GeneratedQuestionDraft {
+  return {
+    id: 'gen-cat-1',
+    subject: 'labourLaw',
+    topicId: REAL_TOPIC_ID,
+    question: 'Sample generated question?',
+    options: [
+      { id: 'o0', text: 'Option A' },
+      { id: 'o1', text: 'Option B' },
+    ],
+    correctOptionId: 'o0',
+    explanation: 'Because A.',
+    provenance: generatedProvenance(),
+    ...overrides,
+  };
+}
 
 function pyq(overrides: Partial<PYQ> = {}): PYQ {
   return {
@@ -183,5 +224,122 @@ describe('catalog-to-Mock-Test selection boundary (real data)', () => {
     const mockPool = QUESTION_BANK.map(questionToCatalogQuestion);
     expect(mockPool.some(isAuthenticPyq)).toBe(false);
     expect(mockPool).toHaveLength(131);
+  });
+});
+
+describe('generatedQuestionToCatalogQuestion (Stage 6N)', () => {
+  it('maps a generated question draft into the catalog shape with its provenance unchanged', () => {
+    const draft = generatedDraft();
+    const entry = generatedQuestionToCatalogQuestion(draft);
+    expect(entry).toEqual({
+      id: 'gen-cat-1',
+      subject: 'labourLaw',
+      topicLabel: SYLLABUS[0].topics[0].title,
+      question: 'Sample generated question?',
+      options: draft.options,
+      correctOptionId: 'o0',
+      explanation: 'Because A.',
+      provenance: draft.provenance,
+    });
+    expect(entry.provenance.kind).toBe('generated');
+  });
+
+  it('never transforms generated provenance into pyq provenance', () => {
+    const entry = generatedQuestionToCatalogQuestion(generatedDraft());
+    expect(entry.provenance.kind).not.toBe('pyq');
+    expect(isAuthenticPyq(entry)).toBe(false);
+  });
+
+  it('preserves source authority/title/reference/date exactly', () => {
+    const draft = generatedDraft({
+      provenance: generatedProvenance({
+        sourceAuthority: 'Ministry X',
+        sourceTitle: 'Notification Y',
+        sourceReference: 'Ref Z',
+        sourcePublishedAt: '2025-06-15',
+      }),
+    });
+    const entry = generatedQuestionToCatalogQuestion(draft);
+    const provenance = entry.provenance as GeneratedProvenance;
+    expect(provenance.sourceAuthority).toBe('Ministry X');
+    expect(provenance.sourceTitle).toBe('Notification Y');
+    expect(provenance.sourceReference).toBe('Ref Z');
+    expect(provenance.sourcePublishedAt).toBe('2025-06-15');
+  });
+
+  it('preserves calibratedAgainstPyqIds exactly', () => {
+    const ids = ['pyq-1', 'pyq-2'];
+    const draft = generatedDraft({ provenance: generatedProvenance({ calibratedAgainstPyqIds: ids }) });
+    const entry = generatedQuestionToCatalogQuestion(draft);
+    expect((entry.provenance as GeneratedProvenance).calibratedAgainstPyqIds).toEqual(ids);
+  });
+
+  it('preserves factualBasis linkage via provenance.topicId', () => {
+    const draft = generatedDraft({ provenance: generatedProvenance({ topicId: REAL_TOPIC_ID }) });
+    const entry = generatedQuestionToCatalogQuestion(draft);
+    expect((entry.provenance as GeneratedProvenance).topicId).toBe(REAL_TOPIC_ID);
+  });
+
+  it('preserves verificationStatus exactly', () => {
+    const draft = generatedDraft({ provenance: generatedProvenance({ verificationStatus: 'published' }) });
+    expect((generatedQuestionToCatalogQuestion(draft).provenance as GeneratedProvenance).verificationStatus).toBe('published');
+  });
+
+  it('never mutates the input draft', () => {
+    const draft = generatedDraft();
+    const snapshot = JSON.stringify(draft);
+    generatedQuestionToCatalogQuestion(draft);
+    expect(JSON.stringify(draft)).toBe(snapshot);
+  });
+});
+
+describe('isGeneratedQuestion', () => {
+  it('is true only for a generated-provenance entry', () => {
+    const catalog = buildQuestionCatalog([pyq()], [question()], [generatedDraft()]);
+    expect(catalog.map(isGeneratedQuestion)).toEqual([false, false, true]);
+  });
+});
+
+describe('buildQuestionCatalog with a generated pool (Stage 6N)', () => {
+  it('1. an empty/omitted generated pool leaves the real catalog at exactly 589 entries', () => {
+    expect(buildQuestionCatalog(PYQ_BANK, QUESTION_BANK)).toHaveLength(589);
+    expect(buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, [])).toHaveLength(589);
+    expect(buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, GENERATED_QUESTION_BANK)).toHaveLength(589);
+  });
+
+  it('2. an approved (here: directly supplied) generated question enters the catalog and increases the count by exactly 1', () => {
+    const catalog = buildQuestionCatalog([pyq()], [question()], [generatedDraft()]);
+    expect(catalog).toHaveLength(3);
+    expect(catalog[2].id).toBe('gen-cat-1');
+    expect(catalog[2].provenance.kind).toBe('generated');
+  });
+
+  it('increases by exactly N for N generated entries', () => {
+    const catalog = buildQuestionCatalog(
+      [pyq()],
+      [question()],
+      [generatedDraft({ id: 'gen-cat-1' }), generatedDraft({ id: 'gen-cat-2' }), generatedDraft({ id: 'gen-cat-3' })],
+    );
+    expect(catalog).toHaveLength(5);
+  });
+
+  it('10. leaves PYQ_BANK ids unchanged after building a catalog with a generated pool', () => {
+    const idsBefore = PYQ_BANK.map((p) => p.id);
+    buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, [generatedDraft()]);
+    expect(PYQ_BANK.map((p) => p.id)).toEqual(idsBefore);
+  });
+
+  it('11. leaves QUESTION_BANK ids unchanged after building a catalog with a generated pool', () => {
+    const idsBefore = QUESTION_BANK.map((q) => q.id);
+    buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, [generatedDraft()]);
+    expect(QUESTION_BANK.map((q) => q.id)).toEqual(idsBefore);
+  });
+
+  it('12. existing 2-argument callers (QuestionBank.tsx / MockTestRunner.tsx style) are unaffected: same 589-entry real catalog as before Stage 6N', () => {
+    const catalog = buildQuestionCatalog(PYQ_BANK, QUESTION_BANK);
+    const practiceOnly = catalog.filter((entry) => !isAuthenticPyq(entry) && !isGeneratedQuestion(entry));
+    expect(catalog).toHaveLength(589);
+    expect(practiceOnly).toHaveLength(QUESTION_BANK.length);
+    expect(catalog.every((e) => !isGeneratedQuestion(e))).toBe(true);
   });
 });

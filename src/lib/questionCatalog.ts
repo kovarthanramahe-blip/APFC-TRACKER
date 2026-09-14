@@ -7,7 +7,7 @@
 // lib/useQuestionSession.ts) without a third session implementation and without either source
 // pretending to be something it isn't (an authentic PYQ vs a hand-authored practice-bank question
 // stay explicitly distinguishable via `provenance.kind`, never merged into one flavor).
-import type { PYQ, Question, QuestionOption, QuestionProvenance } from './types';
+import type { PYQ, Question, QuestionOption, QuestionProvenance, GeneratedQuestionDraft } from './types';
 import { toPyqProvenance, isPyqProvenance } from './practiceQuestion';
 import { TOPIC_TITLES } from './pyqPerformance';
 
@@ -66,11 +66,41 @@ export function questionToCatalogQuestion(q: Question): CatalogQuestion {
   };
 }
 
-/** The unified catalog: every PYQ followed by every practice-bank question, each still carrying
- * its own honest provenance. Neither source array is mutated, reordered within itself, or
- * filtered — this is a pure concatenation of two independently-mapped lists. */
-export function buildQuestionCatalog(pyqBank: PYQ[], questionBank: Question[]): CatalogQuestion[] {
-  return [...pyqBank.map(pyqToCatalogQuestion), ...questionBank.map(questionToCatalogQuestion)];
+/** Maps a single APPROVED source-backed generated question draft (lib/generatedQuestionDraft.ts,
+ * lib/generatedQuestionReview.ts) into the catalog shape. `generatedPool` (buildQuestionCatalog's
+ * third argument) is expected to already contain only drafts that cleared the Stage 6M approval
+ * gate — this function does no gating itself, it only maps; see
+ * data/generatedQuestionBank.ts's selectApprovedGeneratedQuestions for the one place that gate is
+ * actually enforced. The draft's own GeneratedProvenance is carried through completely
+ * unchanged — never rewritten into PyqProvenance or any other shape — so source authority/title/
+ * reference/date, factualBasis linkage (via provenance.topicId), calibratedAgainstPyqIds, and
+ * verificationStatus all survive exactly as the draft had them. */
+export function generatedQuestionToCatalogQuestion(draft: GeneratedQuestionDraft): CatalogQuestion {
+  return {
+    id: draft.id,
+    subject: draft.subject,
+    topicLabel: TOPIC_TITLES[draft.topicId] ?? draft.topicId,
+    question: draft.question,
+    options: draft.options,
+    correctOptionId: draft.correctOptionId,
+    explanation: draft.explanation,
+    provenance: draft.provenance,
+  };
+}
+
+/** The unified catalog: every PYQ, then every practice-bank question, then every approved
+ * generated question — each still carrying its own honest provenance. `generatedPool` is optional
+ * and defaults to an empty array, so every existing two-argument call site (QuestionBank.tsx,
+ * MockTestRunner.tsx, and every prior test) is unaffected and keeps producing exactly the same
+ * PYQ_BANK.length + QUESTION_BANK.length entries it always has. No source array is mutated,
+ * reordered within itself, or filtered — this is a pure concatenation of three independently-mapped
+ * lists. */
+export function buildQuestionCatalog(
+  pyqBank: PYQ[],
+  questionBank: Question[],
+  generatedPool: GeneratedQuestionDraft[] = [],
+): CatalogQuestion[] {
+  return [...pyqBank.map(pyqToCatalogQuestion), ...questionBank.map(questionToCatalogQuestion), ...generatedPool.map(generatedQuestionToCatalogQuestion)];
 }
 
 /** The one predicate "preserve provenance... explicitly distinguishable" actually requires:
@@ -78,4 +108,12 @@ export function buildQuestionCatalog(pyqBank: PYQ[], questionBank: Question[]): 
  * provenance check. */
 export function isAuthenticPyq(entry: CatalogQuestion): boolean {
   return isPyqProvenance(entry.provenance);
+}
+
+/** The generated-entry counterpart to isAuthenticPyq: is this catalog entry a source-backed
+ * generated question (as opposed to an authentic PYQ or a hand-authored practice-bank question)? A
+ * plain provenance.kind narrowing, kept here rather than added to lib/practiceQuestion.ts since
+ * that module's own scope is specifically the PYQ/PracticeQuestion bridge. */
+export function isGeneratedQuestion(entry: CatalogQuestion): boolean {
+  return entry.provenance.kind === 'generated';
 }
