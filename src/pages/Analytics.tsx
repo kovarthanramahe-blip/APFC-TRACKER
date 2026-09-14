@@ -438,10 +438,13 @@ function recentWeeks(progress: Extract<StudyPlanProgressResult, { status: 'ready
   return base.slice(-MAX_WEEKS_SHOWN);
 }
 
-const EXECUTION_STATE_META: Record<ExecutionState, { label: string; tone: 'success' | 'brand' | 'warning' | 'neutral' }> = {
+// P2 — tones match PyqStat's own supported set (no 'warning' there), and are read directly below
+// instead of a separate ad-hoc rule, so 'inactive' renders visually distinct from 'on_track'
+// rather than sharing the same blue as a healthy state.
+const EXECUTION_STATE_META: Record<ExecutionState, { label: string; tone: 'success' | 'brand' | 'danger' | 'neutral' }> = {
   ahead: { label: 'Ahead', tone: 'success' },
   on_track: { label: 'On Track', tone: 'brand' },
-  behind: { label: 'Behind', tone: 'warning' },
+  behind: { label: 'Behind', tone: 'danger' },
   inactive: { label: 'Inactive', tone: 'neutral' },
 };
 
@@ -481,7 +484,7 @@ function StudyPlanProgressCard({ progress }: { progress: StudyPlanProgressResult
             <PyqStat label="Planned Time" value={formatMinutes(progress.plannedMinutes.plannedMinutes)} />
             <PyqStat label="Completed Time" value={formatMinutes(progress.plannedMinutes.completedMinutes)} tone="success" />
             <PyqStat label="Actual Study Time" value={formatMinutes(progress.actualStudyTime.actualStudyMinutes)} />
-            <PyqStat label="Execution" value={EXECUTION_STATE_META[progress.executionState].label} tone={progress.executionState === 'behind' ? 'danger' : 'brand'} small />
+            <PyqStat label="Execution" value={EXECUTION_STATE_META[progress.executionState].label} tone={EXECUTION_STATE_META[progress.executionState].tone} small />
             <PyqStat label="Overdue" value={`${progress.overdue.overduePendingCount}`} tone={progress.overdue.overduePendingCount > 0 ? 'danger' : 'neutral'} />
           </div>
 

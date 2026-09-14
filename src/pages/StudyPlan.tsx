@@ -430,6 +430,11 @@ export default function StudyPlan() {
             </Button>
           )}
         </div>
+        {plan && (
+          <p className="text-[11px] text-slate-400">
+            Rebalance only moves pending tasks to fit your schedule. Adapt also adds or removes tasks based on your current progress — completed work is never touched by either.
+          </p>
+        )}
       </Card>
 
       {!plan ? (
@@ -766,6 +771,12 @@ function PlanScenariosCard({
             <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Scenario: {scenarioTitle(result)}</p>
             <Badge tone={SCENARIO_OUTCOME_META[result.comparison.outcome].tone}>{SCENARIO_OUTCOME_META[result.comparison.outcome].label}</Badge>
           </div>
+
+          {result.type === 'target_date_shift' && result.targetDateShiftDays < 0 && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              A negative shift shortens your preparation period — fewer days remain to complete the plan, not more.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
