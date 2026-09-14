@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy, Quote as QuoteIcon, RefreshCcw } from 'lucide-react';
+import { Flame, Target, BookOpenCheck, Timer, ArrowUpRight, TrendingUp, CalendarClock, Sparkles, Trophy, Quote as QuoteIcon, RefreshCcw, ListChecks } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { useGamification, useRewards, getEncouragementMessage } from '../lib/gamification';
@@ -12,6 +12,7 @@ import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../c
 export default function Dashboard() {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
+  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const sessions = useAppStore((s) => s.sessions);
   const examDate = useAppStore((s) => s.examDate);
   const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
@@ -109,10 +110,11 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:grid-cols-4 lg:w-72">
+            <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:grid-cols-5 lg:w-[26rem]">
               <StatTile icon={Target} label="Syllabus" value={`${overallPct}%`} accent="text-brand-600 dark:text-brand-400" />
               <StatTile icon={Flame} label="Streak" value={`${streak}d`} accent="text-orange-500" />
               <StatTile icon={BookOpenCheck} label="Tests" value={`${attempts.length}`} accent="text-emerald-600 dark:text-emerald-400" />
+              <StatTile icon={ListChecks} label="PYQs" value={`${pyqAttempts.length}`} accent="text-brand-600 dark:text-brand-400" />
               <StatTile icon={TrendingUp} label="Avg Score" value={avgScore !== null ? `${avgScore}%` : '—'} accent="text-fuchsia-600 dark:text-fuchsia-400" />
             </div>
           </div>

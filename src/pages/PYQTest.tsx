@@ -17,6 +17,7 @@ import {
   BarChart3,
   TrendingDown,
   TrendingUp,
+  AlertTriangle,
 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
@@ -33,6 +34,7 @@ import {
   getTopicCounts,
   computeRevisionStatusMap,
   filterPYQs,
+  getVerificationNotice,
   type RevisionFilter,
 } from '../lib/pyqFilters';
 
@@ -833,6 +835,8 @@ export default function PYQTest() {
             })}
           </div>
 
+          <VerificationBanner question={q} />
+
           <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-3">
             <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Explanation</p>
             <FormattedText text={q.explanation} className="text-sm text-slate-600 dark:text-slate-300" />
@@ -1027,6 +1031,31 @@ function StatTile({ label, value, tone = 'neutral' }: { label: string; value: st
       <p className={cx('font-display text-xl font-bold', tones[tone])}>{value}</p>
       <p className="mt-0.5 text-[11px] text-slate-400">{label}</p>
     </Card>
+  );
+}
+
+// Small, compact warning shown near the answer/explanation for disputed/provisional questions
+// only — cross_verified and official questions render nothing here. The note is the question's
+// own existing verificationNote, shown as-is (never invented or rewritten).
+function VerificationBanner({ question }: { question: PYQ }) {
+  const notice = getVerificationNotice(question);
+  if (!notice) return null;
+  const isDisputed = question.verificationStatus === 'disputed';
+  return (
+    <div
+      className={cx(
+        'mt-4 flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs',
+        isDisputed
+          ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
+          : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+      )}
+    >
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+      <div className="min-w-0">
+        <p className="font-semibold">{notice.label}</p>
+        {notice.note && <p className="mt-0.5 text-[11px] opacity-90">{notice.note}</p>}
+      </div>
+    </div>
   );
 }
 

@@ -1,16 +1,16 @@
 import { useMemo } from 'react';
-import type { MockTestAttempt, PomodoroSession, StudyLogEntry } from './types';
+import type { MockTestAttempt, PomodoroSession, PYQAttempt, StudyLogEntry } from './types';
 import { getAllTopicsCount } from '../data/syllabus';
 import { useAppStore } from './store';
 
 // Everything here is derived (computed) from data the app already tracks —
-// completed topics, mock test attempts, study log, starred questions. There
-// is deliberately no separate "XP counter" or "earned badges" list stored
-// anywhere: that would be a second source of truth that could drift from
-// the real data, could be gamed by clicking a toggle repeatedly, and would
-// need its own sync/RLS handling. Deriving it means it's automatically
-// correct, automatically per-user (it only ever reads the current user's
-// already-synced store), and automatically offline-safe.
+// completed topics, mock test attempts, study log, starred questions, PYQ
+// attempts. There is deliberately no separate "XP counter" or "earned
+// badges" list stored anywhere: that would be a second source of truth that
+// could drift from the real data, could be gamed by clicking a toggle
+// repeatedly, and would need its own sync/RLS handling. Deriving it means
+// it's automatically correct, automatically per-user (it only ever reads
+// the current user's already-synced store), and automatically offline-safe.
 
 export interface GamificationInputs {
   completedTopics: Record<string, boolean>;
@@ -18,6 +18,7 @@ export interface GamificationInputs {
   sessions: PomodoroSession[];
   studyLog: Record<string, StudyLogEntry>;
   starredQuestionIds: string[];
+  pyqAttempts: PYQAttempt[];
 }
 
 // --- XP -----------------------------------------------------------------
@@ -33,10 +34,20 @@ export const XP_RULES = {
   perFocusMinute: 1,
   perStarredQuestion: 2,
   perActiveStudyDay: 5,
+  perPyqQuestionAttempted: 1,
 } as const;
 
 export function totalFocusMinutes(studyLog: Record<string, StudyLogEntry>): number {
   return Object.values(studyLog).reduce((sum, e) => sum + e.focusMinutes, 0);
+}
+
+// Counts questions actually answered (correct or wrong, never unanswered) across every saved
+// PYQ attempt. Safe against inflation the same way perMockTestCompleted is: PYQTest.tsx only ever
+// appends one attempt per genuinely submitted test (guarded by submittedRef), so this can't be
+// bumped by re-selecting an answer, reopening a past attempt for review, or bookmarking a
+// question — only by completing another real PYQ practice test.
+export function totalPyqQuestionsAttempted(pyqAttempts: PYQAttempt[]): number {
+  return pyqAttempts.reduce((sum, a) => sum + a.correctCount + a.wrongCount, 0);
 }
 
 export function computeXp(inputs: GamificationInputs): number {
@@ -47,7 +58,8 @@ export function computeXp(inputs: GamificationInputs): number {
     inputs.attempts.length * XP_RULES.perMockTestCompleted +
     totalFocusMinutes(inputs.studyLog) * XP_RULES.perFocusMinute +
     inputs.starredQuestionIds.length * XP_RULES.perStarredQuestion +
-    activeDays * XP_RULES.perActiveStudyDay
+    activeDays * XP_RULES.perActiveStudyDay +
+    totalPyqQuestionsAttempted(inputs.pyqAttempts) * XP_RULES.perPyqQuestionAttempted
   );
 }
 
@@ -202,10 +214,11 @@ export function useGamification(): GamificationSnapshot {
   const sessions = useAppStore((s) => s.sessions);
   const studyLog = useAppStore((s) => s.studyLog);
   const starredQuestionIds = useAppStore((s) => s.starredQuestionIds);
+  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
 
   return useMemo(
-    () => getGamificationSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds }),
-    [completedTopics, attempts, sessions, studyLog, starredQuestionIds],
+    () => getGamificationSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts }),
+    [completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts],
   );
 }
 
@@ -343,10 +356,11 @@ export function useRewards(): RewardsSnapshot {
   const sessions = useAppStore((s) => s.sessions);
   const studyLog = useAppStore((s) => s.studyLog);
   const starredQuestionIds = useAppStore((s) => s.starredQuestionIds);
+  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
 
   return useMemo(
-    () => getRewardsSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds }),
-    [completedTopics, attempts, sessions, studyLog, starredQuestionIds],
+    () => getRewardsSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts }),
+    [completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts],
   );
 }
 

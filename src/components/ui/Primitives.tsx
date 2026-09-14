@@ -52,7 +52,7 @@ export function Badge({
 }: {
   children: ReactNode;
   className?: string;
-  tone?: 'neutral' | 'brand' | 'gold' | 'success' | 'danger';
+  tone?: 'neutral' | 'brand' | 'gold' | 'success' | 'danger' | 'warning';
 }) {
   const tones: Record<string, string> = {
     neutral: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -60,6 +60,7 @@ export function Badge({
     gold: 'bg-gold-100 text-gold-800 dark:bg-gold-500/15 dark:text-gold-300',
     success: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
     danger: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+    warning: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
   };
   return (
     <span className={cx('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium', tones[tone], className)}>

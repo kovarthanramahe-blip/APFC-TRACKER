@@ -10,6 +10,7 @@ import {
   computeRevisionStatusMap,
   revisionStatusOf,
   filterPYQs,
+  getVerificationNotice,
 } from './pyqFilters';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
@@ -262,5 +263,44 @@ describe('real PYQ_BANK data integrity', () => {
   it('subject + topic counts for a real year sum back to that year\'s total (no double-count/drop)', () => {
     const subjectSum = Object.values(getSubjectCounts(PYQ_BANK, 2025)).reduce((a, b) => a + (b ?? 0), 0);
     expect(subjectSum).toBe(120);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('getVerificationNotice', () => {
+  it('returns a disputed notice for a disputed question', () => {
+    const notice = getVerificationNotice({ verificationStatus: 'disputed', verificationNote: 'Two options were challenged.' });
+    expect(notice).toEqual({ label: 'Answer key disputed', note: 'Two options were challenged.' });
+  });
+
+  it('returns a provisional notice for a provisional question', () => {
+    const notice = getVerificationNotice({ verificationStatus: 'provisional' });
+    expect(notice?.label).toBe('Answer not fully verified');
+  });
+
+  it('returns null for a cross_verified question (no warning shown)', () => {
+    expect(getVerificationNotice({ verificationStatus: 'cross_verified' })).toBeNull();
+  });
+
+  it('returns null for an official question', () => {
+    expect(getVerificationNotice({ verificationStatus: 'official' })).toBeNull();
+  });
+
+  it('does not break when verificationNote is missing', () => {
+    expect(() => getVerificationNotice({ verificationStatus: 'disputed' })).not.toThrow();
+    expect(getVerificationNotice({ verificationStatus: 'disputed' })?.note).toBeUndefined();
+  });
+
+  it('passes the verification note through unchanged, never rewriting it', () => {
+    const note = 'UPSC later withdrew this question from the official key.';
+    expect(getVerificationNotice({ verificationStatus: 'provisional', verificationNote: note })?.note).toBe(note);
+  });
+
+  it('real PYQ_BANK disputed/provisional questions all resolve to a non-null notice', () => {
+    const flagged = PYQ_BANK.filter((p) => p.verificationStatus === 'disputed' || p.verificationStatus === 'provisional');
+    expect(flagged.length).toBeGreaterThan(0);
+    for (const p of flagged) {
+      expect(getVerificationNotice(p)).not.toBeNull();
+    }
   });
 });

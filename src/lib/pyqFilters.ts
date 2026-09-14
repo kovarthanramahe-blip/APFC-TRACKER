@@ -98,3 +98,21 @@ export function filterPYQs(bank: PYQ[], opts: PYQFilterOptions): PYQ[] {
     return true;
   });
 }
+
+export interface VerificationNotice {
+  label: string;
+  note?: string;
+}
+
+/**
+ * What (if anything) to show a learner about a question's answer-key reliability. Only
+ * 'disputed' and 'provisional' get a notice — 'official' and 'cross_verified' answers are
+ * trusted as-is, so no warning is shown for them (returns null). The wording here is the
+ * single source of truth for both labels; the verification note itself is passed through
+ * unchanged, never rewritten or invented.
+ */
+export function getVerificationNotice(q: Pick<PYQ, 'verificationStatus' | 'verificationNote'>): VerificationNotice | null {
+  if (q.verificationStatus === 'disputed') return { label: 'Answer key disputed', note: q.verificationNote };
+  if (q.verificationStatus === 'provisional') return { label: 'Answer not fully verified', note: q.verificationNote };
+  return null;
+}
