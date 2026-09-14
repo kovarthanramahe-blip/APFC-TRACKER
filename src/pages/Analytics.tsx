@@ -15,7 +15,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp } from 'lucide-react';
+import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
@@ -23,7 +23,9 @@ import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamificatio
 import { computeAggregateAccuracy } from '../lib/mockTestStats';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
-import { SUBJECT_COLORS, formatMinutes, cx } from '../lib/utils';
+import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressResult } from '../lib/studyPlanProgress';
+import type { PlanTaskType } from '../lib/studyPlan';
+import { SUBJECT_COLORS, formatMinutes, formatDate, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
 function lastNDays(n: number) {
@@ -43,6 +45,9 @@ export default function Analytics() {
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const studyLog = useAppStore((s) => s.studyLog);
   const rewardUnlocks = useAppStore((s) => s.rewardUnlocks);
+  const studyPlan = useAppStore((s) => s.studyPlan);
+  const personalStudyPlanTasks = useAppStore((s) => s.personalStudyPlanTasks);
+  const sessions = useAppStore((s) => s.sessions);
   const gami = useGamification();
   const rewards = useRewards();
 
@@ -93,6 +98,15 @@ export default function Analytics() {
   const totalFocusMinutes = Object.values(studyLog).reduce((sum, e) => sum + e.focusMinutes, 0);
   const totalTestsTaken = attempts.length;
   const avgAccuracy = computeAggregateAccuracy(attempts);
+
+  // Study Plan Progress (Stage 8) — a read-only execution-analytics view (lib/studyPlanProgress),
+  // recomputed from current store state on every render; never persisted, never mutates the plan
+  // or `sessions`. Reuses the app's EXISTING actual-activity record (PomodoroSession) rather than
+  // inventing a second study-history model.
+  const planProgress: StudyPlanProgressResult = useMemo(
+    () => computeStudyPlanProgress({ plan: studyPlan, personalTasks: personalStudyPlanTasks, sessions, currentDate: new Date().toISOString().slice(0, 10) }),
+    [studyPlan, personalStudyPlanTasks, sessions],
+  );
 
   return (
     <div>
@@ -313,6 +327,10 @@ export default function Analytics() {
       </motion.div>
 
       <motion.div {...fadeUp} className="mt-6">
+        <StudyPlanProgressCard progress={planProgress} />
+      </motion.div>
+
+      <motion.div {...fadeUp} className="mt-6">
         <Card className="p-5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Rewards</h3>
@@ -405,6 +423,141 @@ export default function Analytics() {
         </Card>
       </motion.div>
     </div>
+  );
+}
+
+// Keeps "Weekly Progress" compact on a long (e.g. full-year) plan — lib/studyPlanProgress itself
+// still returns every week; this is a display-only slice, favoring the elapsed/current weeks
+// (the ones with real data) over far-future weeks that are necessarily still all zeroes.
+const MAX_WEEKS_SHOWN = 6;
+
+function recentWeeks(progress: Extract<StudyPlanProgressResult, { status: 'ready' }>) {
+  const elapsedOrCurrent = progress.weeklyProgress.filter((w) => w.weekStart <= progress.currentDate);
+  const base = elapsedOrCurrent.length > 0 ? elapsedOrCurrent : progress.weeklyProgress;
+  return base.slice(-MAX_WEEKS_SHOWN);
+}
+
+const EXECUTION_STATE_META: Record<ExecutionState, { label: string; tone: 'success' | 'brand' | 'warning' | 'neutral' }> = {
+  ahead: { label: 'Ahead', tone: 'success' },
+  on_track: { label: 'On Track', tone: 'brand' },
+  behind: { label: 'Behind', tone: 'warning' },
+  inactive: { label: 'Inactive', tone: 'neutral' },
+};
+
+// A small, clearly-labelled local copy of lib/studyPlan's own task-type wording — this stage
+// deliberately doesn't export a new surface from studyPlan.ts (left completely unmodified), same
+// convention studyPlanAdaptive.ts's ADAPTIVE_TASK_TYPE_TITLE already established.
+const TASK_TYPE_TITLE: Record<PlanTaskType, string> = {
+  coverage: 'Coverage',
+  revision: 'Revision',
+  pyq_practice: 'PYQ Practice',
+  review: 'Review',
+};
+
+/** Stage 8 — "how well am I actually executing the study plan?": planned work vs completed
+ * planned work vs actual study activity (lib/studyPlanProgress). Purely derived from current store
+ * state on every render; nothing here is persisted, and nothing here can move or complete a task —
+ * read-only analytics only. */
+function StudyPlanProgressCard({ progress }: { progress: StudyPlanProgressResult }) {
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ClipboardList className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Study Plan Progress</h3>
+        </div>
+        <Link to="/study-plan" className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+          Open Study Plan
+        </Link>
+      </div>
+
+      {progress.status === 'no_plan' ? (
+        <p className="text-sm text-slate-400 dark:text-slate-500">No study plan yet — generate one on the Study Plan page to see execution analytics here.</p>
+      ) : (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <PyqStat label="Plan Completion" value={`${progress.taskCompletion.completionPct}%`} tone="brand" />
+            <PyqStat label="Planned Time" value={formatMinutes(progress.plannedMinutes.plannedMinutes)} />
+            <PyqStat label="Completed Time" value={formatMinutes(progress.plannedMinutes.completedMinutes)} tone="success" />
+            <PyqStat label="Actual Study Time" value={formatMinutes(progress.actualStudyTime.actualStudyMinutes)} />
+            <PyqStat label="Execution" value={EXECUTION_STATE_META[progress.executionState].label} tone={progress.executionState === 'behind' ? 'danger' : 'brand'} small />
+            <PyqStat label="Overdue" value={`${progress.overdue.overduePendingCount}`} tone={progress.overdue.overduePendingCount > 0 ? 'danger' : 'neutral'} />
+          </div>
+
+          <div>
+            <div className="mb-1.5 flex items-center justify-between text-xs">
+              <span className="text-slate-500 dark:text-slate-400">Planned time completed</span>
+              <span className="text-slate-400">{progress.plannedMinutes.completionPct}%</span>
+            </div>
+            <ProgressBar value={progress.plannedMinutes.completionPct} colorClassName="bg-brand-500" height="h-1.5" />
+          </div>
+
+          {progress.recommendations[0] && <p className="text-xs text-brand-700 dark:text-brand-300">{progress.recommendations[0]}</p>}
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">By Task Type</p>
+            <div className="space-y-2">
+              {(Object.keys(TASK_TYPE_TITLE) as PlanTaskType[]).map((type) => {
+                const t = progress.taskTypeProgress[type];
+                if (t.planned === 0) return null;
+                return (
+                  <div key={type} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{TASK_TYPE_TITLE[type]}</span>
+                    <div className="flex shrink-0 items-center gap-3 text-slate-400">
+                      <span>
+                        {t.completed}/{t.planned}
+                      </span>
+                      <Badge tone={t.completionPct >= 60 ? 'success' : t.completionPct > 0 ? 'warning' : 'neutral'}>{t.completionPct}%</Badge>
+                    </div>
+                  </div>
+                );
+              })}
+              {progress.personalTaskTypeProgress.personal.planned > 0 && (
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">Personal</span>
+                  <div className="flex shrink-0 items-center gap-3 text-slate-400">
+                    <span>
+                      {progress.personalTaskTypeProgress.personal.completed}/{progress.personalTaskTypeProgress.personal.planned}
+                    </span>
+                    <Badge tone="neutral">{progress.personalTaskTypeProgress.personal.completionPct}%</Badge>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {progress.weeklyProgress.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Weekly Progress</p>
+                {progress.weeklyProgress.length > MAX_WEEKS_SHOWN && (
+                  <p className="text-[11px] text-slate-400">Most recent {MAX_WEEKS_SHOWN} of {progress.weeklyProgress.length} weeks</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                {recentWeeks(progress).map((w) => (
+                  <div
+                    key={w.weekStart}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 text-xs"
+                  >
+                    <span className="text-slate-500 dark:text-slate-400">
+                      {formatDate(w.weekStart)} – {formatDate(w.weekEnd)}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-3 text-slate-500 dark:text-slate-400">
+                      <span>
+                        {w.completedTaskCount}/{w.plannedTaskCount} tasks
+                      </span>
+                      <span>{formatMinutes(w.actualStudyMinutes)} actual</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">{w.executionPercentage}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
