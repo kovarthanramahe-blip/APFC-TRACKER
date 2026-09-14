@@ -54,16 +54,46 @@ export interface PYQOption {
   text: string;
 }
 
-export interface PYQ {
+// --- Unified Question Architecture, Stage 1 (type-level only — see lib/practiceQuestion.ts) -----
+// The common shape a question needs to be usable by the shared practice/mock session UI, regardless
+// of where it came from. PYQ (below) already has every one of these fields, so it satisfies this
+// interface structurally with no data changes — see the explicit `extends` on PYQ.
+export interface PracticeQuestion {
   id: string;
-  year: number;
   subject: SubjectColorKey;
   topicId: string; // FK -> SyllabusTopic.id
-  subtopic?: string;
   question: string;
   options: PYQOption[];
   correctOptionId: string;
   explanation: string;
+}
+
+/** An authentic previous-year question's provenance — the exact fields PYQ already carries flat,
+ * just viewable as one discriminated value (see lib/practiceQuestion.ts's toPyqProvenance). */
+export interface PyqProvenance {
+  kind: 'pyq';
+  year: number;
+  verificationStatus: PYQVerificationStatus;
+  verificationNote?: string;
+  source?: string;
+}
+
+/** A future source-backed generated question's provenance (e.g. calibrated against PIB, India
+ * Code, Ministry of Labour, EPFO, RBI material) — no generated questions exist yet; this only
+ * reserves the shape so a later question type can be added without another provenance redesign. */
+export interface GeneratedProvenance {
+  kind: 'generated';
+  sourceAuthority: string; // e.g. 'PIB' | 'India Code' | 'Ministry of Labour' | 'EPFO' | 'RBI'
+  sourceReference: string; // citation/URL/document identifying the specific source material
+  generatedAt: string; // ISO timestamp
+  calibratedAgainstPyqIds?: string[]; // PYQ ids this question's pattern/difficulty was calibrated against
+}
+
+export type QuestionProvenance = PyqProvenance | GeneratedProvenance;
+
+export interface PYQ extends PracticeQuestion {
+  year: number;
+  subtopic?: string;
   verificationStatus: PYQVerificationStatus;
   verificationNote?: string;
   source?: string;
