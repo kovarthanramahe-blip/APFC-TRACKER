@@ -9,6 +9,7 @@ import {
   addPersonalStudyPlanTask,
   rebalanceStudyPlan,
   computeEditedCapacity,
+  planHasCompletedTasks,
   MAX_TASK_MINUTES,
   type PersonalPlanTask,
 } from './studyPlanEditing';
@@ -332,5 +333,27 @@ describe('computeEditedCapacity', () => {
         expect(n).toBeGreaterThanOrEqual(0);
       }
     }
+  });
+});
+
+// --- P1 fix #2: Regenerate-confirmation decision logic ------------------------------
+describe('planHasCompletedTasks', () => {
+  it('is false for an empty task list', () => {
+    expect(planHasCompletedTasks([])).toBe(false);
+  });
+
+  it('is false when every task is still pending', () => {
+    const tasks = [task({ id: 't1' }), task({ id: 't2', status: 'pending' })];
+    expect(planHasCompletedTasks(tasks)).toBe(false);
+  });
+
+  it('is true when at least one task is completed', () => {
+    const tasks = [task({ id: 't1' }), task({ id: 't2', status: 'completed' })];
+    expect(planHasCompletedTasks(tasks)).toBe(true);
+  });
+
+  it('is true when every task is completed', () => {
+    const tasks = [task({ id: 't1', status: 'completed' }), task({ id: 't2', status: 'completed' })];
+    expect(planHasCompletedTasks(tasks)).toBe(true);
   });
 });

@@ -25,7 +25,7 @@ import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressResult } from '../lib/studyPlanProgress';
 import type { PlanTaskType } from '../lib/studyPlan';
-import { SUBJECT_COLORS, formatMinutes, formatDate, cx } from '../lib/utils';
+import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
 function lastNDays(n: number) {
@@ -103,8 +103,9 @@ export default function Analytics() {
   // recomputed from current store state on every render; never persisted, never mutates the plan
   // or `sessions`. Reuses the app's EXISTING actual-activity record (PomodoroSession) rather than
   // inventing a second study-history model.
+  // P1 fix #4 — the user's LOCAL calendar date, not UTC's (see lib/utils's getLocalDateString).
   const planProgress: StudyPlanProgressResult = useMemo(
-    () => computeStudyPlanProgress({ plan: studyPlan, personalTasks: personalStudyPlanTasks, sessions, currentDate: new Date().toISOString().slice(0, 10) }),
+    () => computeStudyPlanProgress({ plan: studyPlan, personalTasks: personalStudyPlanTasks, sessions, currentDate: getLocalDateString() }),
     [studyPlan, personalStudyPlanTasks, sessions],
   );
 
@@ -493,6 +494,13 @@ function StudyPlanProgressCard({ progress }: { progress: StudyPlanProgressResult
           </div>
 
           {progress.recommendations[0] && <p className="text-xs text-brand-700 dark:text-brand-300">{progress.recommendations[0]}</p>}
+
+          {/* P1 fix #3 — Plan Progress and Plan Health (Study Plan page) answer different
+              questions and can legitimately disagree; this line is the only thing that changed
+              here, no new logic. */}
+          <p className="text-[11px] text-slate-400">
+            Plan Progress checks whether your actual pace matches the plan so far. See Plan Health on the Study Plan page for whether your remaining workload still fits your remaining time.
+          </p>
 
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">By Task Type</p>

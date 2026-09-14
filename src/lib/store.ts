@@ -13,6 +13,7 @@ import type { PersonalPlanTask } from './studyPlanEditing';
 import { adaptStudyPlan as runAdaptStudyPlan, type AdaptiveResult } from './studyPlanAdaptive';
 import type { SyllabusSubject } from './types';
 import type { PyqPerformanceSnapshot } from './pyqPerformance';
+import { getLocalDateString } from './utils';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -86,7 +87,10 @@ interface AppState {
   // every other field (capacity, capacityReport, coverageSummary, phases, config) exactly as
   // generated. Personal tasks live in their own array — never mixed into the engine's own task
   // list, so they can never be mistaken for syllabus-derived tasks.
-  setStudyPlanTasks: (tasks: StudyPlanTask[]) => void;
+  // P1 fix #1 — `unscheduledTopicIds` is optional here: most edits (complete/move/resize/remove)
+  // never change which topics have a task at all, so they omit it and it stays as-is. Rebalance
+  // recomputes it live (see StudyPlan.tsx's handleRebalance) and passes the fresh value through.
+  setStudyPlanTasks: (tasks: StudyPlanTask[], unscheduledTopicIds?: string[]) => void;
   personalStudyPlanTasks: PersonalPlanTask[];
   setPersonalStudyPlanTasks: (tasks: PersonalPlanTask[]) => void;
 
@@ -103,8 +107,12 @@ interface AppState {
   resetAllData: () => void;
 }
 
+// P1 fix #4 — the user's LOCAL calendar date, not UTC's (see lib/utils's getLocalDateString):
+// toISOString() reports the wrong day for a positive-offset timezone like IST during the early
+// hours of the morning. This only changes how "today" is computed going forward — no persisted
+// StudyLogEntry/task/attempt date already on disk is reinterpreted or rewritten.
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return getLocalDateString();
 }
 
 function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): StudyLogEntry {
@@ -241,8 +249,12 @@ export const useAppStore = create<AppState>()(
       setStudyPlan: (plan) => set({ studyPlan: plan, studyPlanGeneratedAt: new Date().toISOString() }),
       clearStudyPlan: () => set({ studyPlan: null, studyPlanGeneratedAt: null }),
 
-      setStudyPlanTasks: (tasks) =>
-        set((state) => (state.studyPlan ? { studyPlan: { ...state.studyPlan, tasks } } : state)),
+      setStudyPlanTasks: (tasks, unscheduledTopicIds) =>
+        set((state) =>
+          state.studyPlan
+            ? { studyPlan: { ...state.studyPlan, tasks, ...(unscheduledTopicIds !== undefined ? { unscheduledTopicIds } : {}) } }
+            : state,
+        ),
 
       personalStudyPlanTasks: [],
       setPersonalStudyPlanTasks: (tasks) => set({ personalStudyPlanTasks: tasks }),
@@ -258,7 +270,9 @@ export const useAppStore = create<AppState>()(
           pyqPerf,
           currentDate,
         });
-        set({ studyPlan: { ...state.studyPlan, tasks: result.updatedTasks } });
+        // P1 fix #1 — persist the freshly recomputed unscheduledTopicIds alongside the adapted
+        // tasks, so CapacitySummary never displays a stale generation-time snapshot after Adapt.
+        set({ studyPlan: { ...state.studyPlan, tasks: result.updatedTasks, unscheduledTopicIds: result.unscheduledTopicIds } });
         return result;
       },
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { adaptStudyPlan, computeRemainingCapacity, type AdaptiveInput } from './studyPlanAdaptive';
+import { adaptStudyPlan, computeRemainingCapacity, computeUnscheduledTopicIds, type AdaptiveInput } from './studyPlanAdaptive';
 import { completeStudyPlanTask, moveStudyPlanTask, type PersonalPlanTask } from './studyPlanEditing';
 import { generateStudyPlan, type PlanCapacity, type StudyPlan, type StudyPlanConfig, type StudyPlanTask } from './studyPlan';
 import { computePyqPerformance } from './pyqPerformance';
@@ -321,6 +321,69 @@ describe('adaptStudyPlan — Stage 3 compatibility', () => {
     expect(completeResult.ok).toBe(true);
     const moveResult = moveStudyPlanTask(result.updatedTasks, 't1-coverage', '2026-01-10', { validStudyDates: capacity.studyDayDates });
     expect(moveResult.ok).toBe(true);
+  });
+});
+
+// --- P1 fix #1: unscheduled topics never go stale after Rebalance/Adapt --------------------
+describe('computeUnscheduledTopicIds', () => {
+  it('flags a topic that needs coverage but has no task at all', () => {
+    const ids = computeUnscheduledTopicIds([], syllabus, {}, null);
+    expect(ids).toContain('t1');
+  });
+
+  it('does not flag a topic that already has a pending task matching its current need', () => {
+    const t = task({ id: 't1-coverage', topicId: 't1', taskType: 'coverage' });
+    const ids = computeUnscheduledTopicIds([t], syllabus, {}, null);
+    expect(ids).not.toContain('t1');
+  });
+
+  it('does not flag a topic whose matching task is already completed', () => {
+    const t = task({ id: 't1-coverage', topicId: 't1', taskType: 'coverage', status: 'completed' });
+    const ids = computeUnscheduledTopicIds([t], syllabus, { t1: true }, strongPerf);
+    expect(ids).not.toContain('t1');
+  });
+
+  it('never flags a strong topic, even with zero tasks', () => {
+    const ids = computeUnscheduledTopicIds([], syllabus, { t1: true }, strongPerf);
+    expect(ids).not.toContain('t1');
+  });
+
+  it('flags a topic whose only existing task no longer matches what it currently needs', () => {
+    // t1 has an old pyq_practice task, but its current (weak) PYQ performance actually needs revision.
+    const stale = task({ id: 't1-practice', topicId: 't1', taskType: 'pyq_practice' });
+    const ids = computeUnscheduledTopicIds([stale], syllabus, { t1: true }, weakPerf);
+    expect(ids).toContain('t1');
+  });
+});
+
+describe('adaptStudyPlan — unscheduledTopicIds is recomputed live, never stale', () => {
+  it('a topic flagged unscheduled against the ORIGINAL tasks is no longer flagged after Adapt fixes it', () => {
+    // Reproduces the exact staleness the audit found: t1's only existing task (pyq_practice) no
+    // longer matches what its current (weak) PYQ performance needs (revision).
+    const stale = task({ id: 't1-practice', topicId: 't1', taskType: 'pyq_practice', date: '2026-01-09' });
+    const i = input({ plan: buildPlan([stale]), completedTopics: { t1: true }, pyqPerf: weakPerf });
+
+    // Before: computed straight off the plan's original (frozen-shape) task list, t1 IS unscheduled.
+    const before = computeUnscheduledTopicIds(i.plan.tasks, syllabus, i.completedTopics, i.pyqPerf);
+    expect(before).toContain('t1');
+
+    // After running Adapt, the returned unscheduledTopicIds reflects the NEW task list — t1 is fixed.
+    const result = adaptStudyPlan(i);
+    expect(result.addedTaskIds).toContain('t1-revision');
+    expect(result.unscheduledTopicIds).not.toContain('t1');
+  });
+
+  it('a topic that becomes strong is never reported as unscheduled after Adapt', () => {
+    const t = task({ id: 't1-coverage', topicId: 't1', taskType: 'coverage', date: '2026-01-09' });
+    const result = adaptStudyPlan(input({ plan: buildPlan([t]), completedTopics: { t1: true }, pyqPerf: strongPerf }));
+    expect(result.removedTaskIds).toEqual(['t1-coverage']);
+    expect(result.unscheduledTopicIds).not.toContain('t1');
+  });
+
+  it('is deterministic: identical input always produces an identical unscheduledTopicIds', () => {
+    const t = task({ id: 't1-practice', topicId: 't1', taskType: 'pyq_practice' });
+    const i = input({ plan: buildPlan([t]), completedTopics: { t1: true }, pyqPerf: weakPerf });
+    expect(adaptStudyPlan(i).unscheduledTopicIds).toEqual(adaptStudyPlan(i).unscheduledTopicIds);
   });
 });
 

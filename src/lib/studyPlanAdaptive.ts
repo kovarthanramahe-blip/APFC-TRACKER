@@ -65,11 +65,41 @@ export interface AdaptiveResult {
   /** Pending tasks whose date was already before `currentDate` when this run started. */
   missedTaskIds: string[];
   unscheduledTaskIds: string[];
+  /** P1 fix #1 — topics whose current workload needs a task but has none in `updatedTasks` (see
+   * computeUnscheduledTopicIds below). Freshly recomputed here every run, so this never goes
+   * stale after adapting — callers should persist this alongside `updatedTasks`. */
+  unscheduledTopicIds: string[];
   warnings: string[];
   capacityReport: RemainingCapacityReport;
   /** One entry per meaningful change, each with a concrete, deterministic reason — never a vague
    * generated explanation — so the UI can answer "why did my plan change?". */
   changes: AdaptiveChange[];
+}
+
+/**
+ * P1 fix #1 — "which topics currently need a task but don't have one?", derived live from CURRENT
+ * tasks + CURRENT topic status, rather than trusting a frozen snapshot from whenever the plan was
+ * last generated. This is exactly the same per-topic check adaptStudyPlan already makes internally
+ * to decide whether to add a task (a topic "has" what it needs when some task — pending or
+ * completed — already matches its current required taskType); exposed here so both Rebalance and
+ * Adapt can refresh `StudyPlan.unscheduledTopicIds` instead of leaving it stale. Never recomputes
+ * the Stage 1 generation/budgeting algorithm itself.
+ */
+export function computeUnscheduledTopicIds(
+  tasks: StudyPlanTask[],
+  syllabus: SyllabusSubject[],
+  completedTopics: Record<string, boolean>,
+  pyqPerf: PyqPerformanceSnapshot | null,
+): string[] {
+  const statuses = computeUnifiedTopicStatus(syllabus, completedTopics, pyqPerf);
+  const unscheduled: string[] = [];
+  for (const status of statuses) {
+    const workload = estimateTopicWorkload(status);
+    if (!workload.taskType) continue; // 'strong' — nothing needed
+    const hasMatchingTask = tasks.some((t) => t.topicId === status.topicId && t.taskType === workload.taskType);
+    if (!hasMatchingTask) unscheduled.push(status.topicId);
+  }
+  return unscheduled;
 }
 
 // Mirrors lib/studyPlan.ts's own TASK_TYPE_TITLE wording (private to that module) — kept as a
@@ -280,6 +310,7 @@ export function adaptStudyPlan(input: AdaptiveInput): AdaptiveResult {
   }
 
   const capacityReport = computeRemainingCapacity(plan.capacity, currentDate, rebalance.tasks, personalTasks);
+  const unscheduledTopicIds = computeUnscheduledTopicIds(rebalance.tasks, syllabus, completedTopics, pyqPerf);
 
   const warnings: string[] = [];
   if (rebalance.unscheduledTaskIds.length > 0) {
@@ -296,6 +327,7 @@ export function adaptStudyPlan(input: AdaptiveInput): AdaptiveResult {
     completedTaskIds: completed.map((t) => t.id),
     missedTaskIds,
     unscheduledTaskIds: rebalance.unscheduledTaskIds,
+    unscheduledTopicIds,
     warnings,
     capacityReport,
     changes,

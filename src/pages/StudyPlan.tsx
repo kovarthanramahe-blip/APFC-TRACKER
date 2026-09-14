@@ -40,12 +40,14 @@ import {
   addPersonalStudyPlanTask,
   rebalanceStudyPlan,
   computeEditedCapacity,
+  planHasCompletedTasks,
   MAX_TASK_MINUTES,
   type PersonalPlanTask,
 } from '../lib/studyPlanEditing';
+import { computeUnscheduledTopicIds } from '../lib/studyPlanAdaptive';
 import { computePlanHealth, type PlanHealthInput, type PlanHealthReport, type PlanHealthVerdict } from '../lib/studyPlanHealth';
 import { simulateMissedStudyDays, simulateTargetDateShift, type ScenarioResult } from '../lib/studyPlanScenarios';
-import { formatDate, formatMinutes, cx } from '../lib/utils';
+import { formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 
 type TaskKind = 'syllabus' | 'personal';
@@ -73,8 +75,9 @@ const VERDICT_META: Record<CapacityVerdict, { label: string; tone: 'success' | '
   insufficient: { label: 'Insufficient', tone: 'danger', icon: AlertTriangle },
 };
 
+// P1 fix #4 — the user's LOCAL calendar date, not UTC's (see lib/utils's getLocalDateString).
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return getLocalDateString();
 }
 
 /** Groups tasks by date, dates sorted ascending — pure display-layer grouping only; the engine
@@ -142,6 +145,16 @@ export default function StudyPlan() {
   }
 
   function handleGenerate() {
+    // P1 fix #2 — regenerating replaces `plan.tasks` wholesale (a brand-new, all-pending task
+    // list), which silently discards this plan's own task-level completion history. Warn first,
+    // exactly like the existing Remove-task confirmation, and only when there's actually
+    // something to lose. completedTopics/PYQ/session history are never touched either way.
+    if (plan && planHasCompletedTasks(plan.tasks)) {
+      const confirmed = confirm(
+        'Regenerating the plan will replace the current Study Plan and reset completion status for its tasks. Your syllabus, PYQ, and study-session history will not be deleted. Continue?',
+      );
+      if (!confirmed) return;
+    }
     // The engine (lib/studyPlan.ts) is the single source of truth for plan generation — this
     // page only gathers the existing inputs it needs (real syllabus, real progress, real PYQ
     // performance via the F3 helper) and hands them over, never recomputing planning logic itself.
@@ -242,7 +255,12 @@ export default function StudyPlan() {
   function handleRebalance() {
     if (!plan) return;
     const result = rebalanceStudyPlan(plan.capacity, plan.tasks);
-    setStudyPlanTasks(result.tasks);
+    // P1 fix #1 — Rebalance never changes which topics have a task, but it CAN change which
+    // tasks fit the calendar; recompute unscheduledTopicIds against the post-rebalance task list
+    // so CapacitySummary's "N topics could not be scheduled" badge is never stale.
+    const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
+    const unscheduledTopicIds = computeUnscheduledTopicIds(result.tasks, SYLLABUS, completedTopics, pyqPerf);
+    setStudyPlanTasks(result.tasks, unscheduledTopicIds);
     if (result.movedCount === 0) {
       setActionMessage('Nothing needed to move — your plan is already well balanced.');
     } else {
@@ -625,6 +643,12 @@ function PlanHealthCard({ health }: { health: PlanHealthReport }) {
       )}
 
       {health.recommendations[0] && <p className="mt-3 text-xs text-brand-700 dark:text-brand-300">{health.recommendations[0]}</p>}
+
+      {/* P1 fix #3 — Plan Health and Plan Progress (Analytics) answer different questions and can
+          legitimately disagree; this line is the only thing that changed here, no new logic. */}
+      <p className="mt-3 text-[11px] text-slate-400">
+        Plan Health checks whether your remaining workload fits your remaining time. See Plan Progress on Analytics for whether your actual pace matches the plan so far.
+      </p>
     </Card>
   );
 }

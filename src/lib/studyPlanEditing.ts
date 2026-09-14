@@ -190,6 +190,19 @@ export function removeStudyPlanTask<T extends EditableTaskLike>(tasks: T[], task
   return { tasks: tasks.filter((t) => t.id !== taskId), ok: true };
 }
 
+// --- Regenerate confirmation (P1 fix #2) ------------------------------------------
+/**
+ * Whether generating a NEW plan (replacing the current one wholesale, via lib/studyPlan's
+ * generateStudyPlan) needs the student to explicitly confirm first — true whenever the CURRENT
+ * plan has at least one completed task, since regenerating discards that plan's own task-level
+ * completion history (a brand-new task list is produced, all 'pending'). completedTopics, PYQ
+ * attempts, and PomodoroSession history are never touched by regeneration either way, so only
+ * syllabus plan tasks are checked here — never personalTasks (which regeneration never replaces).
+ */
+export function planHasCompletedTasks(tasks: { status: PlanTaskStatus }[]): boolean {
+  return tasks.some((t) => t.status === 'completed');
+}
+
 // --- Rebalance ---------------------------------------------------------------------
 export interface RebalanceResult {
   tasks: StudyPlanTask[];

@@ -26,7 +26,7 @@ import { computeUnifiedTopicStatus, sortByAttentionPriority, type TopicStatus } 
 import { completeStudyPlanTask } from '../lib/studyPlanEditing';
 import { computeDailyStudyQueue, type DailyQueueInput, type DailyQueueItem, type DailyQueueResult } from '../lib/studyPlanDailyQueue';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
-import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, cx } from '../lib/utils';
+import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
 
 export default function Dashboard() {
@@ -44,7 +44,8 @@ export default function Dashboard() {
   const gami = useGamification();
   const rewards = useRewards();
   const streak = gami.streaks.current;
-  const todayKey = new Date().toISOString().slice(0, 10);
+  // P1 fix #4 — the user's LOCAL calendar date, not UTC's (see lib/utils's getLocalDateString).
+  const todayKey = getLocalDateString();
   const todayMinutes = studyLog[todayKey]?.focusMinutes ?? 0;
 
   const [quoteOverride, setQuoteOverride] = useState<number | null>(null);

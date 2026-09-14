@@ -19,6 +19,18 @@ export const SUBJECT_COLORS: Record<
   labourMovement: { text: 'text-pink-700 dark:text-pink-300', bg: 'bg-pink-50 dark:bg-pink-500/10', border: 'border-pink-200 dark:border-pink-500/30', dot: 'bg-pink-500', chart: '#be185d' },
 };
 
+/** The LOCAL calendar date as yyyy-mm-dd — never `toISOString()`, which is always UTC and can
+ * report the wrong calendar day for a positive-offset timezone (e.g. IST, UTC+5:30) during the
+ * early hours of the morning. Accepts an optional Date so callers (and tests) can pass a specific
+ * instant instead of relying on the system clock; reads that Date's own local getters, so the
+ * result always matches whatever timezone the JS runtime is actually configured for. */
+export function getLocalDateString(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function daysUntil(dateStr: string): number {
   const target = new Date(dateStr + 'T00:00:00');
   const now = new Date();
