@@ -9,6 +9,7 @@ import {
   clearAnswer,
   goToNextQuestion,
   goToPreviousQuestion,
+  setSessionCurrent,
   setSessionReviewIndex,
   reviewNextQuestion,
   reviewPreviousQuestion,
@@ -110,6 +111,21 @@ describe('goToNextQuestion / goToPreviousQuestion', () => {
   });
 });
 
+describe('setSessionCurrent', () => {
+  it('jumps current directly to the given index — Mock Test\'s always-visible navigator', () => {
+    const state = startSession([question('q1'), question('q2'), question('q3')]);
+    expect(setSessionCurrent(state, 2).current).toBe(2);
+  });
+
+  it('does not disturb answers, reviewIndex, or the questions list', () => {
+    const state = selectAnswer(startSession([question('q1'), question('q2')]), 'q1', 'q1-correct');
+    const jumped = setSessionCurrent(state, 1);
+    expect(jumped.answers).toEqual(state.answers);
+    expect(jumped.reviewIndex).toBe(state.reviewIndex);
+    expect(jumped.questions).toBe(state.questions);
+  });
+});
+
 describe('setSessionReviewIndex / reviewNextQuestion / reviewPreviousQuestion', () => {
   it('setSessionReviewIndex jumps directly to the given index', () => {
     const state = startSession([question('q1'), question('q2'), question('q3')]);
@@ -185,5 +201,40 @@ describe('computeSessionResults', () => {
       score: -0.833333,
       accuracy: 0,
     });
+  });
+});
+
+describe('genericity beyond PracticeQuestion (Mock Test\'s synthetic Question type)', () => {
+  // Mock Test's Question type (data/questionBank.ts) has a free-text `topic` field instead of a
+  // `topicId` FK, so it does NOT satisfy PracticeQuestion — this fixture deliberately mirrors that
+  // shape to prove the engine works for it anyway (it never reads a question's own fields).
+  interface MockLikeQuestion {
+    id: string;
+    subject: string;
+    topic: string;
+    correctOptionId: string;
+    options: { id: string; text: string }[];
+  }
+
+  function mockQuestion(id: string): MockLikeQuestion {
+    return { id, subject: 'english', topic: 'Grammar', correctOptionId: `${id}-correct`, options: [{ id: `${id}-correct`, text: 'Right' }] };
+  }
+
+  it('drives a full session over a non-PracticeQuestion type with a blueprint-style marking scheme', () => {
+    const scoring: QuestionSessionScoring<MockLikeQuestion> = {
+      marksCorrect: 2.5,
+      marksWrong: -(2.5 * (1 / 3)),
+      statusOf: (q, answers) => {
+        const ans = answers[q.id];
+        if (!ans) return 'unanswered';
+        return ans === q.correctOptionId ? 'correct' : 'wrong';
+      },
+    };
+    let state = startSession([mockQuestion('m1'), mockQuestion('m2')]);
+    state = selectAnswer(state, 'm1', 'm1-correct');
+    state = setSessionCurrent(state, 1);
+    const results = computeSessionResults(state, scoring);
+    expect(results).toEqual({ total: 2, attempted: 1, correct: 1, wrong: 0, unanswered: 1, score: 2.5, accuracy: 100 });
+    expect(state.current).toBe(1);
   });
 });

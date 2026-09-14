@@ -1,9 +1,9 @@
-// Unified Question Architecture, Stage 2 — a thin React binding over questionSessionEngine.ts's
+// Unified Question Architecture, Stage 2-3 — a thin React binding over questionSessionEngine.ts's
 // pure state transitions. All the actual logic lives in that module (and is unit-tested there);
 // this hook only wires it to useState/useRef and exposes a stable, ergonomic call surface for a
-// question-session screen (currently PYQTest.tsx's testing/results/review phases).
+// question-session screen — currently PYQTest.tsx's testing/results/review phases and
+// MockTestRunner.tsx's testing phase (with its own timer/flagging/navigator layered on top here).
 import { useMemo, useRef, useState } from 'react';
-import type { PracticeQuestion } from './types';
 import {
   createEmptySessionState,
   startSession,
@@ -13,6 +13,7 @@ import {
   clearAnswer as clearAnswerPure,
   goToNextQuestion,
   goToPreviousQuestion,
+  setSessionCurrent,
   setSessionReviewIndex,
   reviewNextQuestion,
   reviewPreviousQuestion,
@@ -21,7 +22,7 @@ import {
   type QuestionSessionScoring,
 } from './questionSessionEngine';
 
-export function useQuestionSession<T extends PracticeQuestion>(scoring: QuestionSessionScoring<T>) {
+export function useQuestionSession<T>(scoring: QuestionSessionScoring<T>) {
   const [state, setState] = useState<QuestionSessionState<T>>(createEmptySessionState<T>);
   // A one-shot imperative guard, not reactive session data — see questionSessionEngine.ts's header
   // comment for why this is deliberately a ref, not part of QuestionSessionState.
@@ -67,6 +68,12 @@ export function useQuestionSession<T extends PracticeQuestion>(scoring: Question
 
     goToPrevious() {
       setState(goToPreviousQuestion);
+    },
+
+    /** Jumps directly to a question index within the current (unsubmitted) session — used by Mock
+     * Test's always-visible navigator grid. */
+    goToQuestion(index: number) {
+      setState((s) => setSessionCurrent(s, index));
     },
 
     setReviewIndex(index: number) {

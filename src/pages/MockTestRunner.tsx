@@ -6,7 +6,19 @@ import { getBlueprint, pickQuestionsForBlueprint } from '../data/mockTests';
 import { useAppStore } from '../lib/store';
 import { cx, uuid, SUBJECT_COLORS } from '../lib/utils';
 import { Button, Card } from '../components/ui/Primitives';
-import type { MockTestAttempt } from '../lib/types';
+import type { MockTestAttempt, Question } from '../lib/types';
+import { useQuestionSession } from '../lib/useQuestionSession';
+import type { QuestionResultStatus, QuestionSessionScoring } from '../lib/questionSessionEngine';
+
+// Mock Test's own correctness classifier — structurally identical to lib/pyqPerformance's
+// pyqQuestionStatus, but typed for the synthetic Question (data/questionBank.ts), which doesn't
+// yet satisfy PracticeQuestion (see lib/types.ts), so that PYQ-typed function can't be reused here
+// without widening it — out of scope for this stage.
+function mockQuestionStatus(q: Question, answers: Record<string, string | null>): QuestionResultStatus {
+  const ans = answers[q.id];
+  if (!ans) return 'unanswered';
+  return ans === q.correctOptionId ? 'correct' : 'wrong';
+}
 
 export default function MockTestRunner() {
   const { blueprintId } = useParams();
@@ -14,15 +26,26 @@ export default function MockTestRunner() {
   const addAttempt = useAppStore((s) => s.addAttempt);
 
   const blueprint = blueprintId ? getBlueprint(blueprintId) : undefined;
-  const questions = useMemo(() => (blueprint ? pickQuestionsForBlueprint(blueprint) : []), [blueprint]);
+  const pickedQuestions = useMemo(() => (blueprint ? pickQuestionsForBlueprint(blueprint) : []), [blueprint]);
+
+  // Unified Question Architecture Stage 3 — the same shared testing engine PYQTest.tsx uses
+  // (lib/questionSessionEngine.ts), with Mock Test's own blueprint-driven marking scheme (not
+  // PYQ's fixed 2.5/-0.833333) supplied as data; the engine itself stays unaware of either.
+  const scoring: QuestionSessionScoring<Question> = useMemo(
+    () => ({
+      marksCorrect: blueprint?.marksPerCorrect ?? 0,
+      marksWrong: blueprint ? -(blueprint.marksPerCorrect * blueprint.negativeMarkFraction) : 0,
+      statusOf: mockQuestionStatus,
+    }),
+    [blueprint],
+  );
+  const session = useQuestionSession<Question>(scoring);
+  const { questions, current, answers, results } = session;
 
   const [started, setStarted] = useState(false);
-  const [current, setCurrent] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string | null>>({});
   const [flagged, setFlagged] = useState<Record<string, boolean>>({});
   const [secondsLeft, setSecondsLeft] = useState((blueprint?.durationMinutes ?? 0) * 60);
   const startedAtRef = useRef<string>('');
-  const submittedRef = useRef(false);
 
   useEffect(() => {
     if (!started) return;
@@ -52,33 +75,28 @@ export default function MockTestRunner() {
   }
 
   function handleSubmit() {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
+    if (!session.trySubmit()) return;
 
-    let correct = 0;
-    let wrong = 0;
-    let skipped = 0;
+    // Per-subject aggregation is Mock-Test-specific (the shared engine's results are subject-
+    // agnostic), so it stays a local loop here, reusing the same mockQuestionStatus classifier
+    // handed to the engine above — one classification rule, not two.
     const subjectBreakdown: MockTestAttempt['subjectBreakdown'] = {};
-
     questions.forEach((q) => {
       const bd = subjectBreakdown[q.subject] ?? { correct: 0, wrong: 0, skipped: 0, total: 0 };
       bd.total += 1;
-      const ans = answers[q.id];
-      if (!ans) {
-        skipped += 1;
-        bd.skipped += 1;
-      } else if (ans === q.correctOptionId) {
-        correct += 1;
-        bd.correct += 1;
-      } else {
-        wrong += 1;
-        bd.wrong += 1;
-      }
+      const status = mockQuestionStatus(q, answers);
+      if (status === 'unanswered') bd.skipped += 1;
+      else if (status === 'correct') bd.correct += 1;
+      else bd.wrong += 1;
       subjectBreakdown[q.subject] = bd;
     });
 
-    const score = Math.round((correct * blueprint!.marksPerCorrect - wrong * blueprint!.marksPerCorrect * blueprint!.negativeMarkFraction) * 100) / 100;
-    const maxScore = questions.length * blueprint!.marksPerCorrect;
+    // Same rounding the original implementation applied before persisting — the engine's raw
+    // `results.score` (correct*marksCorrect + wrong*marksWrong, mathematically identical to the
+    // original's correct*marksPerCorrect - wrong*marksPerCorrect*negativeMarkFraction) is rounded
+    // here exactly as before, so the persisted value is unchanged bit-for-bit.
+    const score = Math.round(results.score * 100) / 100;
+    const maxScore = results.total * blueprint!.marksPerCorrect;
 
     const attempt: MockTestAttempt = {
       id: uuid(),
@@ -89,9 +107,9 @@ export default function MockTestRunner() {
       durationMinutes: blueprint!.durationMinutes,
       questionIds: questions.map((q) => q.id),
       answers,
-      correctCount: correct,
-      wrongCount: wrong,
-      skippedCount: skipped,
+      correctCount: results.correct,
+      wrongCount: results.wrong,
+      skippedCount: results.unanswered,
       score,
       maxScore,
       subjectBreakdown,
@@ -107,7 +125,7 @@ export default function MockTestRunner() {
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">{blueprint.title}</h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{blueprint.description}</p>
           <div className="mt-6 grid grid-cols-3 gap-3 text-sm">
-            <InfoTile label="Questions" value={`${questions.length}`} />
+            <InfoTile label="Questions" value={`${pickedQuestions.length}`} />
             <InfoTile label="Duration" value={`${blueprint.durationMinutes}m`} />
             <InfoTile label="Negative Mark" value="1/3" />
           </div>
@@ -118,6 +136,7 @@ export default function MockTestRunner() {
             className="mt-6 w-full"
             onClick={() => {
               startedAtRef.current = new Date().toISOString();
+              session.start(pickedQuestions);
               setStarted(true);
             }}
           >
@@ -176,7 +195,7 @@ export default function MockTestRunner() {
               return (
                 <button
                   key={opt.id}
-                  onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt.id }))}
+                  onClick={() => session.selectAnswer(q.id, opt.id)}
                   className={cx(
                     'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
                     selected
@@ -198,20 +217,20 @@ export default function MockTestRunner() {
             })}
           </div>
           {answers[q.id] && (
-            <button className="mt-3 text-xs text-slate-400 hover:underline" onClick={() => setAnswers((a) => ({ ...a, [q.id]: null }))}>
+            <button className="mt-3 text-xs text-slate-400 hover:underline" onClick={() => session.clearAnswer(q.id)}>
               Clear response
             </button>
           )}
         </Card>
 
         <div className="mt-4 flex items-center justify-between gap-3">
-          <Button variant="secondary" disabled={current === 0} onClick={() => setCurrent((c) => c - 1)}>
+          <Button variant="secondary" disabled={current === 0} onClick={session.goToPrevious}>
             <ChevronLeft className="h-4 w-4" /> Previous
           </Button>
           {current === questions.length - 1 ? (
             <Button onClick={() => confirm('Submit the test now?') && handleSubmit()}>Submit Test</Button>
           ) : (
-            <Button onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))}>
+            <Button onClick={session.goToNext}>
               Next <ChevronRight className="h-4 w-4" />
             </Button>
           )}
@@ -233,7 +252,7 @@ export default function MockTestRunner() {
             return (
               <button
                 key={qq.id}
-                onClick={() => setCurrent(i)}
+                onClick={() => session.goToQuestion(i)}
                 className={cx(
                   'relative h-8 w-8 rounded-lg text-xs font-semibold transition-colors',
                   isCurrent
