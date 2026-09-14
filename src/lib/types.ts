@@ -89,7 +89,16 @@ export interface GeneratedProvenance {
   calibratedAgainstPyqIds?: string[]; // PYQ ids this question's pattern/difficulty was calibrated against
 }
 
-export type QuestionProvenance = PyqProvenance | GeneratedProvenance;
+/** The existing hand-authored practice bank's (data/questionBank.ts) own provenance — distinct from
+ * GeneratedProvenance above: these questions are neither authentic PYQs nor calibrated against a
+ * cited official source, so labelling them 'generated' would fabricate a citation that doesn't
+ * exist. `tag` carries Question's own existing 'Practice'/'PYQ-Style' classification through as-is. */
+export interface PracticeBankProvenance {
+  kind: 'practice_bank';
+  tag: 'Practice' | 'PYQ-Style';
+}
+
+export type QuestionProvenance = PyqProvenance | GeneratedProvenance | PracticeBankProvenance;
 
 export interface PYQ extends PracticeQuestion {
   year: number;

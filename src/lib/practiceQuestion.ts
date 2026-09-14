@@ -19,9 +19,9 @@ export function toPyqProvenance(pyq: PYQ): PyqProvenance {
   };
 }
 
-/** Narrows a QuestionProvenance to its 'pyq' arm. The union currently has exactly two arms, so this
- * one discriminator check is the minimum needed to distinguish either case (a provenance that
- * isn't a PYQ's is, by construction, a generated one). */
+/** Narrows a QuestionProvenance to its 'pyq' arm — the one check every caller actually needs to
+ * answer "is this an authentic PYQ or not" (lib/questionCatalog.ts's isAuthenticPyq reuses this
+ * exact narrowing rather than re-deriving it). */
 export function isPyqProvenance(provenance: QuestionProvenance): provenance is PyqProvenance {
   return provenance.kind === 'pyq';
 }
