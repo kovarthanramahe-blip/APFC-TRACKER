@@ -15,7 +15,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList, Brain } from 'lucide-react';
+import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList, Brain, Gauge } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
@@ -27,6 +27,7 @@ import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressRe
 import type { PlanTaskType } from '../lib/studyPlan';
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from '../lib/pyqFilters';
 import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
+import { computeExamReadiness, type ExamReadinessReport, type ExamReadinessVerdict } from '../lib/examReadiness';
 import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
 
@@ -125,6 +126,29 @@ export default function Analytics() {
     [studyPlan, personalStudyPlanTasks, sessions],
   );
 
+  // Exam Readiness (Stage 3) — the same read-only composite (lib/examReadiness) shown on the
+  // Dashboard, reused verbatim here with no second scoring calculation. No historical snapshot of
+  // past readiness is stored anywhere in this app (completedTopics carries no completion dates), so
+  // a trend/comparison view is intentionally NOT built — it would have to fabricate history.
+  const examReadiness: ExamReadinessReport = useMemo(
+    () =>
+      computeExamReadiness({
+        syllabus: SYLLABUS,
+        completedTopics,
+        pyqPerf,
+        pyqBank: PYQ_BANK,
+        pyqAttempts,
+        bookmarkedPyqIds,
+        revisionQueue,
+        mockTestAttempts: attempts,
+        studyPlan,
+        personalTasks: personalStudyPlanTasks,
+        sessions,
+        currentDate: getLocalDateString(),
+      }),
+    [completedTopics, pyqPerf, pyqAttempts, bookmarkedPyqIds, revisionQueue, attempts, studyPlan, personalStudyPlanTasks, sessions],
+  );
+
   return (
     <div>
       <PageHeader eyebrow="Insights" title="Analytics" description="Track your preparation trends across syllabus coverage, study time and test performance." />
@@ -148,6 +172,10 @@ export default function Analytics() {
             {gami.level.level} <span className="text-sm font-medium text-slate-400">· {gami.xp} XP</span>
           </p>
         </Card>
+      </motion.div>
+
+      <motion.div {...fadeUp} className="mb-6">
+        <ExamReadinessCard report={examReadiness} />
       </motion.div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -477,6 +505,55 @@ const TASK_TYPE_TITLE: Record<PlanTaskType, string> = {
   pyq_practice: 'PYQ Practice',
   review: 'Review',
 };
+
+// Same verdict thresholds/labels as lib/examReadiness's own ExamReadinessVerdict — a page-local
+// presentation mapping only (tone + bar color), same convention as EXECUTION_STATE_META above.
+const READINESS_VERDICT_META: Record<ExamReadinessVerdict, { label: string; tone: 'danger' | 'warning' | 'success'; barColor: string }> = {
+  needs_work: { label: 'Needs Work', tone: 'danger', barColor: 'bg-rose-500' },
+  getting_there: { label: 'Getting There', tone: 'warning', barColor: 'bg-amber-400' },
+  exam_ready: { label: 'Exam Ready', tone: 'success', barColor: 'bg-emerald-500' },
+};
+
+/** Exam Readiness Stage 3 — a read-only capstone summary over lib/examReadiness's composite score
+ * (the same computation Dashboard's card uses). No scoring/weighting happens here; this only
+ * renders the already-computed report (overallScore, verdict, weakestDimension, dimensions). No
+ * historical trend is shown — completedTopics has no completion dates, so a past readiness state
+ * can't be faithfully reconstructed from existing stored data without inventing a new history model. */
+function ExamReadinessCard({ report }: { report: ExamReadinessReport }) {
+  const meta = READINESS_VERDICT_META[report.verdict];
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Exam Readiness</h3>
+        </div>
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <PyqStat label="Overall Score" value={`${report.overallScore}/100`} tone="brand" />
+        {report.dimensions.map((d) => (
+          <PyqStat
+            key={d.dimension}
+            label={d.label}
+            value={d.hasData ? `${d.score}%` : '—'}
+            tone={!d.hasData ? 'neutral' : d.score >= 70 ? 'success' : d.score >= 40 ? 'brand' : 'danger'}
+            small
+          />
+        ))}
+      </div>
+
+      <div className="mt-4">
+        <ProgressBar value={report.overallScore} colorClassName={meta.barColor} height="h-1.5" />
+      </div>
+
+      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+        Weakest area: <span className="font-medium text-slate-700 dark:text-slate-200">{report.weakestDimension.label}</span> — {report.weakestDimension.reason}
+      </p>
+    </Card>
+  );
+}
 
 /** Stage 8 — "how well am I actually executing the study plan?": planned work vs completed
  * planned work vs actual study activity (lib/studyPlanProgress). Purely derived from current store
