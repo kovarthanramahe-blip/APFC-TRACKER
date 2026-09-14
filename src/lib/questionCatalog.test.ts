@@ -164,11 +164,11 @@ describe('catalog compatibility with the shared question-session engine', () => 
 });
 
 describe('catalog-to-Mock-Test selection boundary (real data)', () => {
-  // Mock Test (MockTestRunner.tsx, Stage 5B) sources questions by mapping
-  // pickQuestionsForBlueprint's Question[] output through questionToCatalogQuestion directly —
-  // never by building the full catalog and filtering. This proves that path is equivalent to "the
-  // practice-bank half of the full catalog", so the 131-question mock pool provably cannot gain a
-  // PYQ regardless of which of the two equivalent routes is taken.
+  // As of Stage 5C, Mock Test (MockTestRunner.tsx) builds the FULL catalog and relies on
+  // lib/mockQuestionPool.ts's explicit provenance policy (see mockQuestionPool.test.ts) to keep
+  // PYQs out, rather than mapping QUESTION_BANK directly the way Stage 5B did. Both routes are
+  // provably equivalent — this still holds and is worth keeping as its own invariant: the
+  // practice-bank half of the full catalog really is exactly QUESTION_BANK, nothing more or less.
   it('the practice-bank subset of the full real catalog is exactly QUESTION_BANK, in order, with no PYQs mixed in', () => {
     const fullCatalog = buildQuestionCatalog(PYQ_BANK, QUESTION_BANK);
     const practiceOnly = fullCatalog.filter((entry) => !isAuthenticPyq(entry));
@@ -179,7 +179,7 @@ describe('catalog-to-Mock-Test selection boundary (real data)', () => {
     expect(practiceOnly).toEqual(QUESTION_BANK.map(questionToCatalogQuestion));
   });
 
-  it('mapping QUESTION_BANK directly through questionToCatalogQuestion (what MockTestRunner.tsx actually does) never produces a pyq-provenance entry', () => {
+  it('mapping QUESTION_BANK directly through questionToCatalogQuestion never produces a pyq-provenance entry', () => {
     const mockPool = QUESTION_BANK.map(questionToCatalogQuestion);
     expect(mockPool.some(isAuthenticPyq)).toBe(false);
     expect(mockPool).toHaveLength(131);
