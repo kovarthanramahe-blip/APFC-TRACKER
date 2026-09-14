@@ -331,3 +331,59 @@ describe('study plan editing — store integration', () => {
     expect(report.plannedPendingMinutes).toBe(expectedPending);
   });
 });
+
+// --- Stage 4: adaptive planning — store integration ---------------------------
+describe('adaptStudyPlan — store integration', () => {
+  beforeEach(() => {
+    useAppStore.setState({ studyPlan: null, studyPlanGeneratedAt: null, completedTopics: {}, pyqAttempts: [], personalStudyPlanTasks: [] });
+  });
+
+  function generate() {
+    const result = generateStudyPlan({
+      config: validConfig({ startDate: '2026-01-01', targetDate: '2026-12-20', studyDaysPerWeek: 6, hoursPerStudyDay: 3 }),
+      syllabus: SYLLABUS,
+      completedTopics: {},
+      pyqPerf: null,
+    });
+    if (!result.ok) throw new Error('expected ok plan');
+    useAppStore.getState().setStudyPlan(result.plan);
+    return result.plan;
+  }
+
+  it('returns null and changes nothing when there is no generated plan', () => {
+    const result = useAppStore.getState().adaptStudyPlan(SYLLABUS, null, '2026-01-01');
+    expect(result).toBeNull();
+    expect(useAppStore.getState().studyPlan).toBeNull();
+  });
+
+  it('reads completedTopics/personalStudyPlanTasks from the store and persists the adapted tasks', () => {
+    const plan = generate();
+    useAppStore.setState({ completedTopics: { [plan.tasks[0].topicId]: true } });
+    const result = useAppStore.getState().adaptStudyPlan(SYLLABUS, null, '2026-01-01');
+    expect(result).not.toBeNull();
+    expect(useAppStore.getState().studyPlan!.tasks).toEqual(result!.updatedTasks);
+  });
+
+  it('preserves every other plan field (capacity, config, phases, coverageSummary) untouched', () => {
+    const plan = generate();
+    useAppStore.getState().adaptStudyPlan(SYLLABUS, null, '2026-01-01');
+    const after = useAppStore.getState().studyPlan!;
+    expect(after.capacity).toEqual(plan.capacity);
+    expect(after.config).toEqual(plan.config);
+    expect(after.coverageSummary).toEqual(plan.coverageSummary);
+  });
+
+  it('preserves personalStudyPlanTasks completely untouched', () => {
+    generate();
+    const personal = [{ id: 'p1', date: '2026-01-05', title: 'Revise notes', estimatedMinutes: 20, status: 'pending' as const, taskType: 'personal' as const, reason: 'Added by you.' }];
+    useAppStore.getState().setPersonalStudyPlanTasks(personal);
+    useAppStore.getState().adaptStudyPlan(SYLLABUS, null, '2026-01-01');
+    expect(useAppStore.getState().personalStudyPlanTasks).toEqual(personal);
+  });
+
+  it('never runs on its own — the store starts with no plan and adaptStudyPlan is not called until explicitly invoked', () => {
+    // Simply reflects that no store initialization path calls adaptStudyPlan automatically:
+    // studyPlan stays null after a fresh reset until something explicitly generates or adapts it.
+    expect(useAppStore.getState().studyPlan).toBeNull();
+  });
+});

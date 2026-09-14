@@ -10,6 +10,9 @@ import type {
 } from './types';
 import type { StudyPlan, StudyPlanTask } from './studyPlan';
 import type { PersonalPlanTask } from './studyPlanEditing';
+import { adaptStudyPlan as runAdaptStudyPlan, type AdaptiveResult } from './studyPlanAdaptive';
+import type { SyllabusSubject } from './types';
+import type { PyqPerformanceSnapshot } from './pyqPerformance';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -87,6 +90,15 @@ interface AppState {
   personalStudyPlanTasks: PersonalPlanTask[];
   setPersonalStudyPlanTasks: (tasks: PersonalPlanTask[]) => void;
 
+  // Study Plan adaptive planning (Stage 4): an explicit, on-demand action — never run
+  // automatically — that reconciles the plan's remaining (pending) tasks against the student's
+  // CURRENT progress via lib/studyPlanAdaptive's pure adaptStudyPlan(). completedTopics and
+  // personalStudyPlanTasks are read straight from this store's own state; syllabus/pyqPerf/
+  // currentDate come from the caller (the page), exactly like generateStudyPlan's inputs already
+  // do — the store holds no app-content or "today" logic of its own. Returns the result so the
+  // UI can show what changed; returns null (no-op) when there is no plan to adapt.
+  adaptStudyPlan: (syllabus: SyllabusSubject[], pyqPerf: PyqPerformanceSnapshot | null, currentDate: string) => AdaptiveResult | null;
+
   // Reset
   resetAllData: () => void;
 }
@@ -101,7 +113,7 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       completedTopics: {},
       toggleTopic: (topicId) =>
         set((state) => {
@@ -234,6 +246,21 @@ export const useAppStore = create<AppState>()(
 
       personalStudyPlanTasks: [],
       setPersonalStudyPlanTasks: (tasks) => set({ personalStudyPlanTasks: tasks }),
+
+      adaptStudyPlan: (syllabus, pyqPerf, currentDate) => {
+        const state = get();
+        if (!state.studyPlan) return null;
+        const result = runAdaptStudyPlan({
+          plan: state.studyPlan,
+          personalTasks: state.personalStudyPlanTasks,
+          syllabus,
+          completedTopics: state.completedTopics,
+          pyqPerf,
+          currentDate,
+        });
+        set({ studyPlan: { ...state.studyPlan, tasks: result.updatedTasks } });
+        return result;
+      },
 
       resetAllData: () =>
         set({

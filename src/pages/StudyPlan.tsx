@@ -107,6 +107,7 @@ export default function StudyPlan() {
   const setStudyPlanTasks = useAppStore((s) => s.setStudyPlanTasks);
   const personalTasks = useAppStore((s) => s.personalStudyPlanTasks);
   const setPersonalStudyPlanTasks = useAppStore((s) => s.setPersonalStudyPlanTasks);
+  const adaptStudyPlan = useAppStore((s) => s.adaptStudyPlan);
 
   // Sensible defaults reuse existing app conventions: examDate is already the target the rest of
   // the app counts down to, and dailyGoalMinutes is the user's own existing daily-study setting.
@@ -245,6 +246,22 @@ export default function StudyPlan() {
     }
   }
 
+  // Adaptive planning (Stage 4) — an explicit, user-triggered action only; nothing calls this on
+  // mount or on a timer. Reconciles the plan's remaining tasks against current progress, then
+  // reuses the exact same rebalance step Rebalance Remaining Plan uses.
+  function handleAdapt() {
+    const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
+    const result = adaptStudyPlan(SYLLABUS, pyqPerf, todayStr());
+    if (!result) return;
+    const parts: string[] = [];
+    if (result.addedTaskIds.length) parts.push(`${result.addedTaskIds.length} added`);
+    if (result.removedTaskIds.length) parts.push(`${result.removedTaskIds.length} removed`);
+    if (result.movedTaskIds.length) parts.push(`${result.movedTaskIds.length} moved`);
+    const summary = parts.length ? `Plan adapted: ${parts.join(', ')}.` : 'Plan adapted: no changes were needed.';
+    const warning = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
+    setActionMessage(summary + warning);
+  }
+
   const editedCapacity = useMemo(
     () => (plan ? computeEditedCapacity(plan.capacity, [...plan.tasks, ...personalTasks]) : null),
     [plan, personalTasks],
@@ -331,6 +348,11 @@ export default function StudyPlan() {
           {plan && (
             <Button variant="secondary" onClick={handleRebalance}>
               <Shuffle className="h-4 w-4" /> Rebalance Remaining Plan
+            </Button>
+          )}
+          {plan && (
+            <Button variant="secondary" onClick={handleAdapt}>
+              <Sparkles className="h-4 w-4" /> Adapt Plan
             </Button>
           )}
         </div>
