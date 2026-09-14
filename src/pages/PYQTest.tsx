@@ -16,6 +16,7 @@ import {
   Star,
   BarChart3,
   TrendingDown,
+  TrendingUp,
 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
@@ -47,6 +48,16 @@ function statusOf(q: PYQ, answers: Record<string, string | null>): QuestionStatu
 
 const AVAILABLE_YEARS = Array.from(new Set(PYQ_BANK.map((p) => p.year))).sort((a, b) => a - b);
 const SUBJECTS_IN_BANK: SubjectColorKey[] = SYLLABUS.map((s) => s.colorKey).filter((key) => PYQ_BANK.some((p) => p.subject === key));
+// Per-year question counts, built once from PYQ_BANK — the year picker and analytics
+// never hardcode a year or a count, so a future year's data shows up automatically.
+const YEAR_COUNTS: Record<number, number> = Object.fromEntries(AVAILABLE_YEARS.map((y) => [y, PYQ_BANK.filter((p) => p.year === y).length]));
+
+function formatYearLabel(y: number | 'all') {
+  return y === 'all' ? 'All Years' : String(y);
+}
+
+type RevisionStatus = 'correct' | 'incorrect' | 'unattempted';
+type RevisionFilter = 'all' | RevisionStatus;
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -83,9 +94,10 @@ export default function PYQTest() {
 
   const [phase, setPhase] = useState<Phase>('select');
 
-  const [year, setYear] = useState<number>(AVAILABLE_YEARS[0]);
+  const [year, setYear] = useState<number | 'all'>(AVAILABLE_YEARS[0]);
   const [subject, setSubject] = useState<SubjectColorKey | 'all'>('all');
   const [topicId, setTopicId] = useState<string | 'all'>('all');
+  const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>('all');
   const [countChoice, setCountChoice] = useState<CountChoice>(10);
 
   const [questions, setQuestions] = useState<PYQ[]>([]);
@@ -96,17 +108,42 @@ export default function PYQTest() {
   // even if the results screen is somehow re-entered/re-rendered.
   const submittedRef = useRef(false);
 
+  // Per-question revision status, derived entirely from the existing PYQAttempt[] — no new
+  // persisted data. For each question, the MOST RECENT attempt that included it decides its
+  // status: a null/skipped answer in that attempt still counts as 'unattempted' (it wasn't
+  // actually answered), and a question that has never appeared in any attempt is 'unattempted'.
+  const questionRevisionStatus = useMemo(() => {
+    const map = new Map<string, RevisionStatus>();
+    const sorted = [...pyqAttempts].sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+    for (const attempt of sorted) {
+      for (const qid of attempt.questionIds) {
+        if (map.has(qid)) continue; // already resolved by a more recent attempt
+        const ans = attempt.answers[qid];
+        if (!ans) {
+          map.set(qid, 'unattempted');
+          continue;
+        }
+        const pyq = PYQ_BANK.find((p) => p.id === qid);
+        if (!pyq) continue;
+        map.set(qid, ans === pyq.correctOptionId ? 'correct' : 'incorrect');
+      }
+    }
+    return map;
+  }, [pyqAttempts]);
+
   const filtered = useMemo(() => {
     return PYQ_BANK.filter((p) => {
-      if (p.year !== year) return false;
+      if (year !== 'all' && p.year !== year) return false;
       if (subject !== 'all' && p.subject !== subject) return false;
       if (topicId !== 'all' && p.topicId !== topicId) return false;
+      if (revisionFilter !== 'all' && (questionRevisionStatus.get(p.id) ?? 'unattempted') !== revisionFilter) return false;
       return true;
     });
-  }, [year, subject, topicId]);
+  }, [year, subject, topicId, revisionFilter, questionRevisionStatus]);
 
   const topicsForSubject = useMemo(() => {
-    const pool = subject === 'all' ? PYQ_BANK.filter((p) => p.year === year) : PYQ_BANK.filter((p) => p.year === year && p.subject === subject);
+    const byYear = year === 'all' ? PYQ_BANK : PYQ_BANK.filter((p) => p.year === year);
+    const pool = subject === 'all' ? byYear : byYear.filter((p) => p.subject === subject);
     const ids = Array.from(new Set(pool.map((p) => p.topicId)));
     return ids
       .map((id) => ({ id, title: TOPIC_TITLES[id] ?? id }))
@@ -252,6 +289,7 @@ export default function PYQTest() {
 
     const subjectAgg = new Map<SubjectColorKey, { attempted: number; correct: number; wrong: number; testIds: Set<string> }>();
     const topicAgg = new Map<string, { attempted: number; correct: number; wrong: number }>();
+    const yearAgg = new Map<number, { attempted: number; correct: number; wrong: number; testIds: Set<string> }>();
 
     for (const attempt of pyqAttempts) {
       totalQuestions += attempt.questionIds.length;
@@ -282,6 +320,19 @@ export default function PYQTest() {
           else topicEntry.wrong += 1;
           topicAgg.set(pyq.topicId, topicEntry);
         }
+
+        // Resolved from PYQ_BANK, never from attempt.year — attempt.year is only the
+        // selection filter used to build the test (it's 'all' for a mixed-year test),
+        // so trusting it directly would misattribute every question in such a test to
+        // one year, exactly the bug the subject/topic aggregates above already avoid.
+        const yearEntry = yearAgg.get(pyq.year) ?? { attempted: 0, correct: 0, wrong: 0, testIds: new Set<string>() };
+        yearEntry.testIds.add(attempt.id);
+        if (status !== 'unanswered') {
+          yearEntry.attempted += 1;
+          if (status === 'correct') yearEntry.correct += 1;
+          else yearEntry.wrong += 1;
+        }
+        yearAgg.set(pyq.year, yearEntry);
       }
     }
 
@@ -328,8 +379,22 @@ export default function PYQTest() {
 
     // Weakest first; ties broken alphabetically by topic title for a stable, deterministic order.
     const weakTopics = [...allTopics].sort((a, b) => a.accuracy - b.accuracy || a.topicTitle.localeCompare(b.topicTitle)).slice(0, 6);
+    // Strongest first; same tie-break, same "must have at least one attempted question" pool as weakTopics.
+    const strongestTopics = [...allTopics].sort((a, b) => b.accuracy - a.accuracy || a.topicTitle.localeCompare(b.topicTitle)).slice(0, 6);
 
-    return { overall, subjects, topics, weakTopics };
+    const years = Array.from(yearAgg.entries())
+      .map(([y, v]) => ({
+        year: y,
+        attempted: v.attempted,
+        correct: v.correct,
+        wrong: v.wrong,
+        accuracy: v.attempted > 0 ? (v.correct / v.attempted) * 100 : 0,
+        score: v.correct * MARKS_CORRECT + v.wrong * MARKS_WRONG,
+        testCount: v.testIds.size,
+      }))
+      .sort((a, b) => a.year - b.year);
+
+    return { overall, subjects, topics, weakTopics, strongestTopics, years };
   }, [pyqAttempts]);
 
   if (phase === 'select') {
@@ -356,9 +421,12 @@ export default function PYQTest() {
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Year</p>
             <div className="flex flex-wrap gap-2">
+              <SelectChip active={year === 'all'} onClick={() => setYear('all')}>
+                All Years ({PYQ_BANK.length})
+              </SelectChip>
               {AVAILABLE_YEARS.map((y) => (
                 <SelectChip key={y} active={year === y} onClick={() => setYear(y)}>
-                  {y}
+                  {y} ({YEAR_COUNTS[y]})
                 </SelectChip>
               ))}
             </div>
@@ -392,6 +460,24 @@ export default function PYQTest() {
                   {t.title}
                 </SelectChip>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Revision</p>
+            <div className="flex flex-wrap gap-2">
+              <SelectChip active={revisionFilter === 'all'} onClick={() => setRevisionFilter('all')}>
+                All
+              </SelectChip>
+              <SelectChip active={revisionFilter === 'unattempted'} onClick={() => setRevisionFilter('unattempted')}>
+                Unattempted
+              </SelectChip>
+              <SelectChip active={revisionFilter === 'incorrect'} onClick={() => setRevisionFilter('incorrect')}>
+                Incorrect
+              </SelectChip>
+              <SelectChip active={revisionFilter === 'correct'} onClick={() => setRevisionFilter('correct')}>
+                Correct
+              </SelectChip>
             </div>
           </div>
 
@@ -437,7 +523,7 @@ export default function PYQTest() {
                       {new Date(a.submittedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {a.year} · {a.questionIds.length} question{a.questionIds.length === 1 ? '' : 's'}
+                      {formatYearLabel(a.year)} · {a.questionIds.length} question{a.questionIds.length === 1 ? '' : 's'}
                     </p>
                   </div>
                   <div className="flex items-center gap-4 text-xs">
@@ -552,6 +638,32 @@ export default function PYQTest() {
             </Card>
 
             <Card className="p-5 sm:p-6">
+              <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Performance by Year</h3>
+              <div className="space-y-2">
+                {performance.years.map((y) => (
+                  <div
+                    key={y.year}
+                    className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Badge tone="neutral">{y.year}</Badge>
+                      <span className="text-xs text-slate-400">
+                        {y.testCount} test{y.testCount === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-4 text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">{y.attempted} attempted</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{y.correct} correct</span>
+                      <span className="text-rose-600 dark:text-rose-400">{y.wrong} wrong</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">{y.attempted > 0 ? `${y.accuracy.toFixed(1)}%` : '—'}</span>
+                      <span className="font-display font-bold text-brand-600 dark:text-brand-400">{y.score.toFixed(2)} pts</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-5 sm:p-6">
               <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Subject Performance</h3>
               <div className="space-y-2">
                 {performance.subjects.map((s) => {
@@ -589,6 +701,20 @@ export default function PYQTest() {
                 </div>
                 <div className="space-y-2">
                   {performance.weakTopics.map((t) => (
+                    <TopicRow key={t.topicId} topic={t} />
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {performance.strongestTopics.length > 0 && (
+              <Card className="p-5 sm:p-6">
+                <div className="mb-4 flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-emerald-500" />
+                  <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Strongest Topics</h3>
+                </div>
+                <div className="space-y-2">
+                  {performance.strongestTopics.map((t) => (
                     <TopicRow key={t.topicId} topic={t} />
                   ))}
                 </div>

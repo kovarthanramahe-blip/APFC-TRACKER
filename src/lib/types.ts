@@ -72,7 +72,7 @@ export interface PYQ {
 export interface PYQAttempt {
   id: string;
   submittedAt: string;
-  year: number;
+  year: number | 'all'; // the selection filter used to build the test, not a per-question value
   subject: SubjectColorKey | 'all'; // the selection filter used to build the test, not a per-question value
   topicId: string | 'all';
   questionIds: string[]; // preserves the exact question order used in the test
