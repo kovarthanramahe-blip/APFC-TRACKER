@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { PYQ, Question } from './types';
 import { SYLLABUS } from '../data/syllabus';
+import { PYQ_BANK } from '../data/pyq';
+import { QUESTION_BANK } from '../data/questionBank';
 import { pyqToCatalogQuestion, questionToCatalogQuestion, buildQuestionCatalog, isAuthenticPyq } from './questionCatalog';
 import { startSession, selectAnswer, computeSessionResults, type QuestionSessionScoring } from './questionSessionEngine';
 
@@ -158,5 +160,28 @@ describe('catalog compatibility with the shared question-session engine', () => 
     state = selectAnswer(state, 'q-1', 'q-1-o1'); // wrong
     const results = computeSessionResults(state, scoring);
     expect(results).toEqual({ total: 2, attempted: 2, correct: 1, wrong: 1, unanswered: 0, score: 2.5 - 0.833333, accuracy: 50 });
+  });
+});
+
+describe('catalog-to-Mock-Test selection boundary (real data)', () => {
+  // Mock Test (MockTestRunner.tsx, Stage 5B) sources questions by mapping
+  // pickQuestionsForBlueprint's Question[] output through questionToCatalogQuestion directly —
+  // never by building the full catalog and filtering. This proves that path is equivalent to "the
+  // practice-bank half of the full catalog", so the 131-question mock pool provably cannot gain a
+  // PYQ regardless of which of the two equivalent routes is taken.
+  it('the practice-bank subset of the full real catalog is exactly QUESTION_BANK, in order, with no PYQs mixed in', () => {
+    const fullCatalog = buildQuestionCatalog(PYQ_BANK, QUESTION_BANK);
+    const practiceOnly = fullCatalog.filter((entry) => !isAuthenticPyq(entry));
+
+    expect(practiceOnly).toHaveLength(QUESTION_BANK.length);
+    expect(practiceOnly.map((e) => e.id)).toEqual(QUESTION_BANK.map((q) => q.id));
+    expect(practiceOnly.every((e) => e.provenance.kind === 'practice_bank')).toBe(true);
+    expect(practiceOnly).toEqual(QUESTION_BANK.map(questionToCatalogQuestion));
+  });
+
+  it('mapping QUESTION_BANK directly through questionToCatalogQuestion (what MockTestRunner.tsx actually does) never produces a pyq-provenance entry', () => {
+    const mockPool = QUESTION_BANK.map(questionToCatalogQuestion);
+    expect(mockPool.some(isAuthenticPyq)).toBe(false);
+    expect(mockPool).toHaveLength(131);
   });
 });

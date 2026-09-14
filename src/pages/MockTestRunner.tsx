@@ -6,15 +6,18 @@ import { getBlueprint, pickQuestionsForBlueprint } from '../data/mockTests';
 import { useAppStore } from '../lib/store';
 import { cx, uuid, SUBJECT_COLORS } from '../lib/utils';
 import { Button, Card } from '../components/ui/Primitives';
-import type { MockTestAttempt, Question } from '../lib/types';
+import type { MockTestAttempt } from '../lib/types';
 import { useQuestionSession } from '../lib/useQuestionSession';
 import type { QuestionResultStatus, QuestionSessionScoring } from '../lib/questionSessionEngine';
+import { questionToCatalogQuestion, type CatalogQuestion } from '../lib/questionCatalog';
 
 // Mock Test's own correctness classifier — structurally identical to lib/pyqPerformance's
-// pyqQuestionStatus, but typed for the synthetic Question (data/questionBank.ts), which doesn't
-// yet satisfy PracticeQuestion (see lib/types.ts), so that PYQ-typed function can't be reused here
-// without widening it — out of scope for this stage.
-function mockQuestionStatus(q: Question, answers: Record<string, string | null>): QuestionResultStatus {
+// pyqQuestionStatus, but typed for CatalogQuestion (lib/questionCatalog.ts, Stage 4/5B). Mock Test
+// only ever passes it practice-bank entries (mapped from Question via questionToCatalogQuestion,
+// never buildQuestionCatalog's PYQ half — see pickedQuestions below), so this never sees an
+// authentic-PYQ-provenance entry; kept generic over CatalogQuestion rather than re-narrowed to
+// 'practice_bank' only, since correctness classification doesn't depend on provenance anyway.
+function mockQuestionStatus(q: CatalogQuestion, answers: Record<string, string | null>): QuestionResultStatus {
   const ans = answers[q.id];
   if (!ans) return 'unanswered';
   return ans === q.correctOptionId ? 'correct' : 'wrong';
@@ -26,12 +29,22 @@ export default function MockTestRunner() {
   const addAttempt = useAppStore((s) => s.addAttempt);
 
   const blueprint = blueprintId ? getBlueprint(blueprintId) : undefined;
-  const pickedQuestions = useMemo(() => (blueprint ? pickQuestionsForBlueprint(blueprint) : []), [blueprint]);
+  // Unified Question Architecture Stage 5B — pickQuestionsForBlueprint's own subject-filter +
+  // shuffle selection (data/mockTests.ts, completely untouched) still runs first and exactly as
+  // before, over QUESTION_BANK's 131 questions only; only its OUTPUT is then mapped through the
+  // catalog's own questionToCatalogQuestion (Stage 4), one Question at a time, so every resulting
+  // entry is provenance-tagged 'practice_bank' by construction — there is no code path here that
+  // could pull in a PYQ. Ids, order, and content are unchanged (that mapping is a verbatim field
+  // passthrough plus a provenance tag; see lib/questionCatalog.test.ts).
+  const pickedQuestions = useMemo(
+    () => (blueprint ? pickQuestionsForBlueprint(blueprint).map(questionToCatalogQuestion) : []),
+    [blueprint],
+  );
 
-  // Unified Question Architecture Stage 3 — the same shared testing engine PYQTest.tsx uses
-  // (lib/questionSessionEngine.ts), with Mock Test's own blueprint-driven marking scheme (not
-  // PYQ's fixed 2.5/-0.833333) supplied as data; the engine itself stays unaware of either.
-  const scoring: QuestionSessionScoring<Question> = useMemo(
+  // The same shared testing engine PYQTest.tsx uses (lib/questionSessionEngine.ts), with Mock
+  // Test's own blueprint-driven marking scheme (not PYQ's fixed 2.5/-0.833333) supplied as data;
+  // the engine itself stays unaware of either.
+  const scoring: QuestionSessionScoring<CatalogQuestion> = useMemo(
     () => ({
       marksCorrect: blueprint?.marksPerCorrect ?? 0,
       marksWrong: blueprint ? -(blueprint.marksPerCorrect * blueprint.negativeMarkFraction) : 0,
@@ -39,7 +52,7 @@ export default function MockTestRunner() {
     }),
     [blueprint],
   );
-  const session = useQuestionSession<Question>(scoring);
+  const session = useQuestionSession<CatalogQuestion>(scoring);
   const { questions, current, answers, results } = session;
 
   const [started, setStarted] = useState(false);
@@ -184,7 +197,7 @@ export default function MockTestRunner() {
 
         <Card className="p-5 sm:p-6">
           <div className="mb-3 flex items-center justify-between">
-            <span className={cx('rounded-full px-2.5 py-0.5 text-xs font-medium', colors.bg, colors.text)}>{q.topic}</span>
+            <span className={cx('rounded-full px-2.5 py-0.5 text-xs font-medium', colors.bg, colors.text)}>{q.topicLabel}</span>
             <button
               onClick={() => setFlagged((f) => ({ ...f, [q.id]: !f[q.id] }))}
               className={cx('flex items-center gap-1 text-xs font-medium', flagged[q.id] ? 'text-gold-600' : 'text-slate-400 hover:text-slate-600')}
