@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -7,10 +8,14 @@ import { QUESTION_BANK } from '../data/questionBank';
 import { SUBJECT_META } from '../data/syllabus';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader, fadeUp } from '../components/ui/Primitives';
+import { classifyMockAnswerStatus, matchesMockReviewFilter, MOCK_REVIEW_FILTERS, type MockReviewFilter } from '../lib/mockTestReview';
+
+const REVIEW_FILTER_LABELS: Record<MockReviewFilter, string> = { all: 'All', wrong: 'Wrong', unanswered: 'Skipped', correct: 'Correct' };
 
 export default function MockTestResult() {
   const { attemptId } = useParams();
   const attempt = useAppStore((s) => s.attempts.find((a) => a.id === attemptId));
+  const [reviewFilter, setReviewFilter] = useState<MockReviewFilter>('all');
 
   if (!attempt) {
     return (
@@ -34,6 +39,11 @@ export default function MockTestResult() {
   }));
 
   const questions = attempt.questionIds.map((id) => QUESTION_BANK.find((q) => q.id === id)!).filter(Boolean);
+
+  const reviewCounts: Record<MockReviewFilter, number> = { all: questions.length, correct: 0, wrong: 0, unanswered: 0 };
+  for (const q of questions) reviewCounts[classifyMockAnswerStatus(attempt.answers[q.id], q.correctOptionId)] += 1;
+
+  const visibleQuestions = questions.filter((q) => matchesMockReviewFilter(classifyMockAnswerStatus(attempt.answers[q.id], q.correctOptionId), reviewFilter));
 
   return (
     <div>
@@ -89,19 +99,41 @@ export default function MockTestResult() {
         </motion.div>
       )}
 
-      <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 mb-4">Answer Review</h3>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Answer Review</h3>
+        <div className="flex flex-wrap gap-2">
+          {MOCK_REVIEW_FILTERS.map((f) => (
+            <button
+              key={f}
+              onClick={() => setReviewFilter(f)}
+              className={cx(
+                'rounded-full px-3 py-1.5 text-xs font-medium border transition-colors',
+                reviewFilter === f
+                  ? 'bg-brand-600 text-white border-brand-600'
+                  : 'bg-transparent text-slate-500 border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:text-slate-400',
+              )}
+            >
+              {REVIEW_FILTER_LABELS[f]} ({reviewCounts[f]})
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="space-y-3">
-        {questions.map((q, idx) => {
+        {visibleQuestions.length === 0 && (
+          <p className="py-10 text-center text-sm text-slate-400">No {REVIEW_FILTER_LABELS[reviewFilter].toLowerCase()} questions.</p>
+        )}
+        {visibleQuestions.map((q) => {
           const userAnswer = attempt.answers[q.id];
-          const isCorrect = userAnswer === q.correctOptionId;
+          const status = classifyMockAnswerStatus(userAnswer, q.correctOptionId);
+          const idx = questions.indexOf(q);
           const colors = SUBJECT_COLORS[q.subject];
           return (
             <Card key={q.id} className="p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 shrink-0">
-                  {!userAnswer ? (
+                  {status === 'unanswered' ? (
                     <MinusCircle className="h-5 w-5 text-slate-300" />
-                  ) : isCorrect ? (
+                  ) : status === 'correct' ? (
                     <CheckCircle2 className="h-5 w-5 text-emerald-500" />
                   ) : (
                     <XCircle className="h-5 w-5 text-rose-500" />
