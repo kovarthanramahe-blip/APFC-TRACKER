@@ -125,10 +125,15 @@ export interface WeeklyProgress {
   executionPercentage: number;
 }
 
+/** UTC-only calendar arithmetic — Date.UTC()/setUTCDate() never touch the host's local timezone,
+ * unlike `new Date(dateStr + 'T00:00:00')` + `.toISOString()`, which round-trips through local time
+ * and silently truncates to the wrong calendar day whenever the host runs in a positive UTC offset
+ * (e.g. Asia/Kolkata), which could stall computeWeeklyProgress's loop indefinitely. */
 function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return utc.toISOString().slice(0, 10);
 }
 
 /** Weeks are 7-day buckets anchored to the plan's own startDate (not calendar-week-of-year, which

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { computeStudyPlanProgress, EXECUTION_TOLERANCE_PCT, type StudyPlanProgressInput } from './studyPlanProgress';
 import type { PersonalPlanTask } from './studyPlanEditing';
 import type { PlanCapacity, StudyPlan, StudyPlanTask } from './studyPlan';
@@ -201,6 +201,29 @@ describe('computeStudyPlanProgress — weekly aggregation', () => {
     expect(result.weeklyProgress[1].weekStart).toBe('2026-01-12');
     expect(result.weeklyProgress[1].weekEnd).toBe('2026-01-14'); // clamped to targetDate
     expect(result.weeklyProgress[1].plannedTaskCount).toBe(0);
+  });
+
+  // Regression test for the addDays timezone bug: the old implementation
+  // (`new Date(dateStr + 'T00:00:00')` + `.toISOString()`) round-tripped through the host's LOCAL
+  // timezone. Under a positive UTC offset such as Asia/Kolkata (UTC+5:30), that round-trip silently
+  // truncated back to the previous calendar day once the week-end clamped to targetDate
+  // (2026-01-14), so `cursor` never advanced past targetDate and computeWeeklyProgress's while loop
+  // never terminated — an unbounded `weeks.push(...)` that exhausted memory and crashed the process.
+  // This asserts the exact same weekly boundaries as the test above, but with the process's TZ
+  // forced to Asia/Kolkata for the duration of the assertion, so a regression here would hang/OOM
+  // the test run rather than merely fail an assertion.
+  it('buckets weeks correctly (and terminates) even when the process runs in a positive UTC offset timezone (Asia/Kolkata)', () => {
+    vi.stubEnv('TZ', 'Asia/Kolkata');
+    try {
+      const result = assertReady(computeStudyPlanProgress(input({ plan: buildPlan(mainTasks), sessions: mainSessions })));
+      expect(result.weeklyProgress).toHaveLength(2);
+      expect(result.weeklyProgress[0].weekStart).toBe('2026-01-05');
+      expect(result.weeklyProgress[0].weekEnd).toBe('2026-01-11');
+      expect(result.weeklyProgress[1].weekStart).toBe('2026-01-12');
+      expect(result.weeklyProgress[1].weekEnd).toBe('2026-01-14');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
