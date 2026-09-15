@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Star, ChevronDown, Filter } from 'lucide-react';
+import { Star, ChevronDown, Filter, Search } from 'lucide-react';
 import { QUESTION_BANK } from '../data/questionBank';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
@@ -9,12 +9,14 @@ import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, Badge, PageHeader } from '../components/ui/Primitives';
 import type { SubjectColorKey } from '../lib/types';
 import { buildQuestionCatalog, isAuthenticPyq, type CatalogQuestion } from '../lib/questionCatalog';
+import { matchesQuestionSearch } from '../lib/questionSearch';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
 
 export default function QuestionBank() {
   const [subject, setSubject] = useState<SubjectColorKey | 'all' | 'starred'>('all');
   const [difficulty, setDifficulty] = useState<'all' | (typeof DIFFICULTIES)[number]>('all');
+  const [query, setQuery] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const starred = useAppStore((s) => s.starredQuestionIds);
   const toggleStar = useAppStore((s) => s.toggleStarredQuestion);
@@ -37,10 +39,11 @@ export default function QuestionBank() {
       if (subject === 'starred') return isEntryStarred(entry);
       if (subject !== 'all' && entry.subject !== subject) return false;
       if (difficulty !== 'all' && entry.difficulty !== difficulty) return false;
+      if (!matchesQuestionSearch(entry, query)) return false;
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [catalog, subject, difficulty, starred, bookmarkedPyqIds]);
+  }, [catalog, subject, difficulty, query, starred, bookmarkedPyqIds]);
 
   return (
     <div>
@@ -49,6 +52,16 @@ export default function QuestionBank() {
         title="Question Bank"
         description="Authentic previous-year questions and exam-pattern practice questions, organised by subject — reveal the answer & explanation once you've attempted each."
       />
+
+      <div className="mb-5 relative">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search questions, topics or options…"
+          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        />
+      </div>
 
       <Card className="mb-5 p-3 sm:p-4">
         <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-slate-400 uppercase tracking-wide">
@@ -157,7 +170,11 @@ export default function QuestionBank() {
             </Card>
           );
         })}
-        {filtered.length === 0 && <div className="py-16 text-center text-sm text-slate-400">No questions match these filters.</div>}
+        {filtered.length === 0 && (
+          <div className="py-16 text-center text-sm text-slate-400">
+            {query.trim() ? `No questions match "${query.trim()}".` : 'No questions match these filters.'}
+          </div>
+        )}
       </div>
     </div>
   );
