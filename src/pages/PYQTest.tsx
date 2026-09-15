@@ -52,6 +52,7 @@ import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { useQuestionSession } from '../lib/useQuestionSession';
 import type { QuestionSessionScoring } from '../lib/questionSessionEngine';
+import { resolveTestingKeyAction } from '../lib/questionKeyboardShortcuts';
 
 const COUNT_OPTIONS = [10, 20, 30, 50] as const;
 type CountChoice = (typeof COUNT_OPTIONS)[number] | 'all';
@@ -176,6 +177,37 @@ export default function PYQTest() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtered.length]);
+
+  // Keyboard shortcuts for the testing screen: 1-4/a-d select an option, arrow keys navigate.
+  // Deliberately excludes any submit shortcut (see resolveTestingKeyAction's own comment) and
+  // never fires while focus is on a real input/textarea/select or with a modifier key held, so it
+  // can't hijack normal typing or browser shortcuts. `session`'s methods all close over the
+  // component's own `setState` via a functional updater (see lib/useQuestionSession.ts), so
+  // omitting the fresh-every-render `session` object from deps below never causes a stale update.
+  useEffect(() => {
+    if (phase !== 'testing') return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const q = questions[current];
+      if (!q) return;
+      const action = resolveTestingKeyAction(e.key, q.options.length);
+      if (action.type === 'selectOption') {
+        e.preventDefault();
+        session.selectAnswer(q.id, q.options[action.index].id);
+      } else if (action.type === 'next' && current < questions.length - 1) {
+        e.preventDefault();
+        session.goToNext();
+      } else if (action.type === 'previous' && current > 0) {
+        e.preventDefault();
+        session.goToPrevious();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, current, questions]);
 
   function startTest() {
     if (filtered.length === 0) return;
@@ -1061,6 +1093,11 @@ export default function PYQTest() {
           </button>
         )}
       </Card>
+
+      <p className="mt-3 hidden text-center text-[11px] text-slate-400 sm:block">
+        Keyboard: press <span className="font-semibold">1-{q.options.length}</span> to select an option, <span className="font-semibold">←</span>/
+        <span className="font-semibold">→</span> to navigate
+      </p>
 
       <div className="mt-4 flex items-center justify-between gap-3">
         <Button variant="secondary" disabled={current === 0} onClick={session.goToPrevious}>
