@@ -4,6 +4,10 @@ const config: CapacitorConfig = {
   appId: 'com.apfctracker.app',
   appName: 'APFC Tracker',
   webDir: 'dist',
+  server: {
+    url: 'https://apfc-tracker.vercel.app',
+    cleartext: false,
+  },
   android: {
     allowMixedContent: false,
   },
