@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Star, ChevronDown, Filter, Search } from 'lucide-react';
 import { QUESTION_BANK } from '../data/questionBank';
 import { PYQ_BANK } from '../data/pyq';
+import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
 import { SYLLABUS } from '../data/syllabus';
 import { useAppStore } from '../lib/store';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, Badge, PageHeader } from '../components/ui/Primitives';
 import type { SubjectColorKey } from '../lib/types';
-import { buildQuestionCatalog, isAuthenticPyq, type CatalogQuestion } from '../lib/questionCatalog';
+import { buildQuestionCatalog, isAuthenticPyq, isGeneratedQuestion, type CatalogQuestion } from '../lib/questionCatalog';
 import { matchesQuestionSearch } from '../lib/questionSearch';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
@@ -27,10 +28,12 @@ export default function QuestionBank() {
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const toggleBookmarkedPyq = useAppStore((s) => s.toggleBookmarkedPyq);
 
-  // The unified catalog (lib/questionCatalog.ts, Stage 4) over both existing sources — PYQ_BANK
-  // and QUESTION_BANK are both static module-level arrays, so this is built exactly once, never
-  // mutating or reordering either source.
-  const catalog = useMemo(() => buildQuestionCatalog(PYQ_BANK, QUESTION_BANK), []);
+  // The unified catalog (lib/questionCatalog.ts, Stage 4) over all three existing sources —
+  // PYQ_BANK, QUESTION_BANK, and GENERATED_QUESTION_BANK are all static module-level arrays, so
+  // this is built exactly once, never mutating or reordering any of them. GENERATED_QUESTION_BANK
+  // only ever contains generated questions that already cleared the Stage 6M approval gate
+  // (data/generatedQuestionBank.ts) — a draft can never appear here.
+  const catalog = useMemo(() => buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, GENERATED_QUESTION_BANK), []);
 
   const isEntryStarred = (entry: CatalogQuestion) => (isAuthenticPyq(entry) ? bookmarkedPyqIds.includes(entry.id) : starred.includes(entry.id));
 
@@ -99,6 +102,7 @@ export default function QuestionBank() {
           const isOpen = openId === entry.id;
           const isStarred = isEntryStarred(entry);
           const authenticPyq = isAuthenticPyq(entry);
+          const generated = isGeneratedQuestion(entry);
           const colors = SUBJECT_COLORS[entry.subject];
           return (
             <Card key={entry.id} className="p-4 sm:p-5">
@@ -109,8 +113,12 @@ export default function QuestionBank() {
                     <Badge className={cx(colors.bg, colors.text)}>{entry.topicLabel}</Badge>
                     {entry.difficulty && <Badge tone="neutral">{entry.difficulty}</Badge>}
                     {/* Provenance, kept minimal and explicit per the Unified Question Architecture:
-                        an authentic PYQ is never shown as merely "practice" or vice versa. */}
-                    <Badge tone={authenticPyq ? 'gold' : 'neutral'}>{authenticPyq ? 'Authentic PYQ' : 'Practice'}</Badge>
+                        an authentic PYQ is never shown as merely "practice" or vice versa, and an
+                        approved generated question (the only kind that can ever reach this catalog
+                        — see GENERATED_QUESTION_BANK above) is clearly distinguished from both. */}
+                    <Badge tone={authenticPyq ? 'gold' : generated ? 'brand' : 'neutral'}>
+                      {authenticPyq ? 'Authentic PYQ' : generated ? 'Generated (Verified)' : 'Practice'}
+                    </Badge>
                   </div>
                   <p className="text-sm sm:text-[15px] font-medium text-slate-800 dark:text-slate-100">{entry.question}</p>
 

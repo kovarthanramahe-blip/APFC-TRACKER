@@ -19,6 +19,17 @@ export type ProvenanceKind = QuestionProvenance['kind'];
 export const DEFAULT_MOCK_PROVENANCE_POLICY: readonly ProvenanceKind[] = ['practice_bank'];
 
 /**
+ * The policy a caller opts into when generated questions should also be eligible for Mock Test,
+ * on top of the existing practice-bank default. Safe to use unconditionally — never re-checks
+ * verificationStatus itself, because it doesn't need to: the only way a generated question ever
+ * reaches a catalog built with data/generatedQuestionBank.ts's GENERATED_QUESTION_BANK is by first
+ * clearing the Stage 6M approveGeneratedQuestion gate (verified/published only) via
+ * selectApprovedGeneratedQuestions — a 'draft' generated question can never be a member of that
+ * array, so it can never reach this filter in the first place. This policy is additive to (not a
+ * replacement for) DEFAULT_MOCK_PROVENANCE_POLICY; the default itself is left untouched. */
+export const APPROVED_GENERATED_INCLUSIVE_POLICY: readonly ProvenanceKind[] = [...DEFAULT_MOCK_PROVENANCE_POLICY, 'generated'];
+
+/**
  * Selects the question pool for a blueprint from a CatalogQuestion catalog: filters by the
  * blueprint's own subject constraint (identical semantics to data/mockTests.ts's
  * pickQuestionsForBlueprint, which this supersedes as Mock Test's actual selection path — that

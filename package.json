@@ -24,10 +24,14 @@
     "date-fns": "^4.4.0",
     "framer-motion": "^13.2.0",
     "lucide-react": "^1.45.0",
+    "mammoth": "^1.12.3",
+    "markdown-to-jsx": "^9.10.2",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",
     "recharts": "^3.10.1",
+    "turndown": "^7.2.4",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -36,6 +40,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.5.6",
     "oxlint": "^1.81.0",

@@ -5,6 +5,7 @@ import { Clock, ChevronLeft, ChevronRight, Flag, X } from 'lucide-react';
 import { getBlueprint } from '../data/mockTests';
 import { PYQ_BANK } from '../data/pyq';
 import { QUESTION_BANK } from '../data/questionBank';
+import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
 import { useAppStore } from '../lib/store';
 import { cx, uuid, SUBJECT_COLORS } from '../lib/utils';
 import { Button, Card } from '../components/ui/Primitives';
@@ -12,7 +13,7 @@ import type { MockTestAttempt } from '../lib/types';
 import { useQuestionSession } from '../lib/useQuestionSession';
 import type { QuestionResultStatus, QuestionSessionScoring } from '../lib/questionSessionEngine';
 import { buildQuestionCatalog, type CatalogQuestion } from '../lib/questionCatalog';
-import { selectMockQuestionPool } from '../lib/mockQuestionPool';
+import { selectMockQuestionPool, APPROVED_GENERATED_INCLUSIVE_POLICY } from '../lib/mockQuestionPool';
 import { resolveTestingKeyAction } from '../lib/questionKeyboardShortcuts';
 
 // Mock Test's own correctness classifier — structurally identical to lib/pyqPerformance's
@@ -33,14 +34,21 @@ export default function MockTestRunner() {
 
   const blueprint = blueprintId ? getBlueprint(blueprintId) : undefined;
 
-  // Unified Question Architecture Stage 5C — the full catalog (both sources) is built once, and
-  // selectMockQuestionPool's own default policy (practice-bank only) is what actually keeps PYQs
-  // out of the pool — an explicit, tested filter rather than an implicit guarantee from only ever
-  // mapping QUESTION_BANK. data/mockTests.ts's blueprint definitions, subject filtering, shuffle,
-  // and questionCount capping are all reused verbatim inside selectMockQuestionPool; nothing about
-  // blueprint composition changed, only how the pool that feeds it is assembled.
-  const catalog = useMemo(() => buildQuestionCatalog(PYQ_BANK, QUESTION_BANK), []);
-  const pickedQuestions = useMemo(() => (blueprint ? selectMockQuestionPool(catalog, blueprint) : []), [blueprint, catalog]);
+  // Unified Question Architecture Stage 5C — the full catalog (all three sources) is built once,
+  // and selectMockQuestionPool's own explicit provenance policy is what actually decides which
+  // provenance kinds are eligible — an explicit, tested filter rather than an implicit guarantee
+  // from only ever mapping QUESTION_BANK. data/mockTests.ts's blueprint definitions, subject
+  // filtering, shuffle, and questionCount capping are all reused verbatim inside
+  // selectMockQuestionPool; nothing about blueprint composition changed, only how the pool that
+  // feeds it is assembled. APPROVED_GENERATED_INCLUSIVE_POLICY (lib/mockQuestionPool.ts) widens
+  // eligibility to include approved generated questions on top of the practice-bank default — safe
+  // because GENERATED_QUESTION_BANK can only ever contain drafts that already cleared the Stage 6M
+  // approval gate; a 'draft' generated question can never reach this pool.
+  const catalog = useMemo(() => buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, GENERATED_QUESTION_BANK), []);
+  const pickedQuestions = useMemo(
+    () => (blueprint ? selectMockQuestionPool(catalog, blueprint, APPROVED_GENERATED_INCLUSIVE_POLICY) : []),
+    [blueprint, catalog],
+  );
 
   // The same shared testing engine PYQTest.tsx uses (lib/questionSessionEngine.ts), with Mock
   // Test's own blueprint-driven marking scheme (not PYQ's fixed 2.5/-0.833333) supplied as data;

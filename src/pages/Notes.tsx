@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Pin, Trash2, X, NotebookPen, ChevronRight, ChevronLeft, FolderOpen } from 'lucide-react';
+import Markdown from 'markdown-to-jsx';
+import { Plus, Search, Pin, Trash2, X, NotebookPen, ChevronRight, ChevronLeft, FolderOpen, Upload, Eye, Pencil } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
 import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import type { Note, SubjectColorKey } from '../lib/types';
+import { importNoteFile, SUPPORTED_IMPORT_EXTENSIONS } from '../lib/noteImport';
 
 const TOPIC_TITLES: Record<string, string> = Object.fromEntries(SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, t.title])));
 const TOPIC_SUBJECTS: Record<string, SubjectColorKey> = Object.fromEntries(
@@ -40,6 +42,13 @@ export default function Notes() {
   const [editing, setEditing] = useState<Note | null>(null);
   const [creating, setCreating] = useState(false);
   const [nav, setNav] = useState<Nav>(() => navFromSearchParams(searchParams));
+
+  // File import (Markdown/DOCX/PDF -> a normal, editable Note) — lib/noteImport.ts owns all
+  // parsing/validation; this page only wires the file picker to it and opens the result in the
+  // existing NoteEditor, exactly like startNew does for a blank note.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   // React to a fresh deep link (e.g. navigating here again from another topic) after the page is already mounted.
   useEffect(() => {
@@ -83,6 +92,34 @@ export default function Notes() {
   const quickNewTarget: { subject: SubjectColorKey | 'general'; topicId?: string } =
     nav.level === 'notes' ? { subject: nav.subject, topicId: nav.uncategorized ? undefined : nav.topicId } : { subject: 'general' };
 
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file after an error
+    if (!file) return;
+    setImportError(null);
+    setImporting(true);
+    try {
+      const result = await importNoteFile(file);
+      if (result.status === 'error') {
+        setImportError(result.message);
+        return;
+      }
+      setEditing({
+        id: uuid(),
+        subject: quickNewTarget.subject,
+        topicId: quickNewTarget.topicId,
+        title: result.title,
+        content: result.content,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pinned: false,
+      });
+      setCreating(true);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -90,11 +127,32 @@ export default function Notes() {
         title="Notes"
         description="Capture quick notes, formulas and mnemonics — organised by subject and syllabus topic."
         action={
-          <Button onClick={() => startNew(quickNewTarget.subject, quickNewTarget.topicId)}>
-            <Plus className="h-4 w-4" /> New Note
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" disabled={importing} onClick={() => importInputRef.current?.click()}>
+              <Upload className="h-4 w-4" /> {importing ? 'Importing…' : 'Import File'}
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept={SUPPORTED_IMPORT_EXTENSIONS.join(',') + ',.doc'}
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button onClick={() => startNew(quickNewTarget.subject, quickNewTarget.topicId)}>
+              <Plus className="h-4 w-4" /> New Note
+            </Button>
+          </div>
         }
       />
+
+      {importError && (
+        <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          <p>{importError}</p>
+          <button onClick={() => setImportError(null)} className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <div className="mb-5 relative">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -378,6 +436,11 @@ function NoteEditor({
   const [content, setContent] = useState(note.content);
   const [subject, setSubject] = useState<SubjectColorKey | 'general'>(note.subject);
   const [topicId, setTopicId] = useState<string | undefined>(note.topicId);
+  // Raw-Markdown edit vs. safe rendered preview — the note is always stored/edited as plain
+  // Markdown text; preview mode only changes how it's displayed, via markdown-to-jsx (never
+  // dangerouslySetInnerHTML), with disableParsingRawHTML so any HTML/script tags in imported or
+  // typed content render as inert literal text instead of being parsed.
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
 
   const subj = subject !== 'general' ? SYLLABUS.find((s) => s.colorKey === subject) : undefined;
 
@@ -437,13 +500,61 @@ function NoteEditor({
               ))}
             </select>
           </div>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Write your notes here…"
-            rows={10}
-            className="w-full resize-none rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-          />
+          <div className="flex items-center justify-end">
+            <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setMode('edit')}
+                className={cx(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
+                  mode === 'edit' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                )}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('preview')}
+                className={cx(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
+                  mode === 'preview' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                )}
+              >
+                <Eye className="h-3.5 w-3.5" /> Preview
+              </button>
+            </div>
+          </div>
+          {mode === 'edit' ? (
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Write your notes here…"
+              rows={10}
+              className="w-full resize-none rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          ) : (
+            <div
+              className={cx(
+                'min-h-[15rem] rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200',
+                '[&_h1]:font-display [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-3 [&_h1]:mb-2',
+                '[&_h2]:font-display [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-3 [&_h2]:mb-1.5',
+                '[&_h3]:font-display [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1',
+                '[&_p]:mb-2 [&_p]:leading-relaxed',
+                '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-0.5',
+                '[&_strong]:font-semibold [&_em]:italic',
+                '[&_a]:text-brand-600 dark:[&_a]:text-brand-400 [&_a]:underline',
+                '[&_code]:rounded [&_code]:bg-slate-100 dark:[&_code]:bg-slate-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono',
+                '[&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-slate-100 dark:[&_pre]:bg-slate-800 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
+                '[&_blockquote]:border-l-2 [&_blockquote]:border-slate-200 dark:[&_blockquote]:border-slate-700 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-slate-500',
+              )}
+            >
+              {content.trim() ? (
+                <Markdown options={{ disableParsingRawHTML: true, forceBlock: true }}>{content}</Markdown>
+              ) : (
+                <p className="text-slate-400">Nothing to preview yet.</p>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 px-5 py-4">
           {!isNew ? (

@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { CheckCircle2, XCircle, MinusCircle, Trophy, RotateCcw } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { PYQ_BANK } from '../data/pyq';
 import { QUESTION_BANK } from '../data/questionBank';
+import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
 import { SUBJECT_META } from '../data/syllabus';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader, fadeUp } from '../components/ui/Primitives';
+import { buildQuestionCatalog, type CatalogQuestion } from '../lib/questionCatalog';
 import { classifyMockAnswerStatus, matchesMockReviewFilter, MOCK_REVIEW_FILTERS, type MockReviewFilter } from '../lib/mockTestReview';
 
 const REVIEW_FILTER_LABELS: Record<MockReviewFilter, string> = { all: 'All', wrong: 'Wrong', unanswered: 'Skipped', correct: 'Correct' };
@@ -16,6 +19,12 @@ export default function MockTestResult() {
   const { attemptId } = useParams();
   const attempt = useAppStore((s) => s.attempts.find((a) => a.id === attemptId));
   const [reviewFilter, setReviewFilter] = useState<MockReviewFilter>('all');
+
+  // Same unified catalog Mock Test itself now selects from (PYQ_BANK + QUESTION_BANK +
+  // GENERATED_QUESTION_BANK) — looking up only in QUESTION_BANK here would silently drop any
+  // approved generated question from the review screen once one is ever actually selected.
+  const catalog = useMemo(() => buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, GENERATED_QUESTION_BANK), []);
+  const catalogById = useMemo(() => new Map(catalog.map((q) => [q.id, q])), [catalog]);
 
   if (!attempt) {
     return (
@@ -38,7 +47,7 @@ export default function MockTestResult() {
     Skipped: v.skipped,
   }));
 
-  const questions = attempt.questionIds.map((id) => QUESTION_BANK.find((q) => q.id === id)!).filter(Boolean);
+  const questions = attempt.questionIds.map((id) => catalogById.get(id)).filter((q): q is CatalogQuestion => Boolean(q));
 
   const reviewCounts: Record<MockReviewFilter, number> = { all: questions.length, correct: 0, wrong: 0, unanswered: 0 };
   for (const q of questions) reviewCounts[classifyMockAnswerStatus(attempt.answers[q.id], q.correctOptionId)] += 1;
@@ -142,7 +151,7 @@ export default function MockTestResult() {
                 <div className="min-w-0 flex-1">
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="text-xs text-slate-300 dark:text-slate-600 font-semibold">{idx + 1}.</span>
-                    <Badge className={cx(colors.bg, colors.text)}>{q.topic}</Badge>
+                    <Badge className={cx(colors.bg, colors.text)}>{q.topicLabel}</Badge>
                   </div>
                   <p className="text-sm font-medium text-slate-800 dark:text-slate-100">{q.question}</p>
                   <div className="mt-2 grid gap-1.5 sm:grid-cols-2">

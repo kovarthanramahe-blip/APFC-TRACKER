@@ -2,9 +2,37 @@ import { describe, it, expect } from 'vitest';
 import type { MockTestBlueprint, PYQ, Question } from './types';
 import { PYQ_BANK } from '../data/pyq';
 import { QUESTION_BANK } from '../data/questionBank';
+import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
 import { MOCK_TEST_BLUEPRINTS } from '../data/mockTests';
 import { buildQuestionCatalog, pyqToCatalogQuestion, questionToCatalogQuestion } from './questionCatalog';
-import { selectMockQuestionPool, DEFAULT_MOCK_PROVENANCE_POLICY } from './mockQuestionPool';
+import type { GeneratedQuestionDraft } from './types';
+import { selectMockQuestionPool, DEFAULT_MOCK_PROVENANCE_POLICY, APPROVED_GENERATED_INCLUSIVE_POLICY } from './mockQuestionPool';
+import { generatedQuestionToCatalogQuestion } from './questionCatalog';
+
+function generatedDraft(overrides: Partial<GeneratedQuestionDraft> = {}): GeneratedQuestionDraft {
+  return {
+    id: 'gen-1',
+    subject: 'polity',
+    topicId: 't-1',
+    question: 'A generated question?',
+    options: [
+      { id: 'gen-1-o0', text: 'A' },
+      { id: 'gen-1-o1', text: 'B' },
+    ],
+    correctOptionId: 'gen-1-o0',
+    explanation: 'Because A.',
+    provenance: {
+      kind: 'generated',
+      sourceAuthority: 'Source Authority',
+      sourceTitle: 'Source Title',
+      sourceReference: 'Source Reference',
+      topicId: 't-1',
+      verificationStatus: 'verified',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    ...overrides,
+  };
+}
 
 function pyq(overrides: Partial<PYQ> = {}): PYQ {
   return {
@@ -151,6 +179,45 @@ describe('subject filtering and question-count capping (unchanged semantics)', (
     const catalog = buildQuestionCatalog([], [question({ id: 'q-1' }), question({ id: 'q-2' })]);
     expect(selectMockQuestionPool(catalog, blueprint({ questionCount: 1 }))).toHaveLength(1);
     expect(selectMockQuestionPool(catalog, blueprint({ questionCount: 50 }))).toHaveLength(2);
+  });
+});
+
+describe('4. APPROVED_GENERATED_INCLUSIVE_POLICY widens eligibility without touching the default', () => {
+  it('is the default policy plus "generated", not a replacement for it', () => {
+    expect(APPROVED_GENERATED_INCLUSIVE_POLICY).toEqual([...DEFAULT_MOCK_PROVENANCE_POLICY, 'generated']);
+  });
+
+  it('DEFAULT_MOCK_PROVENANCE_POLICY itself is unchanged (still practice_bank only)', () => {
+    expect(DEFAULT_MOCK_PROVENANCE_POLICY).toEqual(['practice_bank']);
+  });
+
+  it('includes a generated-provenance entry alongside practice-bank entries when used explicitly', () => {
+    const catalog = [...buildQuestionCatalog([], [question({ id: 'q-1' })]), generatedQuestionToCatalogQuestion(generatedDraft({ id: 'gen-1' }))];
+    const pool = selectMockQuestionPool(catalog, blueprint({ questionCount: 10 }), APPROVED_GENERATED_INCLUSIVE_POLICY);
+    expect([...pool.map((e) => e.id)].sort()).toEqual(['gen-1', 'q-1']);
+  });
+
+  it('a generated-provenance entry is still excluded under the unchanged default policy', () => {
+    const catalog = [...buildQuestionCatalog([], [question({ id: 'q-1' })]), generatedQuestionToCatalogQuestion(generatedDraft({ id: 'gen-1' }))];
+    const pool = selectMockQuestionPool(catalog, blueprint({ questionCount: 10 }));
+    expect(pool.map((e) => e.id)).toEqual(['q-1']);
+  });
+
+  it('PYQs still stay excluded even under the generated-inclusive policy (it only adds "generated", not "pyq")', () => {
+    const catalog = [
+      ...buildQuestionCatalog([pyq({ id: 'pyq-1' })], [question({ id: 'q-1' })]),
+      generatedQuestionToCatalogQuestion(generatedDraft({ id: 'gen-1' })),
+    ];
+    const pool = selectMockQuestionPool(catalog, blueprint({ questionCount: 10 }), APPROVED_GENERATED_INCLUSIVE_POLICY);
+    expect([...pool.map((e) => e.id)].sort()).toEqual(['gen-1', 'q-1']);
+  });
+
+  it('the real GENERATED_QUESTION_BANK-backed catalog currently yields no generated entries (bank is empty today)', () => {
+    const catalog = buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, GENERATED_QUESTION_BANK);
+    for (const bp of MOCK_TEST_BLUEPRINTS) {
+      const pool = selectMockQuestionPool(catalog, bp, APPROVED_GENERATED_INCLUSIVE_POLICY);
+      expect(pool.some((e) => e.provenance.kind === 'generated')).toBe(false);
+    }
   });
 });
 
