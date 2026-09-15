@@ -13,6 +13,7 @@ import { useQuestionSession } from '../lib/useQuestionSession';
 import type { QuestionResultStatus, QuestionSessionScoring } from '../lib/questionSessionEngine';
 import { buildQuestionCatalog, type CatalogQuestion } from '../lib/questionCatalog';
 import { selectMockQuestionPool } from '../lib/mockQuestionPool';
+import { resolveTestingKeyAction } from '../lib/questionKeyboardShortcuts';
 
 // Mock Test's own correctness classifier — structurally identical to lib/pyqPerformance's
 // pyqQuestionStatus, but typed for CatalogQuestion (lib/questionCatalog.ts, Stage 4/5B). Kept
@@ -88,6 +89,38 @@ export default function MockTestRunner() {
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started]);
+
+  // Keyboard shortcuts once the test is running — same mapping as pages/PYQTest.tsx's testing
+  // screen (lib/questionKeyboardShortcuts.ts, reused verbatim, not re-implemented): 1-N/a-z select
+  // an option, arrow keys navigate. No shortcut submits the test — that stays a deliberate,
+  // confirmed click only. Ignores modifier-key combinations and real input/textarea/select focus.
+  // `session`'s methods close over this component's own `setState` via a functional updater (see
+  // lib/useQuestionSession.ts), so omitting the fresh-every-render `session` object from deps below
+  // never causes a stale update.
+  useEffect(() => {
+    if (!started) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const q = questions[current];
+      if (!q) return;
+      const action = resolveTestingKeyAction(e.key, q.options.length);
+      if (action.type === 'selectOption') {
+        e.preventDefault();
+        session.selectAnswer(q.id, q.options[action.index].id);
+      } else if (action.type === 'next' && current < questions.length - 1) {
+        e.preventDefault();
+        session.goToNext();
+      } else if (action.type === 'previous' && current > 0) {
+        e.preventDefault();
+        session.goToPrevious();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, current, questions]);
 
   if (!blueprint) {
     return (
@@ -248,6 +281,11 @@ export default function MockTestRunner() {
             </button>
           )}
         </Card>
+
+        <p className="mt-3 hidden text-center text-[11px] text-slate-400 sm:block">
+          Keyboard: press <span className="font-semibold">1-{q.options.length}</span> to select an option, <span className="font-semibold">←</span>/
+          <span className="font-semibold">→</span> to navigate
+        </p>
 
         <div className="mt-4 flex items-center justify-between gap-3">
           <Button variant="secondary" disabled={current === 0} onClick={session.goToPrevious}>
