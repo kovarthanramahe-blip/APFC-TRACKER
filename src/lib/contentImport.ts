@@ -281,6 +281,25 @@ export interface ImportedContentProvenance {
 }
 
 /**
+ * The generic, content-type-agnostic slice of an item's metadata — organisation fields every
+ * imported item can carry regardless of contentType (a research_document today; question banks,
+ * bibliographies and other content types later — see the repository-organisation stage this was
+ * added for). Never auto-filled, inferred, or guessed: both fields are only ever what a user
+ * actually typed. The index signature keeps this a strict superset of the old
+ * `Record<string, unknown>` shape, so any future content-type-specific field (e.g. a 'pyq'
+ * import's {year, paper}) still fits here without another type redesign.
+ */
+export interface ImportedContentMetadata {
+  /** User-assigned organisation tags. Matched case-insensitively by the repository search/filter
+   * utilities (lib/importedContentRepository.ts) but stored/displayed exactly as typed. */
+  tags?: string[];
+  /** A single user-assigned organisation category (e.g. "Literature Review", "Fieldwork") —
+   * freeform text, not a fixed enum. */
+  category?: string;
+  [key: string]: unknown;
+}
+
+/**
  * A single imported item, workspace-scoped and typed by ImportedContentType. This is a
  * REPRESENTATION only — nothing in this module persists an ImportedContent anywhere; see the
  * module header for exactly what stops where.
@@ -295,11 +314,11 @@ export interface ImportedContent {
    * specific conversion step would read this field, not replace how it got here. */
   rawContent: string;
   provenance: ImportedContentProvenance;
-  /** Freeform, content-type-specific metadata (e.g. a future 'pyq' import might carry {year,
-   * paper}) — deliberately untyped here since no content type's structured shape is built out
-   * yet; see OBJECTIVE_QUESTION_CONTENT_TYPES/DESCRIPTIVE_CONTENT_TYPES above and
-   * lib/types.ts's PYQ/DescriptiveExamQuestion for the shapes a real conversion would target. */
-  metadata?: Record<string, unknown>;
+  /** Organisation metadata (tags/category) plus any future content-type-specific fields — see
+   * ImportedContentMetadata. Optional so existing items imported before this field existed
+   * continue to work unchanged: every reader here treats a missing `metadata` exactly like
+   * `{ tags: [], category: undefined }` (see lib/importedContentRepository.ts). */
+  metadata?: ImportedContentMetadata;
 }
 
 // ============================================================================================
@@ -365,7 +384,7 @@ export function confirmImportedContent(
     title?: string;
     content?: string;
     sourceNote?: string;
-    metadata?: Record<string, unknown>;
+    metadata?: ImportedContentMetadata;
     importedAt?: string;
   },
 ): ImportedContent {

@@ -9,6 +9,12 @@ import {
   selectImportedContentByType,
   type ImportPreview,
 } from '../lib/contentImport';
+import {
+  queryImportedContent,
+  getContentTags,
+  getContentCategory,
+  parseTagsInput,
+} from '../lib/importedContentRepository';
 
 // This page has no rendering test here (the project has no React Testing Library / DOM test
 // environment — see StudyPlan.test.ts and every other *.test.ts file in this repo, which all test
@@ -192,5 +198,147 @@ describe('PhD Research page — existing Notes import regression', () => {
     useAppStore.getState().setActiveWorkspaceId('apfc');
     expect(useAppStore.getState().notes).toHaveLength(1);
     expect(useAppStore.getState().notes[0].title).toBe('APFC note');
+  });
+});
+
+// Repository organisation stage — tags/category live in ImportedContent.metadata (never as new
+// top-level fields on ImportedContent itself — see lib/contentImport.ts's ImportedContentMetadata).
+// These tests exercise exactly what PhdResearch.tsx's handleConfirm/handleSaveMetadata do: parse
+// the tags text field with parseTagsInput, build a metadata object, and pass it through
+// confirmImportedContent / updateImportedContent — the same two store-facing calls the page makes.
+describe('PhD Research page — organisation metadata on import', () => {
+  beforeEach(fullReset);
+
+  it('tags and category entered at import time are preserved in the saved document', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const preview = researchPreview();
+    const tags = parseTagsInput('fieldwork, chapter-1');
+    const content = confirmImportedContent(preview, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      metadata: { tags, category: 'Literature Review' },
+    });
+    useAppStore.getState().addImportedContent(content);
+
+    const [stored] = useAppStore.getState().importedContent;
+    expect(getContentTags(stored)).toEqual(['fieldwork', 'chapter-1']);
+    expect(getContentCategory(stored)).toBe('Literature Review');
+  });
+
+  it('importing with no tags/category typed leaves metadata undefined, matching the pre-organisation shape', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview(), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(content);
+
+    const [stored] = useAppStore.getState().importedContent;
+    expect(stored.metadata).toBeUndefined();
+    expect(getContentTags(stored)).toEqual([]);
+    expect(getContentCategory(stored)).toBeUndefined();
+  });
+});
+
+describe('PhD Research page — editing organisation metadata on an existing document', () => {
+  beforeEach(fullReset);
+
+  it('updateImportedContent replaces tags/category without touching title/rawContent/provenance', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview(), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      metadata: { tags: ['draft'], category: 'Uncategorised' },
+    });
+    useAppStore.getState().addImportedContent(content);
+
+    useAppStore.getState().updateImportedContent(content.id, { metadata: { tags: parseTagsInput('final, chapter-1'), category: 'Fieldwork' } });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(getContentTags(updated)).toEqual(['final', 'chapter-1']);
+    expect(getContentCategory(updated)).toBe('Fieldwork');
+    expect(updated.title).toBe(content.title);
+    expect(updated.rawContent).toBe(content.rawContent);
+    expect(updated.provenance).toEqual(content.provenance);
+  });
+
+  it('clearing tags/category in an edit produces an item with no metadata fields set', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview(), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      metadata: { tags: ['draft'], category: 'Fieldwork' },
+    });
+    useAppStore.getState().addImportedContent(content);
+
+    useAppStore.getState().updateImportedContent(content.id, { metadata: undefined });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(getContentTags(updated)).toEqual([]);
+    expect(getContentCategory(updated)).toBeUndefined();
+  });
+
+  it('editing metadata cannot change the document id or workspaceId (runtime-enforced by the store)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview(), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(content);
+
+    // @ts-expect-error — deliberately bypassing the TS-level Omit<...,'id'|'workspaceId'> to prove
+    // the store's own runtime guard (not just the type system) still holds under organisation edits.
+    useAppStore.getState().updateImportedContent(content.id, { id: 'hijacked', workspaceId: 'apfc', metadata: { tags: ['x'] } });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(updated.id).toBe(content.id);
+    expect(updated.workspaceId).toBe('phd_research');
+    expect(getContentTags(updated)).toEqual(['x']);
+  });
+});
+
+describe('PhD Research page — old imported records without metadata still work', () => {
+  beforeEach(fullReset);
+
+  it('a pre-organisation-stage record (no metadata field) displays and is searchable/filterable without throwing', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const legacyDoc = confirmImportedContent(researchPreview({ title: 'Old Literature Notes' }), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+    });
+    useAppStore.getState().addImportedContent(legacyDoc);
+
+    const stored = useAppStore.getState().importedContent;
+    expect(stored[0].metadata).toBeUndefined();
+    expect(() => queryImportedContent(stored, {})).not.toThrow();
+    expect(queryImportedContent(stored, { search: 'literature' }).map((i) => i.id)).toEqual([legacyDoc.id]);
+    expect(queryImportedContent(stored, { tags: ['anything'] })).toEqual([]);
+    expect(queryImportedContent(stored, { category: 'anything' })).toEqual([]);
+  });
+
+  it('a legacy record can still be tagged/categorised via an edit', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const legacyDoc = confirmImportedContent(researchPreview(), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(legacyDoc);
+
+    useAppStore.getState().updateImportedContent(legacyDoc.id, { metadata: { tags: ['newly-tagged'], category: 'Fieldwork' } });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(getContentTags(updated)).toEqual(['newly-tagged']);
+    expect(getContentCategory(updated)).toBe('Fieldwork');
+  });
+});
+
+describe('PhD Research page — search/filter respects workspace isolation', () => {
+  beforeEach(fullReset);
+
+  it('querying only ever sees the active workspace\'s own importedContent array', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const phdDoc = confirmImportedContent(researchPreview({ title: 'Fieldwork Notes' }), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      metadata: { tags: ['fieldwork'] },
+    });
+    useAppStore.getState().addImportedContent(phdDoc);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(queryImportedContent(useAppStore.getState().importedContent, { search: 'fieldwork' })).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(queryImportedContent(useAppStore.getState().importedContent, { search: 'fieldwork' }).map((i) => i.id)).toEqual([phdDoc.id]);
   });
 });
