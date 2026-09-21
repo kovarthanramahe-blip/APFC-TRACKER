@@ -89,3 +89,28 @@ describe('hasMeaningfulData — tolerates missing/malformed fields', () => {
     expect(() => hasMeaningfulData({ pyqAttempts: null, bookmarkedPyqIds: undefined })).not.toThrow();
   });
 });
+
+// Multi-Workspace OS, Stage 2 — a device whose active workspace's fields are all empty but which
+// has archived data under a DIFFERENT (inactive) workspace still has meaningful data: reconciling
+// against an empty cloud row must not treat this as "nothing to upload" and silently drop it.
+describe('hasMeaningfulData — Multi-Workspace OS Stage 2 (inactiveWorkspaceOwnedData)', () => {
+  it('returns false when inactiveWorkspaceOwnedData is empty (today\'s only real case)', () => {
+    expect(hasMeaningfulData({ completedTopics: {}, notes: [], inactiveWorkspaceOwnedData: {} })).toBe(false);
+  });
+
+  it('returns true when inactiveWorkspaceOwnedData holds another workspace\'s archived data, even with an otherwise-empty active workspace', () => {
+    expect(
+      hasMeaningfulData({
+        completedTopics: {},
+        notes: [],
+        attempts: [],
+        sessions: [],
+        studyLog: {},
+        starredQuestionIds: [],
+        pyqAttempts: [],
+        bookmarkedPyqIds: [],
+        inactiveWorkspaceOwnedData: { upsc_cse: { notes: [{ id: 'n1' }] } },
+      }),
+    ).toBe(true);
+  });
+});

@@ -12,6 +12,7 @@ import {
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
+import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 
 // This page has no rendering test here (the project has no React Testing Library / DOM test
 // environment — see the other *.test.ts files in this repo, which all test exported pure
@@ -104,7 +105,9 @@ describe('study plan store integration', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     useAppStore.getState().setStudyPlan(result.plan);
-    expect(useAppStore.getState().studyPlan).toEqual(result.plan);
+    // Multi-Workspace OS, Stage 2 — setStudyPlan stamps the active workspace onto the plan it
+    // stores (see store.ts), so the stored plan now carries one field result.plan doesn't.
+    expect(useAppStore.getState().studyPlan).toEqual({ ...result.plan, workspaceId: DEFAULT_WORKSPACE_ID });
     expect(useAppStore.getState().studyPlanGeneratedAt).not.toBeNull();
   });
 
@@ -378,7 +381,9 @@ describe('adaptStudyPlan — store integration', () => {
     const personal = [{ id: 'p1', date: '2026-01-05', title: 'Revise notes', estimatedMinutes: 20, status: 'pending' as const, taskType: 'personal' as const, reason: 'Added by you.' }];
     useAppStore.getState().setPersonalStudyPlanTasks(personal);
     useAppStore.getState().adaptStudyPlan(SYLLABUS, null, '2026-01-01');
-    expect(useAppStore.getState().personalStudyPlanTasks).toEqual(personal);
+    // Multi-Workspace OS, Stage 2 — setPersonalStudyPlanTasks stamps the active workspace onto
+    // each task (see store.ts), so the stored tasks now carry one field `personal` doesn't.
+    expect(useAppStore.getState().personalStudyPlanTasks).toEqual(personal.map((t) => ({ ...t, workspaceId: DEFAULT_WORKSPACE_ID })));
   });
 
   it('never runs on its own — the store starts with no plan and adaptStudyPlan is not called until explicitly invoked', () => {

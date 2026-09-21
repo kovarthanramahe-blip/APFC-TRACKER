@@ -207,6 +207,7 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'bookmarkedPyqIds',
         'completedTopics',
         'dailyGoalMinutes',
+        'inactiveWorkspaceOwnedData',
         'notes',
         'personalStudyPlanTasks',
         'pyqAttempts',
@@ -220,5 +221,230 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'theme',
       ].sort(),
     );
+  });
+
+  // Stage 2 additions to the SAME migration function (see store.ts's combined Stage 1 + Stage 2
+  // migration comment) — these specifically cover the version-2 -> version-3 step.
+  it('Stage-1-shaped data (already version 2: workspaceId stamped, activeWorkspaceId present, but no inactiveWorkspaceOwnedData yet) gets inactiveWorkspaceOwnedData added', () => {
+    const stage1Fixture = { ...(migrateAppStorage(oldFixture(), 1) as any) };
+    delete stage1Fixture.inactiveWorkspaceOwnedData; // simulate real version-2 data, pre-Stage-2
+    const migrated = migrateAppStorage(stage1Fixture, 2) as any;
+    expect(migrated.inactiveWorkspaceOwnedData).toEqual({});
+    // and everything Stage 1 already stamped is left exactly as it was — not re-stamped/altered
+    expect(migrated.notes[0]).toEqual(stage1Fixture.notes[0]);
+    expect(migrated.studyPlan).toEqual(stage1Fixture.studyPlan);
+    expect(migrated.activeWorkspaceId).toBe('apfc');
+  });
+
+  it('a true Stage-0 fixture (version 1, nothing workspace-related at all) migrates straight to the full Stage-2 shape in one pass', () => {
+    const migrated = migrateAppStorage(oldFixture(), 1) as any;
+    expect(migrated.activeWorkspaceId).toBe('apfc');
+    expect(migrated.inactiveWorkspaceOwnedData).toEqual({});
+    expect(migrated.notes[0].workspaceId).toBe('apfc');
+  });
+
+  it('never overwrites an already-present inactiveWorkspaceOwnedData archive', () => {
+    const fixture = { ...oldFixture(), inactiveWorkspaceOwnedData: { upsc_cse: { notes: [{ id: 'x' }] } } };
+    const migrated = migrateAppStorage(fixture, 1) as any;
+    expect(migrated.inactiveWorkspaceOwnedData).toEqual({ upsc_cse: { notes: [{ id: 'x' }] } });
+  });
+
+  it('the full migration (version 1 straight through to current) is idempotent end-to-end', () => {
+    const once = migrateAppStorage(oldFixture(), 1);
+    const twice = migrateAppStorage(once, 1);
+    expect(twice).toEqual(once);
+  });
+});
+
+// Multi-Workspace OS, Stage 2 — real, tested workspace scoping while there is still only one real
+// workspace (apfc). setActiveWorkspaceId is not called by any UI yet (no switcher — see the task
+// report), but the mechanism it drives is exercised directly here, exactly like a future switcher
+// would call it, to prove isolation actually works before any UI is built on top of it.
+describe('Multi-Workspace OS Stage 2 — workspace-scoped write paths & isolation', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+    });
+  }
+  beforeEach(fullReset);
+
+  describe('write-path stamping — new records receive the active workspace', () => {
+    it('upsertNote stamps a brand-new note with the active workspace', () => {
+      useAppStore.getState().upsertNote({
+        id: 'n1',
+        subject: 'general',
+        title: 'T',
+        content: 'C',
+        createdAt: 'a',
+        updatedAt: 'b',
+        pinned: false,
+      });
+      expect(useAppStore.getState().notes[0].workspaceId).toBe('apfc');
+    });
+
+    it('upsertNote preserves an already-stamped note\'s workspaceId rather than overwriting it', () => {
+      useAppStore.getState().upsertNote({
+        id: 'n1',
+        subject: 'general',
+        title: 'T',
+        content: 'C',
+        createdAt: 'a',
+        updatedAt: 'b',
+        pinned: false,
+        workspaceId: 'upsc_cse',
+      });
+      expect(useAppStore.getState().notes[0].workspaceId).toBe('upsc_cse');
+    });
+
+    it('addAttempt / addPyqAttempt / addSession stamp new items with the active workspace', () => {
+      useAppStore.getState().addAttempt({
+        id: 'a1', blueprintId: 'b1', blueprintTitle: 'T', startedAt: 'a', submittedAt: 'b', durationMinutes: 10,
+        questionIds: [], answers: {}, correctCount: 0, wrongCount: 0, skippedCount: 0, score: 0, maxScore: 0, subjectBreakdown: {},
+      });
+      useAppStore.getState().addPyqAttempt({
+        id: 'p1', submittedAt: 'a', year: 2020, subject: 'polity', topicId: 't-1', questionIds: [], answers: {},
+        correctCount: 0, wrongCount: 0, unansweredCount: 0, score: 0, accuracy: 0,
+      });
+      useAppStore.getState().addSession({ id: 's1', mode: 'focus', startedAt: 'a', completedAt: 'b', durationMinutes: 25, completedFully: true });
+      expect(useAppStore.getState().attempts[0].workspaceId).toBe('apfc');
+      expect(useAppStore.getState().pyqAttempts[0].workspaceId).toBe('apfc');
+      expect(useAppStore.getState().sessions[0].workspaceId).toBe('apfc');
+    });
+
+    it('setStudyPlan stamps the plan and setPersonalStudyPlanTasks stamps every task', () => {
+      useAppStore.getState().setStudyPlan({
+        config: {} as any, capacity: {} as any, capacityReport: {} as any, coverageSummary: {} as any,
+        phases: [], tasks: [], unscheduledTopicIds: [],
+      });
+      useAppStore.getState().setPersonalStudyPlanTasks([
+        { id: 'pt1', date: '2026-01-02', title: 'X', estimatedMinutes: 10, status: 'pending', taskType: 'personal', reason: 'Added by you.' },
+      ]);
+      expect(useAppStore.getState().studyPlan?.workspaceId).toBe('apfc');
+      expect(useAppStore.getState().personalStudyPlanTasks[0].workspaceId).toBe('apfc');
+    });
+  });
+
+  describe('setActiveWorkspaceId — archive/restore isolation', () => {
+    it('is a no-op when switching to the workspace that is already active', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'T', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false });
+      const before = useAppStore.getState();
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      const after = useAppStore.getState();
+      expect(after.notes).toBe(before.notes); // same reference — genuinely untouched, not just equal
+      expect(after.inactiveWorkspaceOwnedData).toBe(before.inactiveWorkspaceOwnedData);
+    });
+
+    it('switching away starts the new workspace completely empty', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'APFC note', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false });
+      useAppStore.getState().toggleTopic('t-1');
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().notes).toEqual([]);
+      expect(useAppStore.getState().completedTopics).toEqual({});
+      expect(useAppStore.getState().activeWorkspaceId).toBe('upsc_cse');
+    });
+
+    it('the outgoing workspace\'s data is archived, not lost, and is restored exactly on switching back', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'APFC note', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false });
+      useAppStore.getState().toggleTopic('t-1');
+      useAppStore.getState().toggleStarredQuestion('q1');
+      useAppStore.getState().toggleBookmarkedPyq('p1');
+      useAppStore.getState().bumpFocusMinutes('2026-01-01', 30);
+      useAppStore.getState().recordRewardUnlocks(['streak_7']);
+      useAppStore.getState().recordRevisionCorrect('p1', '2026-01-08');
+
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // archive apfc, arrive empty
+      expect(useAppStore.getState().notes).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('apfc'); // restore apfc exactly
+      const state = useAppStore.getState();
+      expect(state.notes).toHaveLength(1);
+      expect(state.notes[0].title).toBe('APFC note');
+      expect(state.completedTopics).toEqual({ 't-1': true });
+      expect(state.starredQuestionIds).toEqual(['q1']);
+      expect(state.bookmarkedPyqIds).toEqual(['p1']);
+      expect(state.studyLog['2026-01-01'].focusMinutes).toBe(30);
+      expect(state.rewardUnlocks.streak_7).toBeTruthy();
+      expect(state.revisionQueue.p1.box).toBe(2);
+    });
+
+    it('keyed structures stay fully isolated between two workspaces active in the same session', () => {
+      useAppStore.getState().toggleTopic('apfc-topic');
+      useAppStore.getState().toggleStarredQuestion('apfc-q');
+      useAppStore.getState().recordRevisionCorrect('apfc-pyq', '2026-01-01');
+
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().toggleTopic('cse-topic');
+      useAppStore.getState().toggleStarredQuestion('cse-q');
+      useAppStore.getState().recordRevisionCorrect('cse-pyq', '2026-01-01');
+
+      // upsc_cse's view only ever shows upsc_cse's own data
+      expect(useAppStore.getState().completedTopics).toEqual({ 'cse-topic': true });
+      expect(useAppStore.getState().starredQuestionIds).toEqual(['cse-q']);
+      expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['cse-pyq']);
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      // apfc's own data is completely untouched by anything done while upsc_cse was active
+      expect(useAppStore.getState().completedTopics).toEqual({ 'apfc-topic': true });
+      expect(useAppStore.getState().starredQuestionIds).toEqual(['apfc-q']);
+      expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['apfc-pyq']);
+    });
+
+    it('a third, never-before-visited workspace also starts empty (not accidentally sharing data with either existing one)', () => {
+      useAppStore.getState().toggleTopic('apfc-topic');
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().toggleTopic('cse-topic');
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().completedTopics).toEqual({});
+      expect(useAppStore.getState().notes).toEqual([]);
+    });
+  });
+
+  describe('resetAllData — Stage 2', () => {
+    it('clears inactiveWorkspaceOwnedData for every workspace, not just the active one', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'T', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false });
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // archives apfc's note
+      expect(Object.keys(useAppStore.getState().inactiveWorkspaceOwnedData)).toEqual(['apfc']);
+      useAppStore.getState().resetAllData();
+      expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
+    });
+  });
+
+  describe('exportAllData / importAllData — do not lose workspace-scoped data', () => {
+    it('round-trips a non-empty inactiveWorkspaceOwnedData archive', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'APFC note', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false });
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // archives apfc's note away
+      const json = exportAllData();
+
+      fullReset(); // simulate a fresh device with nothing loaded yet
+      expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
+
+      importAllData(json);
+      expect(Object.keys(useAppStore.getState().inactiveWorkspaceOwnedData)).toEqual(['apfc']);
+      expect(useAppStore.getState().inactiveWorkspaceOwnedData.apfc?.notes[0]?.title).toBe('APFC note');
+
+      // and switching back to apfc after import restores it correctly, same as within one session
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().notes[0]?.title).toBe('APFC note');
+    });
+
+    it('importAllData defaults inactiveWorkspaceOwnedData to {} for a pre-Stage-2 export (older backup file)', () => {
+      const legacyExport = JSON.stringify({ completedTopics: {}, notes: [], attempts: [], pyqAttempts: [] });
+      importAllData(legacyExport);
+      expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
+    });
   });
 });

@@ -114,18 +114,70 @@ interface AppState {
   recordRevisionCorrect: (pyqId: string, today: string) => void;
   recordRevisionIncorrect: (pyqId: string, today: string) => void;
 
-  // Multi-Workspace OS, Stage 1 (foundation only): which workspace (see lib/workspace.ts) is
-  // currently active. Always 'apfc' for now — there is no switcher UI yet, and no read/write path
-  // filters by it yet (that starts in a later stage). Treated as a device-local setting, like
-  // `theme`, not user data: excluded from resetAllData and from exportAllData/importAllData (see
-  // lastSyncedUserId's identical treatment above), so it is never wiped by "reset my data" and
-  // never round-trips through the JSON backup or cloud sync — each device just keeps whatever it
-  // was last set to (currently always the default, since nothing sets it yet).
+  // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
+  // for now — there is still no switcher UI (Stage 2 makes the mechanism real and tested; a later
+  // stage adds the UI to actually call setActiveWorkspaceId). Excluded from resetAllData (like
+  // `theme`, a setting rather than data to wipe), but — unlike a plain device preference — IS
+  // included in exportAllData/importAllData/cloud sync: every workspace-owned field below (notes,
+  // completedTopics, etc.) is only meaningful together with the workspace id it belongs to, so
+  // that pairing must travel with them on any full-state replace (see setActiveWorkspaceId and
+  // importAllData). This intentionally differs from lastSyncedUserId, which stays device-local for
+  // an unrelated reason (detecting an account change on THIS device) that doesn't apply here.
   activeWorkspaceId: WorkspaceKind;
+  // Multi-Workspace OS, Stage 2: switching workspaces archives every workspace-owned field's
+  // current value under the OUTGOING workspace's id here, then restores whatever was previously
+  // archived for the INCOMING workspace (or a fresh empty snapshot the first time). See
+  // WorkspaceOwnedData / emptyWorkspaceOwnedData below and setActiveWorkspaceId's implementation.
+  // Round-trips through exportAllData/importAllData and cloud sync (see hasMeaningfulData in
+  // cloudSync.ts), same as activeWorkspaceId now does — it is real user data (every OTHER
+  // workspace's notes/attempts/etc.), and losing it on sync would be data loss. Always `{}` today,
+  // since nothing calls setActiveWorkspaceId yet.
+  inactiveWorkspaceOwnedData: Partial<Record<WorkspaceKind, WorkspaceOwnedData>>;
   setActiveWorkspaceId: (id: WorkspaceKind) => void;
 
   // Reset
   resetAllData: () => void;
+}
+
+/**
+ * Multi-Workspace OS, Stage 2 — the complete set of fields that belong to ONE workspace, as
+ * opposed to global device/app settings (theme, examDate, dailyGoalMinutes, lastSyncedUserId,
+ * activeWorkspaceId itself) which apply across every workspace and are deliberately excluded.
+ * This is exactly the field list AppState exposes for "the current workspace's data" today — see
+ * setActiveWorkspaceId, which archives/restores precisely this shape when switching workspaces.
+ */
+interface WorkspaceOwnedData {
+  completedTopics: Record<string, boolean>;
+  notes: Note[];
+  attempts: MockTestAttempt[];
+  pyqAttempts: PYQAttempt[];
+  sessions: PomodoroSession[];
+  studyLog: Record<string, StudyLogEntry>;
+  starredQuestionIds: string[];
+  bookmarkedPyqIds: string[];
+  rewardUnlocks: Record<string, string>;
+  studyPlan: StudyPlan | null;
+  studyPlanGeneratedAt: string | null;
+  personalStudyPlanTasks: PersonalPlanTask[];
+  revisionQueue: RevisionQueue;
+}
+
+function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
+  return {
+    completedTopics: {},
+    notes: [],
+    attempts: [],
+    pyqAttempts: [],
+    sessions: [],
+    studyLog: {},
+    starredQuestionIds: [],
+    bookmarkedPyqIds: [],
+    rewardUnlocks: {},
+    studyPlan: null,
+    studyPlanGeneratedAt: null,
+    personalStudyPlanTasks: [],
+    revisionQueue: createRevisionQueue(),
+  };
 }
 
 // P1 fix #4 — the user's LOCAL calendar date, not UTC's (see lib/utils's getLocalDateString):
@@ -140,32 +192,37 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
   return log[date] ?? { date, focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0 };
 }
 
-// --- Multi-Workspace OS, Stage 1 persist migration -------------------------------------------
+// --- Multi-Workspace OS persist migration (Stage 1 + Stage 2, folded into one forward step) ---
 // Every existing user's persisted data (localStorage today; the same JSON also round-trips
 // through Supabase's single `user_data` row via cloudSync.ts) predates the very idea of a
 // workspace: it is implicitly "the APFC data," just never labelled as such. This migration makes
-// that label explicit and permanent, with zero manual steps and zero data loss:
+// that label explicit and permanent, with zero manual steps and zero data loss, for a persisted
+// blob at ANY prior version (true pre-Stage-1 data, or already-Stage-1-migrated version-2 data):
 //  - every existing array-of-object entity (notes, mock test attempts, PYQ attempts, Pomodoro
 //    sessions, personal study-plan tasks) gets `workspaceId: 'apfc'` stamped onto each item that
 //    doesn't already have one;
 //  - the single current study plan (if any) gets the same stamp;
-//  - `activeWorkspaceId` is set to the default ('apfc') if not already present.
-// Deliberately NOT touched here (see the Stage 1 diagnostic/plan write-up): completedTopics,
-// studyLog, rewardUnlocks, and revisionQueue are all keyed Records (by topicId/date/id/pyqId)
-// rather than arrays of objects, and starredQuestionIds/bookmarkedPyqIds are plain string arrays
-// (question ids, not objects) — none of these can safely take a per-entry `workspaceId` without
-// either corrupting a non-object value or changing the record's key namespace, and the latter
-// would require updating every page that reads them directly. Restructuring those is explicitly
-// deferred to a later stage, once a second real workspace exists to design the namespacing
-// against; for now they continue to behave exactly as before, which is safe precisely because
-// only one real workspace ('apfc') exists today. Nothing about this migration changes PYQ_BANK,
-// QUESTION_BANK, syllabus data, or the generated-question pipeline — none of that is persisted
-// user state, so none of it is touched by (or even reachable from) this function.
+//  - `activeWorkspaceId` is set to the default ('apfc') if not already present;
+//  - `inactiveWorkspaceOwnedData` (Stage 2 — see the interface above) is set to `{}` if not already
+//    present. There is nothing to migrate INTO it: it holds OTHER workspaces' archived data, and
+//    since 'apfc' has always been the only real workspace, nothing has ever been archived.
+// Deliberately NOT restructured here: completedTopics, studyLog, rewardUnlocks, and revisionQueue
+// are all keyed Records (by topicId/date/id/pyqId) rather than arrays of objects, and
+// starredQuestionIds/bookmarkedPyqIds are plain string arrays (question ids, not objects) — none
+// of these take a per-entry `workspaceId` (would corrupt a non-object value, or a bare string).
+// Stage 2 instead isolates these correctly via setActiveWorkspaceId's whole-field archive/restore
+// swap (see below) rather than by tagging individual entries — so their ON-DISK shape genuinely
+// never needs to change at all, at any version: whatever is currently in e.g. `completedTopics`
+// already unambiguously belongs to `activeWorkspaceId` by construction, because the swap is the
+// only thing that ever replaces these fields wholesale. Nothing about this migration changes
+// PYQ_BANK, QUESTION_BANK, syllabus data, or the generated-question pipeline — none of that is
+// persisted user state, so none of it is touched by (or even reachable from) this function.
 //
 // Pure, deterministic, and idempotent: given the same input it always returns the same output,
 // and running it again on its own output is a no-op (every item it would stamp already has a
-// truthy workspaceId, so the `?? DEFAULT_WORKSPACE_ID` fallback never re-fires).
-export const APP_STORE_PERSIST_VERSION = 2;
+// truthy workspaceId, so the `?? DEFAULT_WORKSPACE_ID` fallback never re-fires, and
+// inactiveWorkspaceOwnedData is left exactly as-is once present).
+export const APP_STORE_PERSIST_VERSION = 3;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -200,6 +257,7 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     personalStudyPlanTasks: stampWorkspaceIdOnArray(state.personalStudyPlanTasks),
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
+    inactiveWorkspaceOwnedData: (state.inactiveWorkspaceOwnedData as Record<string, unknown> | undefined) ?? {},
   };
 }
 
@@ -233,13 +291,17 @@ export const useAppStore = create<AppState>()(
       notes: [],
       upsertNote: (note) =>
         set((state) => {
-          const idx = state.notes.findIndex((n) => n.id === note.id);
+          // Multi-Workspace OS, Stage 2 — stamp the current workspace on a genuinely new note;
+          // preserve whatever workspaceId an existing/edited note already carries (spread from the
+          // original note object by Notes.tsx's NoteEditor) rather than ever overwriting it.
+          const stamped = { ...note, workspaceId: note.workspaceId ?? state.activeWorkspaceId };
+          const idx = state.notes.findIndex((n) => n.id === stamped.id);
           if (idx >= 0) {
             const copy = [...state.notes];
-            copy[idx] = note;
+            copy[idx] = stamped;
             return { notes: copy };
           }
-          return { notes: [note, ...state.notes] };
+          return { notes: [stamped, ...state.notes] };
         }),
       deleteNote: (id) => set((state) => ({ notes: state.notes.filter((n) => n.id !== id) })),
       togglePinNote: (id) =>
@@ -253,7 +315,7 @@ export const useAppStore = create<AppState>()(
           const date = todayKey();
           const entry = ensureLogEntry(state.studyLog, date);
           return {
-            attempts: [attempt, ...state.attempts],
+            attempts: [{ ...attempt, workspaceId: attempt.workspaceId ?? state.activeWorkspaceId }, ...state.attempts],
             studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } },
           };
         }),
@@ -264,14 +326,14 @@ export const useAppStore = create<AppState>()(
           const date = todayKey();
           const entry = ensureLogEntry(state.studyLog, date);
           return {
-            pyqAttempts: [attempt, ...state.pyqAttempts],
+            pyqAttempts: [{ ...attempt, workspaceId: attempt.workspaceId ?? state.activeWorkspaceId }, ...state.pyqAttempts],
             studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } },
           };
         }),
 
       sessions: [],
       addSession: (session) =>
-        set((state) => ({ sessions: [session, ...state.sessions] })),
+        set((state) => ({ sessions: [{ ...session, workspaceId: session.workspaceId ?? state.activeWorkspaceId }, ...state.sessions] })),
 
       studyLog: {},
       bumpFocusMinutes: (date, minutes) =>
@@ -330,7 +392,12 @@ export const useAppStore = create<AppState>()(
 
       studyPlan: null,
       studyPlanGeneratedAt: null,
-      setStudyPlan: (plan) => set({ studyPlan: plan, studyPlanGeneratedAt: new Date().toISOString() }),
+      setStudyPlan: (plan) =>
+        set((state) => ({
+          // Multi-Workspace OS, Stage 2 — stamp the current workspace, same rule as upsertNote.
+          studyPlan: { ...plan, workspaceId: plan.workspaceId ?? state.activeWorkspaceId },
+          studyPlanGeneratedAt: new Date().toISOString(),
+        })),
       clearStudyPlan: () => set({ studyPlan: null, studyPlanGeneratedAt: null }),
 
       setStudyPlanTasks: (tasks, unscheduledTopicIds) =>
@@ -341,7 +408,10 @@ export const useAppStore = create<AppState>()(
         ),
 
       personalStudyPlanTasks: [],
-      setPersonalStudyPlanTasks: (tasks) => set({ personalStudyPlanTasks: tasks }),
+      setPersonalStudyPlanTasks: (tasks) =>
+        set((state) => ({
+          personalStudyPlanTasks: tasks.map((t) => ({ ...t, workspaceId: t.workspaceId ?? state.activeWorkspaceId })),
+        })),
 
       adaptStudyPlan: (syllabus, pyqPerf, currentDate) => {
         const state = get();
@@ -367,7 +437,41 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, pyqId, today) })),
 
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
-      setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
+      inactiveWorkspaceOwnedData: {},
+      // Multi-Workspace OS, Stage 2 — the whole-field archive/restore swap: every field listed in
+      // WorkspaceOwnedData is snapshotted under the OUTGOING workspace's id in
+      // inactiveWorkspaceOwnedData, then replaced with whatever was previously archived for the
+      // INCOMING workspace (or a fresh empty snapshot the first time that workspace is visited).
+      // No per-item filtering or inspection is needed here: everything currently sitting in e.g.
+      // `notes` already belongs to the outgoing workspace by construction (every write path stamps
+      // new items with the CURRENT activeWorkspaceId, and the only other thing that ever replaces
+      // these fields wholesale is this same swap) — so the whole bucket moves together. A no-op
+      // (returns state unchanged) when switching to the workspace that's already active.
+      setActiveWorkspaceId: (id) =>
+        set((state) => {
+          if (id === state.activeWorkspaceId) return state;
+          const outgoingSnapshot: WorkspaceOwnedData = {
+            completedTopics: state.completedTopics,
+            notes: state.notes,
+            attempts: state.attempts,
+            pyqAttempts: state.pyqAttempts,
+            sessions: state.sessions,
+            studyLog: state.studyLog,
+            starredQuestionIds: state.starredQuestionIds,
+            bookmarkedPyqIds: state.bookmarkedPyqIds,
+            rewardUnlocks: state.rewardUnlocks,
+            studyPlan: state.studyPlan,
+            studyPlanGeneratedAt: state.studyPlanGeneratedAt,
+            personalStudyPlanTasks: state.personalStudyPlanTasks,
+            revisionQueue: state.revisionQueue,
+          };
+          const incoming = state.inactiveWorkspaceOwnedData[id] ?? emptyWorkspaceOwnedData();
+          return {
+            activeWorkspaceId: id,
+            inactiveWorkspaceOwnedData: { ...state.inactiveWorkspaceOwnedData, [state.activeWorkspaceId]: outgoingSnapshot },
+            ...incoming,
+          };
+        }),
 
       resetAllData: () =>
         set({
@@ -384,6 +488,9 @@ export const useAppStore = create<AppState>()(
           studyPlanGeneratedAt: null,
           personalStudyPlanTasks: [],
           revisionQueue: createRevisionQueue(),
+          // Multi-Workspace OS, Stage 2 — "reset ALL data" means every workspace's data, not just
+          // the active one's; a no-op today since nothing has ever populated this archive.
+          inactiveWorkspaceOwnedData: {},
         }),
     }),
     {
@@ -412,6 +519,12 @@ export function exportAllData() {
     studyPlanGeneratedAt: state.studyPlanGeneratedAt,
     personalStudyPlanTasks: state.personalStudyPlanTasks,
     revisionQueue: state.revisionQueue,
+    // Multi-Workspace OS, Stage 2 — activeWorkspaceId travels WITH the flat fields above (notes,
+    // completedTopics, etc.) because they only mean "this workspace's data" together with it; and
+    // every OTHER workspace's archived data is equally real user data (see AppState's doc-comment)
+    // — both must survive a JSON backup / cloud sync round-trip, same as everything else here.
+    activeWorkspaceId: state.activeWorkspaceId,
+    inactiveWorkspaceOwnedData: state.inactiveWorkspaceOwnedData,
     exportedAt: new Date().toISOString(),
   };
   return JSON.stringify(data, null, 2);
@@ -435,5 +548,7 @@ export function importAllData(json: string) {
     studyPlanGeneratedAt: data.studyPlanGeneratedAt ?? null,
     personalStudyPlanTasks: data.personalStudyPlanTasks ?? [],
     revisionQueue: data.revisionQueue ?? createRevisionQueue(),
+    activeWorkspaceId: (data.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
+    inactiveWorkspaceOwnedData: data.inactiveWorkspaceOwnedData ?? {},
   });
 }

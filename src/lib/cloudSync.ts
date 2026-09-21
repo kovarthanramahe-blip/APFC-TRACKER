@@ -36,6 +36,11 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     ((data.starredQuestionIds as unknown[]) ?? []).length,
     ((data.pyqAttempts as unknown[]) ?? []).length,
     ((data.bookmarkedPyqIds as unknown[]) ?? []).length,
+    // Multi-Workspace OS, Stage 2 — a device that only has data archived under a non-active
+    // workspace (inactiveWorkspaceOwnedData) still has meaningful data; without this it could be
+    // wrongly treated as empty and have valid cloud data overwritten. Always empty today (nothing
+    // populates it yet), so this never changes today's behavior — see store.ts's field doc-comment.
+    Object.keys((data.inactiveWorkspaceOwnedData as object) ?? {}).length,
   ];
   return counts.some((c) => c > 0);
 }
