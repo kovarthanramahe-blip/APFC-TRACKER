@@ -41,6 +41,27 @@ describe('1. markdown extraction', () => {
   });
 });
 
+describe('1b. plain text (.txt) import — new supported format', () => {
+  it('importNoteFile reads a .txt file as-is (normalized) via file.text(), same as .md', async () => {
+    const file = new File(['Just a plain note, no markdown syntax at all.'], 'thoughts.txt', { type: 'text/plain' });
+    const result = await importNoteFile(file);
+    expect(result).toEqual({ status: 'ok', title: 'thoughts', content: 'Just a plain note, no markdown syntax at all.' });
+  });
+
+  it('still honours a Markdown-style heading if the .txt file happens to contain one', async () => {
+    const file = new File(['# Real Title\n\nBody text.'], 'notes.txt');
+    const result = await importNoteFile(file);
+    expect(result).toEqual({ status: 'ok', title: 'Real Title', content: '# Real Title\n\nBody text.' });
+  });
+
+  it('normalizes CRLF line endings in a .txt file exactly like .md', async () => {
+    const file = new File(['line1\r\nline2\r\n'], 'notes.txt');
+    const result = await importNoteFile(file);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.content).toBe('line1\nline2');
+  });
+});
+
 describe('2. file extension/type validation', () => {
   it.each([
     ['notes.md', 'markdown'],
@@ -48,6 +69,8 @@ describe('2. file extension/type validation', () => {
     ['notes.markdown', 'markdown'],
     ['report.docx', 'docx'],
     ['report.pdf', 'pdf'],
+    ['plain.txt', 'text'],
+    ['plain.TXT', 'text'],
     ['old.doc', 'doc'],
     ['image.png', 'unsupported'],
     ['archive.zip', 'unsupported'],
@@ -56,12 +79,16 @@ describe('2. file extension/type validation', () => {
     expect(getImportFileKind(filename)).toBe(expectedKind);
   });
 
-  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf', () => {
-    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.docx', '.markdown', '.md', '.pdf']);
+  // Intentionally expanded from the original md/markdown/docx/pdf set — Multi-Workspace OS's
+  // Import-First Content Repository foundation adds .txt as a new, safe supported format (plain
+  // text needs no parsing) on top of everything Notes import already supported. Every extension
+  // that already worked keeps working identically — see the rest of this file.
+  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt', () => {
+    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.docx', '.markdown', '.md', '.pdf', '.txt']);
   });
 
   it('validateImportFile accepts every supported extension with a normal size', () => {
-    for (const kind of ['notes.md', 'notes.markdown', 'report.docx', 'report.pdf']) {
+    for (const kind of ['notes.md', 'notes.markdown', 'report.docx', 'report.pdf', 'notes.txt']) {
       const result = validateImportFile({ name: kind, size: 1024 });
       expect(result.valid).toBe(true);
     }
