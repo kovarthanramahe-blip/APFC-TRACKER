@@ -1,0 +1,371 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { useAppStore } from '../lib/store';
+import { createRevisionQueue } from '../lib/revisionQueue';
+import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
+import { NAV_ITEMS } from '../components/layout/nav';
+import {
+  IMPORTED_CONTENT_TYPES,
+  buildImportPreview,
+  confirmImportedContent,
+  createManualImportedContent,
+  selectImportedContentByType,
+  type ImportPreview,
+  type ImportedContent,
+} from '../lib/contentImport';
+import {
+  parseBibliographyRecords,
+  formatBibliographyRecordAsText,
+  buildBibliographyMetadata,
+  getBibliographyFields,
+  isManuallyCreated,
+  queryBibliography,
+  parseAuthorsInput,
+} from '../lib/bibliography';
+import { getContentTags, getContentCategory, parseTagsInput } from '../lib/importedContentRepository';
+
+// This page has no rendering test here (no React Testing Library / DOM environment in this repo —
+// see StudyPlan.test.ts and PhdResearch.test.ts for the established convention). These tests
+// exercise exactly what pages/WorkingBibliography.tsx does: parse a structured import file with
+// lib/bibliography.ts, confirm/save each parsed record (or a manual entry) through the real store,
+// and query/filter the result — a manual browser smoke check covers the actual on-screen flow (see
+// the task report).
+
+function fullReset() {
+  useAppStore.setState({
+    activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+    inactiveWorkspaceOwnedData: {},
+    completedTopics: {},
+    notes: [],
+    attempts: [],
+    pyqAttempts: [],
+    sessions: [],
+    studyLog: {},
+    starredQuestionIds: [],
+    bookmarkedPyqIds: [],
+    rewardUnlocks: {},
+    studyPlan: null,
+    studyPlanGeneratedAt: null,
+    personalStudyPlanTasks: [],
+    revisionQueue: createRevisionQueue(),
+    importedContent: [],
+  });
+}
+
+/** Mirrors exactly what pages/WorkingBibliography.tsx's handleConfirmStructured does for one
+ * parsed record: builds an ImportPreview from the record's own raw block, confirms it with
+ * contentType 'bibliography', and saves it. */
+function importStructuredFile(rawText: string, sourceFilename = 'sources.md') {
+  const parsed = parseBibliographyRecords(rawText);
+  for (const record of parsed.records) {
+    const preview: ImportPreview = {
+      sourceFilename,
+      originalFormat: 'markdown',
+      suggestedContentType: 'bibliography',
+      title: record.title,
+      content: record.rawBlock,
+    };
+    const content = confirmImportedContent(preview, {
+      workspaceId: 'phd_research',
+      contentType: 'bibliography',
+      metadata: buildBibliographyMetadata({ fields: record.fields, tags: record.tags, category: record.category }),
+    });
+    useAppStore.getState().addImportedContent(content);
+  }
+  return parsed;
+}
+
+/** Mirrors what pages/WorkingBibliography.tsx's handleSaveForm does for a brand-new manual entry. */
+function addManualRecord(input: { title: string; authors?: string; year?: string; tags?: string; category?: string; notes?: string }) {
+  const fields = {
+    authors: input.authors ? parseAuthorsInput(input.authors) : undefined,
+    year: input.year,
+    notes: input.notes,
+  };
+  const tags = input.tags ? parseTagsInput(input.tags) : [];
+  const category = input.category;
+  const rawContent = formatBibliographyRecordAsText({ title: input.title, fields, tags, category });
+  const content = createManualImportedContent({
+    workspaceId: 'phd_research',
+    contentType: 'bibliography',
+    title: input.title,
+    content: rawContent,
+    metadata: buildBibliographyMetadata({ fields, tags, category }),
+  });
+  useAppStore.getState().addImportedContent(content);
+  return content;
+}
+
+describe('bibliography content type', () => {
+  it('"bibliography" is a recognised ImportedContentType, reused from the existing import foundation', () => {
+    expect(IMPORTED_CONTENT_TYPES).toContain('bibliography');
+  });
+
+  it('a "Working Bibliography" nav-reachable route exists under /phd-research', () => {
+    // Reached via the PhD Research tab switcher rather than a second top-level nav item — the
+    // top-level "PhD Research" entry is what's registered in NAV_ITEMS.
+    const phdItem = NAV_ITEMS.find((n) => n.to === '/phd-research');
+    expect(phdItem).toBeDefined();
+  });
+});
+
+describe('structured record validation (parseBibliographyRecords)', () => {
+  beforeEach(fullReset);
+
+  it('a well-formed structured file produces one ImportedContent per record when imported', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const text = `Title: Paper One\nAuthors: Jane Smith\nYear: 2020\n\n---\n\nTitle: Paper Two\nAuthors: John Doe\nYear: 2019`;
+    const parsed = importStructuredFile(text);
+    expect(parsed.records).toHaveLength(2);
+    const stored = selectImportedContentByType(useAppStore.getState().importedContent, 'bibliography');
+    expect(stored.map((s) => s.title).sort()).toEqual(['Paper One', 'Paper Two']);
+  });
+
+  it('an unstructured file (no recognised Title: lines) produces zero records — nothing is fabricated', () => {
+    const parsed = parseBibliographyRecords('Just some free-form prose with no structure at all.');
+    expect(parsed.records).toEqual([]);
+    expect(parsed.skippedBlockCount).toBe(1);
+  });
+});
+
+describe('manual creation', () => {
+  beforeEach(fullReset);
+
+  it('creates a bibliography record with only a title (every other field optional)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addManualRecord({ title: 'Manually Catalogued Source' });
+    const stored = useAppStore.getState().importedContent;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].title).toBe('Manually Catalogued Source');
+    expect(stored[0].contentType).toBe('bibliography');
+  });
+
+  it('creates a record with several fields, tags and category set', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addManualRecord({ title: 'Full Record', authors: 'Jane Smith, John Doe', year: '2021', tags: 'fieldwork, key-source', category: 'Fieldwork' });
+    const [stored] = useAppStore.getState().importedContent;
+    expect(getBibliographyFields(stored).authors).toEqual(['Jane Smith', 'John Doe']);
+    expect(getBibliographyFields(stored).year).toBe('2021');
+    expect(getContentTags(stored)).toEqual(['fieldwork', 'key-source']);
+    expect(getContentCategory(stored)).toBe('Fieldwork');
+  });
+
+  it("a manual record's rawContent is a readable rendition of its fields, not empty", () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addManualRecord({ title: 'Readable Record', authors: 'Jane Smith', year: '2020' });
+    const [stored] = useAppStore.getState().importedContent;
+    expect(stored.rawContent).toContain('Title: Readable Record');
+    expect(stored.rawContent).toContain('Jane Smith');
+  });
+});
+
+describe('editing bibliography records', () => {
+  beforeEach(fullReset);
+
+  it('editing an imported record updates fields/title but never touches its original rawContent', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const originalRawBlock = 'Title: Original Title\nYear: 2018';
+    importStructuredFile(originalRawBlock);
+    const [imported] = useAppStore.getState().importedContent;
+    expect(imported.rawContent).toBe(originalRawBlock);
+
+    // Mirrors WorkingBibliography.tsx's handleSaveForm for an IMPORTED record being edited:
+    // title/metadata change, rawContent is deliberately left untouched.
+    useAppStore.getState().updateImportedContent(imported.id, {
+      title: 'Corrected Title',
+      metadata: buildBibliographyMetadata({ fields: { year: '2019' } }),
+    });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(updated.title).toBe('Corrected Title');
+    expect(getBibliographyFields(updated).year).toBe('2019');
+    expect(updated.rawContent).toBe(originalRawBlock);
+  });
+
+  it('editing a manually-created record regenerates its own rawContent to match the new fields', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const created = addManualRecord({ title: 'Draft Title', year: '2020' });
+    expect(isManuallyCreated(created)).toBe(true);
+
+    const newFields = { year: '2022' };
+    const newRawContent = formatBibliographyRecordAsText({ title: 'Final Title', fields: newFields, tags: [], category: undefined });
+    useAppStore.getState().updateImportedContent(created.id, {
+      title: 'Final Title',
+      rawContent: newRawContent,
+      metadata: buildBibliographyMetadata({ fields: newFields }),
+    });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(updated.title).toBe('Final Title');
+    expect(getBibliographyFields(updated).year).toBe('2022');
+    expect(updated.rawContent).toContain('Final Title');
+    expect(updated.rawContent).toContain('2022');
+  });
+
+  it("editing cannot change a record's id or workspaceId (runtime-enforced by the store)", () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const created = addManualRecord({ title: 'Immutable Identity' });
+
+    // @ts-expect-error — deliberately bypassing the TS-level Omit<...,'id'|'workspaceId'> to prove
+    // the store's own runtime guard still holds for bibliography edits, exactly as it does for
+    // every other content type (see lib/store.test.ts).
+    useAppStore.getState().updateImportedContent(created.id, { id: 'hijacked', workspaceId: 'apfc', title: 'Still Immutable' });
+
+    const [updated] = useAppStore.getState().importedContent;
+    expect(updated.id).toBe(created.id);
+    expect(updated.workspaceId).toBe('phd_research');
+    expect(updated.title).toBe('Still Immutable');
+  });
+});
+
+describe('deleting bibliography records', () => {
+  beforeEach(fullReset);
+
+  it('deleteImportedContent removes exactly the targeted record', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const a = addManualRecord({ title: 'Keep Me' });
+    const b = addManualRecord({ title: 'Delete Me' });
+    expect(useAppStore.getState().importedContent).toHaveLength(2);
+
+    useAppStore.getState().deleteImportedContent(b.id);
+
+    const remaining = useAppStore.getState().importedContent;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].id).toBe(a.id);
+  });
+});
+
+describe('import provenance — imported vs manually created', () => {
+  beforeEach(fullReset);
+
+  it('a structured-import record is never marked manual', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    importStructuredFile('Title: Imported Paper\nYear: 2020');
+    const [stored] = useAppStore.getState().importedContent;
+    expect(isManuallyCreated(stored)).toBe(false);
+    expect(stored.provenance.origin).toBe('import');
+    expect(stored.provenance.sourceFilename).toBe('sources.md');
+  });
+
+  it('a manually created record is always marked manual, with no source filename', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const created = addManualRecord({ title: 'Hand-catalogued' });
+    expect(isManuallyCreated(created)).toBe(true);
+    expect(created.provenance.origin).toBe('manual');
+    expect(created.provenance.sourceFilename).toBeUndefined();
+  });
+
+  it('a fallback (unstructured) file import is still marked "import", not "manual"', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const preview = buildImportPreview({ name: 'raw-notes.txt' }, { format: 'text', text: 'Unstructured prose with no records.' });
+    const content = confirmImportedContent(preview, {
+      workspaceId: 'phd_research',
+      contentType: 'bibliography',
+      metadata: buildBibliographyMetadata({}),
+    });
+    useAppStore.getState().addImportedContent(content);
+    const [stored] = useAppStore.getState().importedContent;
+    expect(isManuallyCreated(stored)).toBe(false);
+    expect(stored.rawContent).toBe('Unstructured prose with no records.');
+  });
+});
+
+describe('search / author / year / publication-type / tag / category filters', () => {
+  beforeEach(fullReset);
+
+  it('filters the active workspace\'s bibliography records correctly via queryBibliography', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    importStructuredFile(
+      `Title: Fieldwork Study\nAuthors: Jane Smith\nYear: 2020\nType: Journal Article\nTags: fieldwork\nCategory: Fieldwork\n\n---\n\nTitle: Literature Survey\nAuthors: John Doe\nYear: 2018\nType: Book\nTags: literature\nCategory: Literature Review`,
+    );
+    const all = selectImportedContentByType(useAppStore.getState().importedContent, 'bibliography');
+    expect(all).toHaveLength(2);
+
+    expect(queryBibliography(all, { search: 'Fieldwork' }).map((r) => r.title)).toEqual(['Fieldwork Study']);
+    expect(queryBibliography(all, { author: 'John Doe' }).map((r) => r.title)).toEqual(['Literature Survey']);
+    expect(queryBibliography(all, { year: '2020' }).map((r) => r.title)).toEqual(['Fieldwork Study']);
+    expect(queryBibliography(all, { publicationType: 'book' }).map((r) => r.title)).toEqual(['Literature Survey']);
+    expect(queryBibliography(all, { tags: ['literature'] }).map((r) => r.title)).toEqual(['Literature Survey']);
+    expect(queryBibliography(all, { category: 'Fieldwork' }).map((r) => r.title)).toEqual(['Fieldwork Study']);
+  });
+});
+
+describe('workspace isolation', () => {
+  beforeEach(fullReset);
+
+  it('a bibliography record saved in phd_research is invisible after switching to apfc', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addManualRecord({ title: 'PhD-only Source' });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().importedContent).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().importedContent).toHaveLength(1);
+  });
+
+  it('a bibliography record saved in phd_research is invisible in upsc_cse', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addManualRecord({ title: 'PhD-only Source' });
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().importedContent).toEqual([]);
+  });
+});
+
+describe('legacy importedContent without bibliography metadata', () => {
+  beforeEach(fullReset);
+
+  it('an item with contentType bibliography but no metadata still displays/queries without throwing', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const legacy: ImportedContent = {
+      id: 'legacy-1',
+      workspaceId: 'phd_research',
+      contentType: 'bibliography',
+      title: 'Pre-stage Bibliography Item',
+      rawContent: 'Some raw text saved before structured fields existed.',
+      provenance: { sourceFilename: 'old.md', originalFormat: 'markdown', importedAt: '2026-01-01T00:00:00.000Z' },
+    };
+    useAppStore.getState().addImportedContent(legacy);
+
+    const stored = selectImportedContentByType(useAppStore.getState().importedContent, 'bibliography');
+    expect(stored).toHaveLength(1);
+    expect(() => getBibliographyFields(stored[0])).not.toThrow();
+    expect(getBibliographyFields(stored[0])).toEqual({});
+    expect(isManuallyCreated(stored[0])).toBe(false);
+    expect(queryBibliography(stored, {})).toHaveLength(1);
+    expect(queryBibliography(stored, { author: 'anyone' })).toEqual([]);
+  });
+});
+
+describe('existing research-document flow regression', () => {
+  beforeEach(fullReset);
+
+  it('importing a bibliography record does not affect research_document items', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const researchPreview = buildImportPreview({ name: 'thesis-chapter.md' }, { format: 'markdown', text: '# Thesis Chapter\n\nDraft text.' });
+    const researchDoc = confirmImportedContent(researchPreview, { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(researchDoc);
+
+    addManualRecord({ title: 'A Bibliography Record' });
+
+    const all = useAppStore.getState().importedContent;
+    expect(all).toHaveLength(2);
+    expect(selectImportedContentByType(all, 'research_document')).toHaveLength(1);
+    expect(selectImportedContentByType(all, 'bibliography')).toHaveLength(1);
+    expect(selectImportedContentByType(all, 'research_document')[0].title).toBe('Thesis Chapter');
+  });
+
+  it('deleting a bibliography record leaves research_document items untouched', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const researchPreview = buildImportPreview({ name: 'notes.md' }, { format: 'markdown', text: '# Notes' });
+    const researchDoc = confirmImportedContent(researchPreview, { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(researchDoc);
+    const bibRecord = addManualRecord({ title: 'Temp Source' });
+
+    useAppStore.getState().deleteImportedContent(bibRecord.id);
+
+    const all = useAppStore.getState().importedContent;
+    expect(all).toHaveLength(1);
+    expect(all[0].contentType).toBe('research_document');
+  });
+});

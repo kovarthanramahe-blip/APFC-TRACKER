@@ -84,6 +84,17 @@ export const MAX_IMPORT_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export type ImportFileFormat = 'markdown' | 'docx' | 'pdf' | 'text' | 'doc' | 'unsupported';
 
+/** Human-readable labels for ImportFileFormat, shared by every import-preview UI (Notes, PhD
+ * Research documents, Working Bibliography, …) so the wording stays consistent in one place. */
+export const IMPORT_FORMAT_LABELS: Record<ImportFileFormat, string> = {
+  markdown: 'Markdown (.md)',
+  docx: 'Word Document (.docx)',
+  pdf: 'PDF',
+  text: 'Plain Text (.txt)',
+  doc: 'Legacy Word Document (.doc)',
+  unsupported: 'Unsupported',
+};
+
 const LEGACY_DOC_MESSAGE = "Legacy .doc files aren't supported yet. Please save the document as .docx or PDF and upload it again.";
 const NEAR_EMPTY_PDF_MESSAGE = 'This PDF may be scanned/image-based and does not contain extractable text.';
 const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported file type. Please upload a .md, .markdown, .docx, .pdf, or .txt file.';
@@ -269,8 +280,10 @@ export async function extractContentFromFile(file: File, maxBytes: number = MAX_
 // ============================================================================================
 
 export interface ImportedContentProvenance {
-  sourceFilename: string;
-  originalFormat: ImportFileFormat;
+  /** Present for file-derived items (`origin: 'import'`); absent for manually created ones
+   * (`origin: 'manual'`) — there is no real file to name. */
+  sourceFilename?: string;
+  originalFormat?: ImportFileFormat;
   /** ISO timestamp of when this file was imported (not the source document's own date, if any). */
   importedAt: string;
   /** Freeform, user-supplied attribution/citation (e.g. "Official UPSC PDF, 2023 GS Paper I") —
@@ -278,6 +291,13 @@ export interface ImportedContentProvenance {
    * told, matching the same discipline the PYQ/generated-question architecture already applies
    * (see lib/types.ts's PyqProvenance/GeneratedProvenance). */
   sourceNote?: string;
+  /** Distinguishes a real file import from a manually typed-in record (see
+   * createManualImportedContent below) — added for the Working Bibliography stage, where a user
+   * can either import a source file or catalogue a source by hand. A record saved before this
+   * field existed has no `origin` at all; every reader treats that exactly like 'import', since
+   * every item before this stage really did come from a file (see confirmImportedContent, the only
+   * way to create an ImportedContent before createManualImportedContent existed). */
+  origin?: 'import' | 'manual';
 }
 
 /**
@@ -399,6 +419,39 @@ export function confirmImportedContent(
       originalFormat: preview.originalFormat,
       importedAt: options.importedAt ?? new Date().toISOString(),
       sourceNote: options.sourceNote,
+      origin: 'import',
+    },
+    metadata: options.metadata,
+  };
+}
+
+/**
+ * The other way an ImportedContent can come to exist: typed in by hand, with no source file at
+ * all (e.g. manually cataloguing a bibliography record — see the Working Bibliography stage this
+ * was added for). Mirrors confirmImportedContent's construction exactly (same id/provenance/
+ * metadata shape, same "caller must explicitly supply workspaceId/contentType/title" discipline —
+ * still nothing here invents a title or content), but stamps `provenance.origin: 'manual'` and
+ * leaves sourceFilename/originalFormat unset, since there is no file to name.
+ */
+export function createManualImportedContent(options: {
+  workspaceId: WorkspaceKind;
+  contentType: ImportedContentType;
+  title: string;
+  content?: string;
+  metadata?: ImportedContentMetadata;
+  sourceNote?: string;
+  createdAt?: string;
+}): ImportedContent {
+  return {
+    id: uuid(),
+    workspaceId: options.workspaceId,
+    contentType: options.contentType,
+    title: options.title,
+    rawContent: options.content ?? '',
+    provenance: {
+      importedAt: options.createdAt ?? new Date().toISOString(),
+      sourceNote: options.sourceNote,
+      origin: 'manual',
     },
     metadata: options.metadata,
   };

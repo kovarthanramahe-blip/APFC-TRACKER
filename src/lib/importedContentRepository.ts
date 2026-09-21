@@ -34,7 +34,7 @@ export function searchImportedContent(items: readonly ImportedContent[], query: 
     (item) =>
       item.title.toLowerCase().includes(q) ||
       item.rawContent.toLowerCase().includes(q) ||
-      item.provenance.sourceFilename.toLowerCase().includes(q),
+      (item.provenance.sourceFilename ?? '').toLowerCase().includes(q),
   );
 }
 

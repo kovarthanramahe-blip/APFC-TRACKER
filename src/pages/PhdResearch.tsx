@@ -10,11 +10,12 @@ import {
   confirmImportedContent,
   selectImportedContentByType,
   SUPPORTED_IMPORT_EXTENSIONS,
+  IMPORT_FORMAT_LABELS,
   type ImportPreview,
   type ImportedContent,
   type ImportedContentMetadata,
-  type ImportFileFormat,
 } from '../lib/contentImport';
+import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import {
   queryImportedContent,
   collectImportedContentTags,
@@ -29,16 +30,8 @@ import {
 // category — lib/importedContentRepository.ts) so imported documents stay findable as the
 // collection grows. Content type is still hardcoded to 'research_document' (no picker), and raw
 // imported content is still not editable — only organisation metadata (tags/category) is. No AI
-// features, no bibliography/citation handling yet.
-const FORMAT_LABELS: Record<ImportFileFormat, string> = {
-  markdown: 'Markdown (.md)',
-  docx: 'Word Document (.docx)',
-  pdf: 'PDF',
-  text: 'Plain Text (.txt)',
-  doc: 'Legacy Word Document (.doc)',
-  unsupported: 'Unsupported',
-};
-
+// features. A separate, structured Working Bibliography repository (source records with
+// author/year/DOI/etc.) lives at pages/WorkingBibliography.tsx — see the tab switcher below.
 function buildMetadata(tagsInput: string, categoryInput: string): ImportedContentMetadata | undefined {
   const tags = parseTagsInput(tagsInput);
   const category = categoryInput.trim();
@@ -176,6 +169,7 @@ export default function PhdResearch() {
           </div>
         }
       />
+      <PhdResearchTabs />
 
       {importError && (
         <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
@@ -286,7 +280,7 @@ export default function PhdResearch() {
                   {category && <Badge tone="gold">{category}</Badge>}
                 </div>
                 <h4 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{doc.title}</h4>
-                <p className="mt-1 text-xs text-slate-400 truncate">{doc.provenance.sourceFilename}</p>
+                <p className="mt-1 text-xs text-slate-400 truncate">{doc.provenance.sourceFilename ?? 'Manually added'}</p>
                 <p className="mt-1 text-[11px] text-slate-300 dark:text-slate-600">
                   Imported {new Date(doc.provenance.importedAt).toLocaleDateString('en-IN')}
                 </p>
@@ -368,7 +362,7 @@ function ImportPreviewPanel({
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Detected format</p>
-          <p className="text-sm text-slate-700 dark:text-slate-200">{FORMAT_LABELS[preview.originalFormat]}</p>
+          <p className="text-sm text-slate-700 dark:text-slate-200">{IMPORT_FORMAT_LABELS[preview.originalFormat]}</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Content type</p>
@@ -451,7 +445,7 @@ function ViewDocumentModal({ document, onClose }: { document: ImportedContent; o
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <div className="min-w-0">
             <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{document.title}</h3>
-            <p className="text-xs text-slate-400 truncate">{document.provenance.sourceFilename}</p>
+            <p className="text-xs text-slate-400 truncate">{document.provenance.sourceFilename ?? 'Manually added'}</p>
           </div>
           <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
