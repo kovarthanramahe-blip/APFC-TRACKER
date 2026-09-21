@@ -3,6 +3,8 @@ import { useAppStore, exportAllData, importAllData, migrateAppStorage, APP_STORE
 import { createRevisionQueue } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from './workspace';
 import { hasMeaningfulData } from './cloudSync';
+import { selectImportedContentByType, type ImportedContent } from './contentImport';
+import { PYQ_BANK } from '../data/pyq';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
 // works directly outside React for in-memory state (persist's localStorage access is safely
@@ -208,6 +210,7 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'bookmarkedPyqIds',
         'completedTopics',
         'dailyGoalMinutes',
+        'importedContent',
         'inactiveWorkspaceOwnedData',
         'notes',
         'personalStudyPlanTasks',
@@ -244,10 +247,14 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
     expect(migrated.notes[0].workspaceId).toBe('apfc');
   });
 
-  it('never overwrites an already-present inactiveWorkspaceOwnedData archive', () => {
+  it('never overwrites an already-present inactiveWorkspaceOwnedData archive — only backfills missing fields within each snapshot', () => {
     const fixture = { ...oldFixture(), inactiveWorkspaceOwnedData: { upsc_cse: { notes: [{ id: 'x' }] } } };
     const migrated = migrateAppStorage(fixture, 1) as any;
-    expect(migrated.inactiveWorkspaceOwnedData).toEqual({ upsc_cse: { notes: [{ id: 'x' }] } });
+    // the existing snapshot's own content (notes) is fully preserved, not replaced...
+    expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.notes).toEqual([{ id: 'x' }]);
+    // ...but the version-4 importedContent backfill still reaches INTO this archived snapshot too
+    // (see withImportedContentDefaultInArchive), not just the top-level active fields.
+    expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.importedContent).toEqual([]);
   });
 
   it('the full migration (version 1 straight through to current) is idempotent end-to-end', () => {
@@ -603,5 +610,229 @@ describe('Multi-Workspace OS Stage 3B-2A — PYQ progress isolation across works
     useAppStore.getState().setActiveWorkspaceId('apfc');
     expect(useAppStore.getState().bookmarkedPyqIds).toEqual(['apfc-pyq-1']);
     expect(useAppStore.getState().revisionQueue['apfc-pyq-1'].box).toBe(2);
+  });
+});
+
+// Import-First Content Repository foundation — the `importedContent` collection (ImportedContent[]
+// from lib/contentImport.ts), persisted and workspace-scoped exactly like every other collection
+// in this store (see lib/store.ts's WorkspaceOwnedData). No UI writes to this yet — these tests
+// exercise the store actions directly, the same way a future UI eventually would.
+describe('Import-First Content Repository — importedContent collection', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+      importedContent: [],
+    });
+  }
+  beforeEach(fullReset);
+
+  function contentFixture(overrides: Partial<ImportedContent> = {}): ImportedContent {
+    return {
+      id: overrides.id ?? 'c1',
+      workspaceId: overrides.workspaceId ?? 'apfc',
+      contentType: overrides.contentType ?? 'note',
+      title: overrides.title ?? 'Imported thing',
+      rawContent: overrides.rawContent ?? 'Some raw text',
+      provenance: overrides.provenance ?? { sourceFilename: 'source.md', originalFormat: 'markdown', importedAt: '2026-01-01T00:00:00.000Z' },
+      metadata: overrides.metadata,
+    };
+  }
+
+  describe('add / update / delete', () => {
+    it('addImportedContent adds a new item, stamped with the active workspace', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      expect(useAppStore.getState().importedContent).toHaveLength(1);
+      expect(useAppStore.getState().importedContent[0].workspaceId).toBe('apfc');
+    });
+
+    it('addImportedContent always uses the CURRENT active workspace, overriding any workspaceId already on the item', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1', workspaceId: 'phd_research' }));
+      expect(useAppStore.getState().importedContent[0].workspaceId).toBe('apfc');
+    });
+
+    it('updateImportedContent updates the matching item\'s fields, leaving others untouched', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1', title: 'Original' }));
+      useAppStore.getState().updateImportedContent('c1', { title: 'Renamed', rawContent: 'New content' });
+      const item = useAppStore.getState().importedContent[0];
+      expect(item.title).toBe('Renamed');
+      expect(item.rawContent).toBe('New content');
+      expect(item.id).toBe('c1');
+      expect(item.workspaceId).toBe('apfc');
+    });
+
+    it('updateImportedContent cannot change id or workspaceId (not part of its accepted update type)', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      // @ts-expect-error — id/workspaceId are intentionally excluded from the update type
+      useAppStore.getState().updateImportedContent('c1', { id: 'different', workspaceId: 'upsc_cse' });
+      expect(useAppStore.getState().importedContent[0].id).toBe('c1');
+      expect(useAppStore.getState().importedContent[0].workspaceId).toBe('apfc');
+    });
+
+    it('updateImportedContent on an unknown id is a safe no-op', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().updateImportedContent('does-not-exist', { title: 'X' });
+      expect(useAppStore.getState().importedContent).toHaveLength(1);
+      expect(useAppStore.getState().importedContent[0].title).toBe('Imported thing');
+    });
+
+    it('deleteImportedContent removes exactly the matching item', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
+      useAppStore.getState().deleteImportedContent('c1');
+      expect(useAppStore.getState().importedContent.map((c) => c.id)).toEqual(['c2']);
+    });
+  });
+
+  describe('retrieve / content-type filtering', () => {
+    it('retrieve: all added items are readable back from the store', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
+      expect(useAppStore.getState().importedContent.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
+    });
+
+    it('selectImportedContentByType filters correctly across mixed content types', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'n1', contentType: 'note' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'q1', contentType: 'question_bank' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'q2', contentType: 'question_bank' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'r1', contentType: 'research_document' }));
+
+      const questionBankItems = selectImportedContentByType(useAppStore.getState().importedContent, 'question_bank');
+      expect(questionBankItems.map((c) => c.id).sort()).toEqual(['q1', 'q2']);
+
+      const noteItems = selectImportedContentByType(useAppStore.getState().importedContent, 'note');
+      expect(noteItems.map((c) => c.id)).toEqual(['n1']);
+
+      const bibliographyItems = selectImportedContentByType(useAppStore.getState().importedContent, 'bibliography');
+      expect(bibliographyItems).toEqual([]);
+    });
+  });
+
+  describe('workspace isolation (mandatory)', () => {
+    it('APFC content never appears in UPSC CSE', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'apfc-1' }));
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().importedContent).toEqual([]);
+    });
+
+    it('UPSC CSE content never appears in PhD Research', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'cse-1' }));
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().importedContent).toEqual([]);
+    });
+
+    it('PhD Research content never appears in APFC', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'phd-1' }));
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().importedContent).toEqual([]);
+    });
+
+    it('all three workspaces keep entirely separate, correctly restored collections', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'apfc-1' }));
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'cse-1' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'cse-2' }));
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'phd-1' }));
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().importedContent.map((c) => c.id)).toEqual(['apfc-1']);
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().importedContent.map((c) => c.id).sort()).toEqual(['cse-1', 'cse-2']);
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().importedContent.map((c) => c.id)).toEqual(['phd-1']);
+    });
+  });
+
+  describe('persistence / migration', () => {
+    it('a pre-Stage-4 persisted blob (no importedContent field at all) migrates to importedContent: []', () => {
+      const oldBlob = { notes: [], activeWorkspaceId: 'apfc', inactiveWorkspaceOwnedData: {} };
+      const migrated = migrateAppStorage(oldBlob, 3) as any;
+      expect(migrated.importedContent).toEqual([]);
+    });
+
+    it('migration is idempotent for importedContent (running twice does not duplicate or reset it)', () => {
+      const withContent = { importedContent: [contentFixture({ id: 'kept' })], activeWorkspaceId: 'apfc', inactiveWorkspaceOwnedData: {} };
+      const once = migrateAppStorage(withContent, 3) as any;
+      const twice = migrateAppStorage(once, 3) as any;
+      expect(twice.importedContent).toEqual([contentFixture({ id: 'kept' })]);
+    });
+
+    it('a no-op migration (already current version) leaves importedContent completely untouched', () => {
+      const current = { importedContent: [contentFixture({ id: 'kept' })] };
+      const migrated = migrateAppStorage(current, APP_STORE_PERSIST_VERSION) as any;
+      expect(migrated.importedContent).toEqual([contentFixture({ id: 'kept' })]);
+    });
+  });
+
+  describe('export / import', () => {
+    it('exportAllData / importAllData round-trip importedContent for the active workspace', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      const json = exportAllData();
+      fullReset();
+      expect(useAppStore.getState().importedContent).toEqual([]);
+      importAllData(json);
+      expect(useAppStore.getState().importedContent).toHaveLength(1);
+      expect(useAppStore.getState().importedContent[0].id).toBe('c1');
+    });
+
+    it('exportAllData / importAllData round-trip importedContent archived under an inactive workspace too', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'apfc-1' }));
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // archives apfc's importedContent away
+      const json = exportAllData();
+      fullReset();
+      importAllData(json);
+      expect(useAppStore.getState().inactiveWorkspaceOwnedData.apfc?.importedContent?.[0]?.id).toBe('apfc-1');
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().importedContent[0]?.id).toBe('apfc-1');
+    });
+
+    it('importAllData defaults importedContent to [] for an older export that predates this field', () => {
+      const legacyExport = JSON.stringify({ completedTopics: {}, notes: [], attempts: [], pyqAttempts: [] });
+      importAllData(legacyExport);
+      expect(useAppStore.getState().importedContent).toEqual([]);
+    });
+  });
+
+  describe('cloud-sync payload inclusion', () => {
+    it('hasMeaningfulData recognizes a device whose ONLY data is imported content', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      const payload = JSON.parse(exportAllData());
+      expect(hasMeaningfulData(payload)).toBe(true);
+    });
+
+    it('an empty importedContent array does not, by itself, make an otherwise-empty payload "meaningful"', () => {
+      const payload = JSON.parse(exportAllData());
+      expect(hasMeaningfulData(payload)).toBe(false);
+    });
+  });
+
+  describe('regression: existing Notes and APFC data are unaffected', () => {
+    it('adding imported content never touches the separate `notes` collection', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Real note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      expect(useAppStore.getState().notes).toHaveLength(1);
+      expect(useAppStore.getState().notes[0].title).toBe('Real note');
+      expect(useAppStore.getState().importedContent).toHaveLength(1);
+    });
+
+    it('APFC PYQ_BANK is completely unaffected by this stage (still exactly 458 questions)', () => {
+      expect(PYQ_BANK.length).toBe(458);
+    });
   });
 });

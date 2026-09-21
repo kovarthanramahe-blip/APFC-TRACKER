@@ -384,3 +384,17 @@ export function confirmImportedContent(
     metadata: options.metadata,
   };
 }
+
+// ============================================================================================
+// Retrieval helpers over an ImportedContent[] collection (see lib/store.ts's `importedContent`
+// field — already workspace-scoped by construction, so these never need a workspace parameter:
+// whatever array a caller has is already that workspace's own content, exactly like `notes`).
+// ============================================================================================
+
+export function selectImportedContentByType(items: readonly ImportedContent[], contentType: ImportedContentType): ImportedContent[] {
+  return items.filter((item) => item.contentType === contentType);
+}
+
+export function getImportedContentById(items: readonly ImportedContent[], id: string): ImportedContent | undefined {
+  return items.find((item) => item.id === id);
+}

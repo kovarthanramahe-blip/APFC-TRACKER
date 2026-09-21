@@ -16,6 +16,7 @@ import type { PyqPerformanceSnapshot } from './pyqPerformance';
 import { getLocalDateString } from './utils';
 import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
+import type { ImportedContent } from './contentImport';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -114,6 +115,19 @@ interface AppState {
   recordRevisionCorrect: (pyqId: string, today: string) => void;
   recordRevisionIncorrect: (pyqId: string, today: string) => void;
 
+  // Import-First Content Repository foundation: generic, workspace-scoped records produced by
+  // lib/contentImport.ts's pipeline (note/question_bank/descriptive_questions/pyq/
+  // research_document/bibliography/other — see that module for the full ImportedContent shape).
+  // Workspace-owned exactly like notes/attempts/etc. above — archived/restored by
+  // setActiveWorkspaceId's swap, never per-item filtered. No UI writes to this yet; it exists so
+  // the persistence/migration layer is ready before one does. `updateImportedContent` cannot
+  // change `id` or `workspaceId` — moving an item to a different workspace is not something a
+  // generic update should ever silently allow.
+  importedContent: ImportedContent[];
+  addImportedContent: (item: ImportedContent) => void;
+  updateImportedContent: (id: string, updates: Partial<Omit<ImportedContent, 'id' | 'workspaceId'>>) => void;
+  deleteImportedContent: (id: string) => void;
+
   // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
   // for now — there is still no switcher UI (Stage 2 makes the mechanism real and tested; a later
   // stage adds the UI to actually call setActiveWorkspaceId). Excluded from resetAllData (like
@@ -160,6 +174,7 @@ interface WorkspaceOwnedData {
   studyPlanGeneratedAt: string | null;
   personalStudyPlanTasks: PersonalPlanTask[];
   revisionQueue: RevisionQueue;
+  importedContent: ImportedContent[];
 }
 
 function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
@@ -177,6 +192,7 @@ function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
     studyPlanGeneratedAt: null,
     personalStudyPlanTasks: [],
     revisionQueue: createRevisionQueue(),
+    importedContent: [],
   };
 }
 
@@ -222,7 +238,17 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // and running it again on its own output is a no-op (every item it would stamp already has a
 // truthy workspaceId, so the `?? DEFAULT_WORKSPACE_ID` fallback never re-fires, and
 // inactiveWorkspaceOwnedData is left exactly as-is once present).
-export const APP_STORE_PERSIST_VERSION = 3;
+//
+// Version 4 (Import-First Content Repository foundation) adds one more backfill on top of the
+// above: `importedContent` (ImportedContent[] — see lib/contentImport.ts) is a BRAND NEW field
+// with no pre-existing data of its own to migrate or stamp — unlike notes/attempts/etc., nothing
+// before this version could have ever produced one, so there is nothing to retroactively tag,
+// only a missing array to default to `[]`. That backfill has to reach two places: the active
+// top-level field, AND every snapshot already sitting inside inactiveWorkspaceOwnedData (a real
+// user may already have archived snapshots there from using the Stage 3A workspace switcher) —
+// missing it in the archive would mean restoring a workspace via setActiveWorkspaceId later
+// produces a state with importedContent === undefined instead of [].
+export const APP_STORE_PERSIST_VERSION = 4;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -236,6 +262,24 @@ function stampWorkspaceIdOnArray(value: unknown): unknown {
 function stampWorkspaceIdOnObject(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   return { ...value, workspaceId: (value as { workspaceId?: WorkspaceKind }).workspaceId ?? DEFAULT_WORKSPACE_ID };
+}
+
+function withImportedContentDefault(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const snapshot = value as Record<string, unknown>;
+  return { ...snapshot, importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [] };
+}
+
+/** Backfills `importedContent: []` onto every snapshot inside an inactiveWorkspaceOwnedData
+ * archive (see withImportedContentDefault) — not just the top-level active fields. */
+function withImportedContentDefaultInArchive(rawArchive: unknown): Record<string, unknown> {
+  if (!rawArchive || typeof rawArchive !== 'object' || Array.isArray(rawArchive)) return {};
+  const archive = rawArchive as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(archive)) {
+    result[key] = withImportedContentDefault(archive[key]);
+  }
+  return result;
 }
 
 /** Exported for direct, isolated testing (see store.test.ts) — this is the exact function wired
@@ -256,8 +300,9 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     sessions: stampWorkspaceIdOnArray(state.sessions),
     personalStudyPlanTasks: stampWorkspaceIdOnArray(state.personalStudyPlanTasks),
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
+    importedContent: Array.isArray(state.importedContent) ? state.importedContent : [],
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
-    inactiveWorkspaceOwnedData: (state.inactiveWorkspaceOwnedData as Record<string, unknown> | undefined) ?? {},
+    inactiveWorkspaceOwnedData: withImportedContentDefaultInArchive(state.inactiveWorkspaceOwnedData),
   };
 }
 
@@ -436,6 +481,28 @@ export const useAppStore = create<AppState>()(
       recordRevisionIncorrect: (pyqId, today) =>
         set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, pyqId, today) })),
 
+      importedContent: [],
+      // The store is the single source of truth for which workspace an item belongs to — always
+      // the CURRENT activeWorkspaceId at the moment of adding, never trusting whatever
+      // `item.workspaceId` happened to already say. This guarantees the invariant every other
+      // workspace-owned collection already relies on: everything physically sitting in
+      // `importedContent` right now truly belongs to the active workspace, so setActiveWorkspaceId's
+      // swap (below) can keep moving the whole array wholesale without per-item inspection.
+      addImportedContent: (item) =>
+        set((state) => ({ importedContent: [{ ...item, workspaceId: state.activeWorkspaceId }, ...state.importedContent] })),
+      updateImportedContent: (id, updates) =>
+        set((state) => ({
+          importedContent: state.importedContent.map((c) => {
+            if (c.id !== id) return c;
+            // Runtime enforcement, not just the TS signature above: `id`/`workspaceId` are
+            // stripped from `updates` even if a caller bypasses the type system and includes
+            // them — workspace isolation must hold regardless of what a caller passes in.
+            const { id: _ignoredId, workspaceId: _ignoredWorkspaceId, ...safeUpdates } = updates as Partial<ImportedContent>;
+            return { ...c, ...safeUpdates };
+          }),
+        })),
+      deleteImportedContent: (id) => set((state) => ({ importedContent: state.importedContent.filter((c) => c.id !== id) })),
+
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
       inactiveWorkspaceOwnedData: {},
       // Multi-Workspace OS, Stage 2 — the whole-field archive/restore swap: every field listed in
@@ -464,6 +531,7 @@ export const useAppStore = create<AppState>()(
             studyPlanGeneratedAt: state.studyPlanGeneratedAt,
             personalStudyPlanTasks: state.personalStudyPlanTasks,
             revisionQueue: state.revisionQueue,
+            importedContent: state.importedContent,
           };
           const incoming = state.inactiveWorkspaceOwnedData[id] ?? emptyWorkspaceOwnedData();
           return {
@@ -488,6 +556,7 @@ export const useAppStore = create<AppState>()(
           studyPlanGeneratedAt: null,
           personalStudyPlanTasks: [],
           revisionQueue: createRevisionQueue(),
+          importedContent: [],
           // Multi-Workspace OS, Stage 2 — "reset ALL data" means every workspace's data, not just
           // the active one's; a no-op today since nothing has ever populated this archive.
           inactiveWorkspaceOwnedData: {},
@@ -519,6 +588,7 @@ export function exportAllData() {
     studyPlanGeneratedAt: state.studyPlanGeneratedAt,
     personalStudyPlanTasks: state.personalStudyPlanTasks,
     revisionQueue: state.revisionQueue,
+    importedContent: state.importedContent,
     // Multi-Workspace OS, Stage 2 — activeWorkspaceId travels WITH the flat fields above (notes,
     // completedTopics, etc.) because they only mean "this workspace's data" together with it; and
     // every OTHER workspace's archived data is equally real user data (see AppState's doc-comment)
@@ -548,6 +618,7 @@ export function importAllData(json: string) {
     studyPlanGeneratedAt: data.studyPlanGeneratedAt ?? null,
     personalStudyPlanTasks: data.personalStudyPlanTasks ?? [],
     revisionQueue: data.revisionQueue ?? createRevisionQueue(),
+    importedContent: data.importedContent ?? [],
     activeWorkspaceId: (data.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: data.inactiveWorkspaceOwnedData ?? {},
   });

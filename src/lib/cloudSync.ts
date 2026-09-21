@@ -41,6 +41,9 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     // wrongly treated as empty and have valid cloud data overwritten. Always empty today (nothing
     // populates it yet), so this never changes today's behavior — see store.ts's field doc-comment.
     Object.keys((data.inactiveWorkspaceOwnedData as object) ?? {}).length,
+    // Import-First Content Repository foundation — imported non-note content (question banks,
+    // PYQs, research documents, etc.) is just as real as any other field here.
+    ((data.importedContent as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }
