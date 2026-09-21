@@ -2,19 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { WORKSPACES, ACTIVE_WORKSPACES, DEFAULT_WORKSPACE_ID, getWorkspaceMeta } from './workspace';
 
 describe('workspace registry', () => {
-  it('WORKSPACES lists all three workspaces, including the not-yet-active PhD Research', () => {
+  it('WORKSPACES lists all three workspaces', () => {
     expect(WORKSPACES.map((w) => w.id).sort()).toEqual(['apfc', 'phd_research', 'upsc_cse'].sort());
   });
 
-  it('ACTIVE_WORKSPACES — Stage 3A — contains exactly APFC and UPSC CSE, never PhD Research', () => {
-    expect(ACTIVE_WORKSPACES.map((w) => w.id)).toEqual(['apfc', 'upsc_cse']);
+  it('ACTIVE_WORKSPACES contains all three workspaces, now that PhD Research has its own page', () => {
+    expect(ACTIVE_WORKSPACES.map((w) => w.id).sort()).toEqual(['apfc', 'phd_research', 'upsc_cse'].sort());
     expect(ACTIVE_WORKSPACES.every((w) => w.status === 'active')).toBe(true);
-    expect(ACTIVE_WORKSPACES.some((w) => w.id === 'phd_research')).toBe(false);
   });
 
-  it('PhD Research is registered but explicitly marked comingSoon, not active', () => {
+  it('PhD Research is registered and marked active', () => {
     const phd = WORKSPACES.find((w) => w.id === 'phd_research');
-    expect(phd?.status).toBe('comingSoon');
+    expect(phd?.status).toBe('active');
   });
 
   it('DEFAULT_WORKSPACE_ID is apfc and is itself active', () => {

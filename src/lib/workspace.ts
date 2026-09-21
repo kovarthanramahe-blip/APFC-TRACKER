@@ -5,9 +5,9 @@
 // and this static registry; Stage 2 (lib/store.ts's `activeWorkspaceId` + `inactiveWorkspaceOwnedData`)
 // made switching between them safe and isolated at the data layer, with no UI yet. Stage 3A adds
 // the first real UI: a switcher (see components/layout/AppShell.tsx) and workspace-aware
-// navigation/empty-states, but ONLY for workspaces marked `status: 'active'` below — PhD Research
-// stays `status: 'comingSoon'`, present in the registry (so later stages don't need another
-// registry redesign) but never selectable or reachable from any UI.
+// navigation/empty-states, gated on `status: 'active'` below. PhD Research became `active` once it
+// got its first real page (pages/PhdResearch.tsx) — an import-first document repository, not the
+// full projects/chapters/bibliography research system planned for later.
 export type WorkspaceKind = 'apfc' | 'upsc_cse' | 'phd_research';
 
 export interface WorkspaceMeta {
@@ -32,7 +32,7 @@ export interface WorkspaceMeta {
 export const WORKSPACES: readonly WorkspaceMeta[] = [
   { id: 'apfc', label: 'APFC (UPSC EPFO)', shortLabel: 'APFC', tagline: 'UPSC EPFO Prep', kind: 'exam', status: 'active' },
   { id: 'upsc_cse', label: 'UPSC CSE', shortLabel: 'UPSC CSE', tagline: 'Civil Services Prep', kind: 'exam', status: 'active' },
-  { id: 'phd_research', label: 'PhD Research', shortLabel: 'PhD', tagline: 'Research Workspace', kind: 'research', status: 'comingSoon' },
+  { id: 'phd_research', label: 'PhD Research', shortLabel: 'PhD', tagline: 'Research Workspace', kind: 'research', status: 'active' },
 ];
 
 /** The only workspaces a switcher (or any other UI) should ever offer — filters out anything not

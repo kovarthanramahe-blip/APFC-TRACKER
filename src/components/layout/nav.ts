@@ -9,6 +9,7 @@ import {
   BarChart3,
   CalendarRange,
   Settings,
+  GraduationCap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/pyq-test', label: 'PYQs', icon: FileQuestion },
   { to: '/mock-tests', label: 'Mock Tests', icon: FileClock },
   { to: '/notes', label: 'Notes', icon: NotebookPen },
+  { to: '/phd-research', label: 'PhD Research', icon: GraduationCap },
   { to: '/pomodoro', label: 'Pomodoro', icon: Timer },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/study-plan', label: 'Study Plan', icon: CalendarRange },

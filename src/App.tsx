@@ -18,6 +18,7 @@ const MockTests = lazy(() => import('./pages/MockTests'));
 const MockTestRunner = lazy(() => import('./pages/MockTestRunner'));
 const MockTestResult = lazy(() => import('./pages/MockTestResult'));
 const Notes = lazy(() => import('./pages/Notes'));
+const PhdResearch = lazy(() => import('./pages/PhdResearch'));
 const Pomodoro = lazy(() => import('./pages/Pomodoro'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const StudyPlan = lazy(() => import('./pages/StudyPlan'));
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="/mock-tests/run/:blueprintId" element={<MockTestRunner />} />
           <Route path="/mock-tests/result/:attemptId" element={<MockTestResult />} />
           <Route path="/notes" element={<Notes />} />
+          <Route path="/phd-research" element={<PhdResearch />} />
           <Route path="/pomodoro" element={<Pomodoro />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/study-plan" element={<StudyPlan />} />

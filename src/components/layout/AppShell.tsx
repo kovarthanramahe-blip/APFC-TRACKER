@@ -9,8 +9,8 @@ import { daysUntil } from '../../lib/utils';
 import { cx } from '../../lib/utils';
 
 // Multi-Workspace OS, Stage 3A — the first real UI on top of Stage 2's already-tested
-// activeWorkspaceId/setActiveWorkspaceId. Only ACTIVE_WORKSPACES (APFC, UPSC CSE) are offered —
-// PhD Research stays in the registry but is filtered out, so it's never selectable here.
+// activeWorkspaceId/setActiveWorkspaceId. Only ACTIVE_WORKSPACES are offered — a workspace stays
+// in the registry but out of this list until it has its own real page to switch into.
 function WorkspaceSwitch() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
