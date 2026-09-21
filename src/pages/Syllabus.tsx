@@ -2,14 +2,29 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks } from 'lucide-react';
-import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
+import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
+
+// Multi-Workspace OS, Stage 3B-1 — per-workspace copy for the parts of the page that used to
+// hardcode APFC's own wording. Structural/behavioural logic below stays workspace-generic
+// (reading through `syllabus`, the resolved array), so this is the only place new workspace copy
+// needs to be added when a future workspace's syllabus goes live.
+const PAGE_COPY: Record<string, { eyebrow: string; description: string }> = {
+  apfc: {
+    eyebrow: 'Phase I · Recruitment Test',
+    description: 'Official UPSC EPFO APFC syllabus broken into trackable topics — check off what you\'ve covered.',
+  },
+  upsc_cse: {
+    eyebrow: 'Prelims & Mains',
+    description: 'UPSC Civil Services Examination syllabus broken into trackable topics — check off what you\'ve covered.',
+  },
+};
 
 export default function Syllabus() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -18,24 +33,30 @@ export default function Syllabus() {
   const toggleTopic = useAppStore((s) => s.toggleTopic);
   const markSubjectTopics = useAppStore((s) => s.markSubjectTopics);
 
+  // Multi-Workspace OS, Stage 3B-1 — the ONE line that decides which syllabus this page shows;
+  // everything else below reads `syllabus`, never a specific workspace's data file directly.
+  const syllabus = useMemo(() => getSyllabusForWorkspace(activeWorkspaceId), [activeWorkspaceId]);
+
   // Same unified topic-status source of truth as Dashboard/Analytics (lib/topicStatus) — a topic
   // covered here but flagged elsewhere as weak from real PYQ performance must show that here too,
-  // otherwise the checkmark alone would misleadingly read as "done".
+  // otherwise the checkmark alone would misleadingly read as "done". PYQ_BANK only ever contains
+  // APFC questions, so for a workspace with no PYQ practice yet (pyqAttempts always []) this
+  // naturally degrades to "no PYQ signal" for every topic — never a special case to handle here.
   const needsRevisionTopicIds = useMemo(() => {
     const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
-    const statuses = computeUnifiedTopicStatus(SYLLABUS, completedTopics, pyqPerf);
+    const statuses = computeUnifiedTopicStatus(syllabus, completedTopics, pyqPerf);
     return new Set(statuses.filter((t) => t.status === 'needs_revision').map((t) => t.topicId));
-  }, [completedTopics, pyqAttempts]);
+  }, [syllabus, completedTopics, pyqAttempts]);
 
   // Deep-link support: "Study this topic" from a PYQ review arrives as /syllabus?topicId=...
   const [searchParams] = useSearchParams();
   const deepLinkTopicId = searchParams.get('topicId');
   const deepLinkSubjectId = useMemo(
-    () => (deepLinkTopicId ? SYLLABUS.find((s) => s.topics.some((t) => t.id === deepLinkTopicId))?.id : undefined),
-    [deepLinkTopicId],
+    () => (deepLinkTopicId ? syllabus.find((s) => s.topics.some((t) => t.id === deepLinkTopicId))?.id : undefined),
+    [syllabus, deepLinkTopicId],
   );
 
-  const [openIds, setOpenIds] = useState<string[]>(() => (deepLinkSubjectId ? [deepLinkSubjectId] : [SYLLABUS[0].id]));
+  const [openIds, setOpenIds] = useState<string[]>(() => (deepLinkSubjectId ? [deepLinkSubjectId] : syllabus[0] ? [syllabus[0].id] : []));
   const [query, setQuery] = useState('');
   const highlightedRef = useRef<HTMLLIElement>(null);
 
@@ -48,22 +69,26 @@ export default function Syllabus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkSubjectId, deepLinkTopicId]);
 
-  const totalTopics = getAllTopicsCount();
+  const totalTopics = syllabus.reduce((sum, s) => sum + s.topics.length, 0);
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
   const overallPct = totalTopics ? Math.round((doneTopics / totalTopics) * 100) : 0;
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return SYLLABUS;
+    if (!query.trim()) return syllabus;
     const q = query.toLowerCase();
-    return SYLLABUS.map((subj) => ({
-      ...subj,
-      topics: subj.topics.filter((t) => t.title.toLowerCase().includes(q) || subj.title.toLowerCase().includes(q)),
-    })).filter((subj) => subj.topics.length > 0);
-  }, [query]);
+    return syllabus
+      .map((subj) => ({
+        ...subj,
+        topics: subj.topics.filter((t) => t.title.toLowerCase().includes(q) || subj.title.toLowerCase().includes(q)),
+      }))
+      .filter((subj) => subj.topics.length > 0);
+  }, [syllabus, query]);
 
-  // Multi-Workspace OS, Stage 3A — SYLLABUS is APFC's own real data; showing it under a
-  // different workspace's branding would fabricate content that workspace doesn't have yet.
-  if (activeWorkspaceId !== 'apfc') {
+  // Multi-Workspace OS, Stage 3B-1 — a workspace's own syllabus (not just "is it apfc") decides
+  // whether this page has real content to show. Today only 'apfc' and 'upsc_cse' resolve to a
+  // non-empty syllabus (see data/registry.ts); 'phd_research' (and any future workspace without a
+  // syllabus yet) correctly falls back to the same coming-soon empty state Stage 3A introduced.
+  if (syllabus.length === 0) {
     return (
       <div>
         <PageHeader eyebrow="Syllabus" title="Syllabus Tracker" />
@@ -72,12 +97,14 @@ export default function Syllabus() {
     );
   }
 
+  const copy = PAGE_COPY[activeWorkspaceId] ?? PAGE_COPY.apfc;
+
   return (
     <div>
       <PageHeader
-        eyebrow="Phase I · Recruitment Test"
+        eyebrow={copy.eyebrow}
         title="Syllabus Tracker"
-        description="Official UPSC EPFO APFC syllabus broken into trackable topics — check off what you've covered."
+        description={copy.description}
         action={
           <div className="flex items-center gap-3">
             <div className="text-right">
@@ -223,7 +250,7 @@ export default function Syllabus() {
           onClick={() => {
             if (confirm('Reset all syllabus progress?')) {
               markSubjectTopics(
-                SYLLABUS.flatMap((s) => s.topics.map((t) => t.id)),
+                syllabus.flatMap((s) => s.topics.map((t) => t.id)),
                 false,
               );
             }
