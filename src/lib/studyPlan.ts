@@ -11,6 +11,7 @@
 import type { SyllabusSubject } from './types';
 import { computeUnifiedTopicStatus, type UnifiedTopicStatus, type TopicStatus } from './topicStatus';
 import type { PyqPerformanceSnapshot } from './pyqPerformance';
+import type { WorkspaceKind } from './workspace';
 
 // --- Config ---------------------------------------------------------------
 // 0 = Sunday .. 6 = Saturday, matching JS Date#getDay() — no new day-numbering convention invented.
@@ -287,6 +288,11 @@ export interface StudyPlan {
   /** Topics whose workload didn't fit within plannable capacity — reported explicitly rather than
    * silently dropped, so the deficit in the capacity report always matches what's actually missing. */
   unscheduledTopicIds: string[];
+  /** Multi-Workspace OS, Stage 1 — which workspace this plan belongs to. Optional because
+   * generateStudyPlan() itself never sets it (this stays a pure function of its existing inputs);
+   * lib/store.ts's persist migration stamps it onto an existing persisted plan as 'apfc'. Nothing
+   * writes or reads it yet beyond that migration. */
+  workspaceId?: WorkspaceKind;
 }
 
 export interface StudyPlanGenerationInput {

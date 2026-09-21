@@ -5,6 +5,7 @@
 // pending tasks that no longer fit" operation (rebalanceStudyPlan) that reuses the exact same
 // PlanCapacity the engine already computed.
 import type { PlanCapacity, PlanTaskStatus, StudyPlanTask } from './studyPlan';
+import type { WorkspaceKind } from './workspace';
 import { uuid } from './utils';
 
 // --- Personal tasks -----------------------------------------------------------
@@ -26,6 +27,10 @@ export interface PersonalPlanTask {
   status: PlanTaskStatus;
   taskType: PersonalTaskType;
   reason: string;
+  /** Multi-Workspace OS, Stage 1 — which workspace this task belongs to. Optional because nothing
+   * creating a PersonalPlanTask sets it yet; lib/store.ts's persist migration stamps it onto an
+   * existing persisted task as 'apfc'. Nothing writes or reads it yet beyond that migration. */
+  workspaceId?: WorkspaceKind;
 }
 
 export const MAX_TASK_MINUTES = 240; // 4 hours — a sensible upper bound for a single scheduled block

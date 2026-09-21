@@ -1,5 +1,7 @@
 // Core domain types for the APFC Tracker app
 
+import type { WorkspaceKind } from './workspace';
+
 export interface SyllabusTopic {
   id: string;
   title: string;
@@ -154,6 +156,11 @@ export interface PYQAttempt {
   unansweredCount: number;
   score: number;
   accuracy: number;
+  /** Multi-Workspace OS, Stage 1 — which workspace this attempt belongs to. Optional because it
+   * doesn't exist on data saved before this field was introduced; lib/store.ts's persist migration
+   * stamps it onto every existing item as 'apfc'. Nothing writes or reads it yet beyond that
+   * migration — a later stage is what actually stamps it on newly created items and filters by it. */
+  workspaceId?: WorkspaceKind;
 }
 
 export interface MockTestBlueprint {
@@ -182,6 +189,8 @@ export interface MockTestAttempt {
   score: number;
   maxScore: number;
   subjectBreakdown: Record<string, { correct: number; wrong: number; skipped: number; total: number }>;
+  /** Multi-Workspace OS, Stage 1 — see PYQAttempt.workspaceId above; same optionality/migration. */
+  workspaceId?: WorkspaceKind;
 }
 
 export interface Note {
@@ -193,6 +202,8 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   pinned: boolean;
+  /** Multi-Workspace OS, Stage 1 — see PYQAttempt.workspaceId above; same optionality/migration. */
+  workspaceId?: WorkspaceKind;
 }
 
 export interface PomodoroSession {
@@ -203,6 +214,8 @@ export interface PomodoroSession {
   completedAt: string;
   durationMinutes: number;
   completedFully: boolean;
+  /** Multi-Workspace OS, Stage 1 — see PYQAttempt.workspaceId above; same optionality/migration. */
+  workspaceId?: WorkspaceKind;
 }
 
 export interface StudyLogEntry {

@@ -15,6 +15,7 @@ import type { SyllabusSubject } from './types';
 import type { PyqPerformanceSnapshot } from './pyqPerformance';
 import { getLocalDateString } from './utils';
 import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
+import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -113,6 +114,16 @@ interface AppState {
   recordRevisionCorrect: (pyqId: string, today: string) => void;
   recordRevisionIncorrect: (pyqId: string, today: string) => void;
 
+  // Multi-Workspace OS, Stage 1 (foundation only): which workspace (see lib/workspace.ts) is
+  // currently active. Always 'apfc' for now — there is no switcher UI yet, and no read/write path
+  // filters by it yet (that starts in a later stage). Treated as a device-local setting, like
+  // `theme`, not user data: excluded from resetAllData and from exportAllData/importAllData (see
+  // lastSyncedUserId's identical treatment above), so it is never wiped by "reset my data" and
+  // never round-trips through the JSON backup or cloud sync — each device just keeps whatever it
+  // was last set to (currently always the default, since nothing sets it yet).
+  activeWorkspaceId: WorkspaceKind;
+  setActiveWorkspaceId: (id: WorkspaceKind) => void;
+
   // Reset
   resetAllData: () => void;
 }
@@ -127,6 +138,69 @@ function todayKey() {
 
 function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): StudyLogEntry {
   return log[date] ?? { date, focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0 };
+}
+
+// --- Multi-Workspace OS, Stage 1 persist migration -------------------------------------------
+// Every existing user's persisted data (localStorage today; the same JSON also round-trips
+// through Supabase's single `user_data` row via cloudSync.ts) predates the very idea of a
+// workspace: it is implicitly "the APFC data," just never labelled as such. This migration makes
+// that label explicit and permanent, with zero manual steps and zero data loss:
+//  - every existing array-of-object entity (notes, mock test attempts, PYQ attempts, Pomodoro
+//    sessions, personal study-plan tasks) gets `workspaceId: 'apfc'` stamped onto each item that
+//    doesn't already have one;
+//  - the single current study plan (if any) gets the same stamp;
+//  - `activeWorkspaceId` is set to the default ('apfc') if not already present.
+// Deliberately NOT touched here (see the Stage 1 diagnostic/plan write-up): completedTopics,
+// studyLog, rewardUnlocks, and revisionQueue are all keyed Records (by topicId/date/id/pyqId)
+// rather than arrays of objects, and starredQuestionIds/bookmarkedPyqIds are plain string arrays
+// (question ids, not objects) — none of these can safely take a per-entry `workspaceId` without
+// either corrupting a non-object value or changing the record's key namespace, and the latter
+// would require updating every page that reads them directly. Restructuring those is explicitly
+// deferred to a later stage, once a second real workspace exists to design the namespacing
+// against; for now they continue to behave exactly as before, which is safe precisely because
+// only one real workspace ('apfc') exists today. Nothing about this migration changes PYQ_BANK,
+// QUESTION_BANK, syllabus data, or the generated-question pipeline — none of that is persisted
+// user state, so none of it is touched by (or even reachable from) this function.
+//
+// Pure, deterministic, and idempotent: given the same input it always returns the same output,
+// and running it again on its own output is a no-op (every item it would stamp already has a
+// truthy workspaceId, so the `?? DEFAULT_WORKSPACE_ID` fallback never re-fires).
+export const APP_STORE_PERSIST_VERSION = 2;
+
+function stampWorkspaceIdOnArray(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((item) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? { ...item, workspaceId: (item as { workspaceId?: WorkspaceKind }).workspaceId ?? DEFAULT_WORKSPACE_ID }
+      : item,
+  );
+}
+
+function stampWorkspaceIdOnObject(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return { ...value, workspaceId: (value as { workspaceId?: WorkspaceKind }).workspaceId ?? DEFAULT_WORKSPACE_ID };
+}
+
+/** Exported for direct, isolated testing (see store.test.ts) — this is the exact function wired
+ * into `persist`'s own `migrate` option below, not a re-implementation of it. */
+export function migrateAppStorage(persistedState: unknown, version: number): unknown {
+  const state: Record<string, unknown> =
+    persistedState && typeof persistedState === 'object' && !Array.isArray(persistedState)
+      ? { ...(persistedState as Record<string, unknown>) }
+      : {};
+
+  if (version >= APP_STORE_PERSIST_VERSION) return state;
+
+  return {
+    ...state,
+    notes: stampWorkspaceIdOnArray(state.notes),
+    attempts: stampWorkspaceIdOnArray(state.attempts),
+    pyqAttempts: stampWorkspaceIdOnArray(state.pyqAttempts),
+    sessions: stampWorkspaceIdOnArray(state.sessions),
+    personalStudyPlanTasks: stampWorkspaceIdOnArray(state.personalStudyPlanTasks),
+    studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
+    activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
+  };
 }
 
 export const useAppStore = create<AppState>()(
@@ -292,6 +366,9 @@ export const useAppStore = create<AppState>()(
       recordRevisionIncorrect: (pyqId, today) =>
         set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, pyqId, today) })),
 
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
+
       resetAllData: () =>
         set({
           completedTopics: {},
@@ -311,7 +388,8 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'apfc-tracker-storage',
-      version: 1,
+      version: APP_STORE_PERSIST_VERSION,
+      migrate: migrateAppStorage as (persistedState: unknown, version: number) => AppState,
     },
   ),
 );
