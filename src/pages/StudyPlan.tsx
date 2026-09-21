@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { SYLLABUS } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
 import { computePyqPerformance } from '../lib/pyqPerformance';
@@ -48,7 +49,7 @@ import { computeUnscheduledTopicIds } from '../lib/studyPlanAdaptive';
 import { computePlanHealth, type PlanHealthInput, type PlanHealthReport, type PlanHealthVerdict } from '../lib/studyPlanHealth';
 import { simulateMissedStudyDays, simulateTargetDateShift, type ScenarioResult } from '../lib/studyPlanScenarios';
 import { formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
-import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
+import { Card, Badge, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 
 type TaskKind = 'syllabus' | 'personal';
 
@@ -105,6 +106,7 @@ export function groupTasksByPhase(tasks: StudyPlanTask[]): [string, StudyPlanTas
 }
 
 export default function StudyPlan() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const examDate = useAppStore((s) => s.examDate);
@@ -350,6 +352,17 @@ export default function StudyPlan() {
       personal: personalTasks.filter((t) => t.date === date),
     }));
   }, [plan, personalTasks]);
+
+  // Multi-Workspace OS, Stage 3A — plan generation depends on SYLLABUS (APFC's own real data);
+  // a plan "generated" for a workspace with no syllabus yet would be fabricated content.
+  if (activeWorkspaceId !== 'apfc') {
+    return (
+      <div>
+        <PageHeader eyebrow="Preparation" title="Study Plan" />
+        <WorkspaceComingSoon icon={CalendarRange} workspaceLabel={getWorkspaceMeta(activeWorkspaceId).shortLabel} />
+      </div>
+    );
+  }
 
   return (
     <div>

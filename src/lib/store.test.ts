@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useAppStore, exportAllData, importAllData, migrateAppStorage, APP_STORE_PERSIST_VERSION } from './store';
 import { createRevisionQueue } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from './workspace';
+import { hasMeaningfulData } from './cloudSync';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
 // works directly outside React for in-memory state (persist's localStorage access is safely
@@ -446,5 +447,84 @@ describe('Multi-Workspace OS Stage 2 — workspace-scoped write paths & isolatio
       importAllData(legacyExport);
       expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
     });
+  });
+});
+
+// Multi-Workspace OS, Stage 3A — the workspace switcher makes setActiveWorkspaceId a REAL,
+// user-triggered action for the first time (Stage 2 only exercised it directly in tests). This
+// specifically re-verifies, via the exact same exportAllData/importAllData path cloud sync uses
+// (see cloudSync.ts's currentLocalData/reconcileOnSignIn), that switching workspaces through the
+// real UI action still can't cause the cross-device data-loss scenario investigated for this
+// stage: a device reconciling cloud data must end up with EVERY workspace's data intact, not just
+// whichever workspace happened to be active when the cloud row was last written.
+describe('Multi-Workspace OS Stage 3A — switcher-driven cloud-sync safety', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+    });
+  }
+  beforeEach(fullReset);
+
+  it('a fresh device importing a cloud blob ends up with BOTH the active workspace and every archived workspace intact', () => {
+    // Device A: real APFC usage, then a real workspace switch (the actual action the sidebar
+    // switcher now calls), then some real UPSC CSE usage.
+    useAppStore.getState().upsertNote({ id: 'n-apfc', subject: 'general', title: 'APFC note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+    useAppStore.getState().toggleTopic('apfc-topic');
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().upsertNote({ id: 'n-cse', subject: 'general', title: 'UPSC CSE note', content: 'y', createdAt: 'b', updatedAt: 'b', pinned: false });
+    useAppStore.getState().toggleTopic('cse-topic');
+
+    const cloudPayload = JSON.parse(exportAllData());
+
+    // Device B: signs in fresh, "cloud wins" (reconcileOnSignIn's real path) — importAllData is
+    // exactly what that calls.
+    fullReset();
+    importAllData(JSON.stringify(cloudPayload));
+
+    // Device B lands on whatever was active when the payload was written (upsc_cse) — its own
+    // data is immediately visible, no switch needed.
+    expect(useAppStore.getState().activeWorkspaceId).toBe('upsc_cse');
+    expect(useAppStore.getState().notes[0]?.title).toBe('UPSC CSE note');
+    expect(useAppStore.getState().completedTopics).toEqual({ 'cse-topic': true });
+
+    // And APFC's data — archived at export time — is NOT lost: switching to it on device B
+    // restores it exactly.
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().notes[0]?.title).toBe('APFC note');
+    expect(useAppStore.getState().completedTopics).toEqual({ 'apfc-topic': true });
+  });
+
+  it('hasMeaningfulData recognizes data immediately after switching to a brand-new workspace (archived data alone is enough)', () => {
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'APFC note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // archives the apfc note; upsc_cse itself starts empty
+    const payload = JSON.parse(exportAllData());
+    // The push gate (startCloudSync) must NOT treat this as "nothing to sync" — that would mean
+    // a real device's cloud row never receives the archived workspace's data at all.
+    expect(hasMeaningfulData(payload)).toBe(true);
+  });
+
+  it('a genuinely empty app (never used, no workspace ever switched) is still correctly treated as having nothing to sync', () => {
+    const payload = JSON.parse(exportAllData());
+    expect(hasMeaningfulData(payload)).toBe(false);
+  });
+
+  it('switching to the same workspace repeatedly does not create phantom archive entries', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
   });
 });

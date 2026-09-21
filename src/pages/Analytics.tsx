@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList, Brain, Gauge } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
@@ -30,7 +31,7 @@ import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
 import { computeExamReadiness, type ExamReadinessReport, type ExamReadinessVerdict } from '../lib/examReadiness';
 import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
-import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp } from '../components/ui/Primitives';
+import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp, WorkspaceComingSoon } from '../components/ui/Primitives';
 
 function lastNDays(n: number) {
   const days: string[] = [];
@@ -44,6 +45,7 @@ function lastNDays(n: number) {
 }
 
 export default function Analytics() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
@@ -153,6 +155,18 @@ export default function Analytics() {
       }),
     [completedTopics, pyqPerf, pyqAttempts, bookmarkedPyqIds, revisionQueue, attempts, studyPlan, personalStudyPlanTasks, sessions],
   );
+
+  // Multi-Workspace OS, Stage 3A — Analytics is built entirely from SYLLABUS-derived progress and
+  // PYQ performance (APFC's own real data); showing zeroed-out APFC charts under a different
+  // workspace's branding would still be showing APFC's structure, not this workspace's.
+  if (activeWorkspaceId !== 'apfc') {
+    return (
+      <div>
+        <PageHeader eyebrow="Insights" title="Analytics" />
+        <WorkspaceComingSoon icon={ListChecks} workspaceLabel={getWorkspaceMeta(activeWorkspaceId).shortLabel} />
+      </div>
+    );
+  }
 
   return (
     <div>

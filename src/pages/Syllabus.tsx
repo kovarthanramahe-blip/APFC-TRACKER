@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks } from 'lucide-react';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
 import { useAppStore } from '../lib/store';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
-import { Card, ProgressBar, Button, PageHeader } from '../components/ui/Primitives';
+import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 
 export default function Syllabus() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const toggleTopic = useAppStore((s) => s.toggleTopic);
@@ -58,6 +60,17 @@ export default function Syllabus() {
       topics: subj.topics.filter((t) => t.title.toLowerCase().includes(q) || subj.title.toLowerCase().includes(q)),
     })).filter((subj) => subj.topics.length > 0);
   }, [query]);
+
+  // Multi-Workspace OS, Stage 3A — SYLLABUS is APFC's own real data; showing it under a
+  // different workspace's branding would fabricate content that workspace doesn't have yet.
+  if (activeWorkspaceId !== 'apfc') {
+    return (
+      <div>
+        <PageHeader eyebrow="Syllabus" title="Syllabus Tracker" />
+        <WorkspaceComingSoon icon={ListChecks} workspaceLabel={getWorkspaceMeta(activeWorkspaceId).shortLabel} />
+      </div>
+    );
+  }
 
   return (
     <div>

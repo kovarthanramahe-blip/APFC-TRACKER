@@ -18,8 +18,10 @@ import {
   Check,
   Brain,
   Gauge,
+  NotebookPen,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { useGamification, useRewards, getEncouragementMessage } from '../lib/gamification';
@@ -36,6 +38,7 @@ import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateStrin
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
 
 export default function Dashboard() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
@@ -155,6 +158,46 @@ export default function Dashboard() {
       const result = completeStudyPlanTask(personalStudyPlanTasks, item.task.id);
       if (result.ok) setPersonalStudyPlanTasks(result.tasks);
     }
+  }
+
+  // Multi-Workspace OS, Stage 3A — every widget below (readiness, syllabus progress, PYQ/mock
+  // stats, weak topics) is built from SYLLABUS/PYQ_BANK, APFC's own real data; a full-page gate
+  // avoids showing APFC's structure with zeroed-out numbers under a different workspace's
+  // branding. Notes and Pomodoro already work for this workspace (see their own pages), so the
+  // gate still offers direct links to both rather than leaving the home page a dead end.
+  if (activeWorkspaceId !== 'apfc') {
+    const workspace = getWorkspaceMeta(activeWorkspaceId);
+    return (
+      <div className="space-y-6">
+        <motion.div {...fadeUp}>
+          <Card className="relative overflow-hidden p-6 sm:p-8">
+            <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-brand-500/10 blur-3xl" />
+            <div className="absolute -bottom-20 -left-10 h-56 w-56 rounded-full bg-gold-400/10 blur-3xl" />
+            <div className="relative">
+              <Badge tone="brand" className="mb-3">
+                <CalendarClock className="h-3 w-3" /> {workspace.label}
+              </Badge>
+              <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">{workspace.shortLabel} content coming next</h1>
+              <p className="mt-2 max-w-xl text-sm sm:text-base text-slate-500 dark:text-slate-400">
+                We're still building out the syllabus, question bank and mock tests for this workspace. Notes and focus sessions already work here.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link to="/notes">
+                  <Button>
+                    <NotebookPen className="h-4 w-4" /> Open Notes
+                  </Button>
+                </Link>
+                <Link to="/pomodoro">
+                  <Button variant="secondary">
+                    <Timer className="h-4 w-4" /> Start focus session
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+      </div>
+    );
   }
 
   return (

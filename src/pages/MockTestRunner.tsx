@@ -31,8 +31,13 @@ export default function MockTestRunner() {
   const { blueprintId } = useParams();
   const navigate = useNavigate();
   const addAttempt = useAppStore((s) => s.addAttempt);
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
 
-  const blueprint = blueprintId ? getBlueprint(blueprintId) : undefined;
+  // Multi-Workspace OS, Stage 3A — MOCK_TEST_BLUEPRINTS isn't workspace-gated at the data level
+  // (blueprintId lookup would still succeed under any workspace), so this page guards itself
+  // directly for the case of a direct/stale URL visit while a non-APFC workspace is active
+  // (MockTests.tsx's own list page already hides these links, so this is a defensive fallback).
+  const blueprint = blueprintId && activeWorkspaceId === 'apfc' ? getBlueprint(blueprintId) : undefined;
 
   // Unified Question Architecture Stage 5C — the full catalog (all three sources) is built once,
   // and selectMockQuestionPool's own explicit provenance policy is what actually decides which

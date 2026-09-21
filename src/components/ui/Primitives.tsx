@@ -1,5 +1,6 @@
 import { type ReactNode, type ButtonHTMLAttributes, type HTMLAttributes } from 'react';
 import { motion } from 'framer-motion';
+import type { LucideIcon } from 'lucide-react';
 import { cx } from '../../lib/utils';
 
 export function Card({
@@ -126,6 +127,26 @@ export function PageHeader({
         {description && <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base">{description}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * Multi-Workspace OS, Stage 3A — the shared empty state for an exam-oriented page (Syllabus,
+ * Question Bank, PYQs, Mock Tests, Study Plan, Analytics) when a non-APFC exam workspace (e.g.
+ * UPSC CSE) is active. Deliberately generic and reused verbatim rather than per-page copy: it
+ * never fabricates or hints at syllabus/question/PYQ content that doesn't exist yet for that
+ * workspace. `workspaceLabel` names the actual active workspace so the message never claims to be
+ * about APFC when it isn't.
+ */
+export function WorkspaceComingSoon({ icon: Icon, workspaceLabel }: { icon: LucideIcon; workspaceLabel: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 py-20 px-6 text-center">
+      <Icon className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
+      <h3 className="font-display font-semibold text-slate-700 dark:text-slate-200">{workspaceLabel} content coming next</h3>
+      <p className="mt-1.5 max-w-sm text-sm text-slate-400">
+        We're still building out the syllabus, question bank and mock tests for this workspace. Your Notes and Pomodoro sessions already work here.
+      </p>
     </div>
   );
 }

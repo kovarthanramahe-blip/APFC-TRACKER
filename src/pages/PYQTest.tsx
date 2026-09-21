@@ -23,8 +23,9 @@ import {
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
 import { useAppStore } from '../lib/store';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { SUBJECT_COLORS, getLocalDateString, cx, uuid } from '../lib/utils';
-import { Card, Button, Badge, PageHeader, ProgressBar } from '../components/ui/Primitives';
+import { Card, Button, Badge, PageHeader, ProgressBar, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { FormattedText } from '../components/ui/FormattedText';
 import type { PYQ, PYQAttempt, SubjectColorKey } from '../lib/types';
 import {
@@ -96,6 +97,7 @@ function BookmarkButton({ pyqId }: { pyqId: string }) {
 }
 
 export default function PYQTest() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const addPyqAttempt = useAppStore((s) => s.addPyqAttempt);
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
@@ -383,6 +385,18 @@ export default function PYQTest() {
     setReviseIndex((i) => i + 1);
     setReviseAnswer(null);
     setReviseChecked(false);
+  }
+
+  // Multi-Workspace OS, Stage 3A — PYQ_BANK is APFC's own real data; guarding here (before any
+  // phase branch) covers every screen this page can be in, including a stray workspace switch
+  // mid-test, not just the initial 'select' screen.
+  if (activeWorkspaceId !== 'apfc') {
+    return (
+      <div>
+        <PageHeader eyebrow="Previous Year Questions" title="PYQs" />
+        <WorkspaceComingSoon icon={History} workspaceLabel={getWorkspaceMeta(activeWorkspaceId).shortLabel} />
+      </div>
+    );
   }
 
   if (phase === 'select') {

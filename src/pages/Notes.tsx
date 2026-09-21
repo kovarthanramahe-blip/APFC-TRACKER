@@ -5,6 +5,7 @@ import Markdown from 'markdown-to-jsx';
 import { Plus, Search, Pin, Trash2, X, NotebookPen, ChevronRight, ChevronLeft, FolderOpen, Upload, Eye, Pencil } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import type { Note, SubjectColorKey } from '../lib/types';
@@ -32,6 +33,12 @@ function navFromSearchParams(params: URLSearchParams): Nav {
 }
 
 export default function Notes() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  // Multi-Workspace OS, Stage 3A — SYLLABUS is APFC's own subject/topic tree; a non-APFC
+  // workspace has no syllabus to organise notes by yet, so it skips the subject/topic drill-down
+  // entirely and works as a single flat "General" notes list instead (notes themselves are
+  // already correctly workspace-isolated by the store — see lib/store.ts's Stage 2 design).
+  const isApfc = activeWorkspaceId === 'apfc';
   const notes = useAppStore((s) => s.notes);
   const upsertNote = useAppStore((s) => s.upsertNote);
   const deleteNote = useAppStore((s) => s.deleteNote);
@@ -90,7 +97,7 @@ export default function Notes() {
   }
 
   const quickNewTarget: { subject: SubjectColorKey | 'general'; topicId?: string } =
-    nav.level === 'notes' ? { subject: nav.subject, topicId: nav.uncategorized ? undefined : nav.topicId } : { subject: 'general' };
+    isApfc && nav.level === 'notes' ? { subject: nav.subject, topicId: nav.uncategorized ? undefined : nav.topicId } : { subject: 'general' };
 
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -166,6 +173,20 @@ export default function Notes() {
 
       {searchResults ? (
         <NoteGrid notes={searchResults} onOpen={setEditing} onTogglePin={togglePinNote} emptyText={`No notes match "${query}".`} showLocation />
+      ) : !isApfc ? (
+        // Multi-Workspace OS, Stage 3A — no syllabus to drill into yet, so this workspace's notes
+        // are just one flat list. `notes` is already this workspace's own notes only (Stage 2).
+        <NoteGrid
+          notes={notes}
+          onOpen={setEditing}
+          onTogglePin={togglePinNote}
+          emptyText={`No ${getWorkspaceMeta(activeWorkspaceId).shortLabel} notes yet.`}
+          emptyAction={
+            <Button onClick={() => startNew('general')}>
+              <Plus className="h-4 w-4" /> Add a note
+            </Button>
+          }
+        />
       ) : (
         <>
           <Breadcrumb nav={nav} onNavigate={setNav} />

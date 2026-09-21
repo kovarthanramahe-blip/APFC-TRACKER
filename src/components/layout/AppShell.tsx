@@ -4,8 +4,42 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { GraduationCap, Menu, X, Moon, Sun, Laptop } from 'lucide-react';
 import { NAV_ITEMS, MOBILE_NAV_ITEMS } from './nav';
 import { useAppStore } from '../../lib/store';
+import { ACTIVE_WORKSPACES, getWorkspaceMeta } from '../../lib/workspace';
 import { daysUntil } from '../../lib/utils';
 import { cx } from '../../lib/utils';
+
+// Multi-Workspace OS, Stage 3A — the first real UI on top of Stage 2's already-tested
+// activeWorkspaceId/setActiveWorkspaceId. Only ACTIVE_WORKSPACES (APFC, UPSC CSE) are offered —
+// PhD Research stays in the registry but is filtered out, so it's never selectable here.
+function WorkspaceSwitch() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
+  return (
+    <div className="flex items-center rounded-full bg-slate-100 dark:bg-slate-800 p-1 gap-0.5">
+      {ACTIVE_WORKSPACES.map((w) => (
+        <button
+          key={w.id}
+          onClick={() => setActiveWorkspaceId(w.id)}
+          aria-label={`Switch to ${w.label}`}
+          aria-pressed={activeWorkspaceId === w.id}
+          className={cx(
+            'relative rounded-full px-3 py-1 text-xs font-semibold transition-colors',
+            activeWorkspaceId === w.id ? 'text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
+          )}
+        >
+          {activeWorkspaceId === w.id && (
+            <motion.span
+              layoutId="workspace-pill"
+              className="absolute inset-0 rounded-full bg-brand-600"
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            />
+          )}
+          <span className="relative">{w.shortLabel}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function ThemeSwitch() {
   const theme = useAppStore((s) => s.theme);
@@ -42,7 +76,13 @@ function ThemeSwitch() {
 }
 
 function CountdownChip() {
+  // Multi-Workspace OS, Stage 3A — APFC's exam date (store.ts's `examDate`) is a single global
+  // field, not workspace-scoped (see Stage 2's field-by-field inspection); showing it under a
+  // non-APFC workspace's branding would be a fabricated date for an exam this app knows nothing
+  // about, so the chip simply doesn't render rather than any store/migration change being needed.
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const examDate = useAppStore((s) => s.examDate);
+  if (activeWorkspaceId !== 'apfc') return null;
   const days = daysUntil(examDate);
   return (
     <div className="hidden sm:flex items-center gap-2 rounded-full border border-gold-300/60 bg-gold-50 dark:bg-gold-500/10 dark:border-gold-500/30 px-3.5 py-1.5">
@@ -55,6 +95,8 @@ function CountdownChip() {
 }
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const workspace = getWorkspaceMeta(activeWorkspaceId);
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 py-6">
@@ -62,9 +104,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <GraduationCap className="h-5 w-5" strokeWidth={2.2} />
         </div>
         <div>
-          <p className="font-display font-bold text-slate-900 dark:text-white leading-tight">APFC Tracker</p>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight">UPSC EPFO Prep</p>
+          <p className="font-display font-bold text-slate-900 dark:text-white leading-tight">{workspace.shortLabel} Tracker</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight">{workspace.tagline}</p>
         </div>
+      </div>
+
+      <div className="px-5 pb-4">
+        <WorkspaceSwitch />
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
@@ -89,9 +135,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <div className="px-5 py-4 text-[11px] text-slate-400 dark:text-slate-600">
-        Exam Day: 20 Dec 2026
-      </div>
+      {/* Multi-Workspace OS, Stage 3A — same reasoning as CountdownChip: no fabricated exam date
+          for a workspace that doesn't have one. */}
+      {activeWorkspaceId === 'apfc' && <div className="px-5 py-4 text-[11px] text-slate-400 dark:text-slate-600">Exam Day: 20 Dec 2026</div>}
     </div>
   );
 }

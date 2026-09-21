@@ -1,12 +1,14 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Clock, ListOrdered, ArrowRight, Layers, Award } from 'lucide-react';
+import { Clock, ListOrdered, ArrowRight, Layers, Award, FileClock } from 'lucide-react';
 import { MOCK_TEST_BLUEPRINTS } from '../data/mockTests';
 import { useAppStore } from '../lib/store';
-import { Card, Badge, PageHeader, fadeUp, staggerContainer } from '../components/ui/Primitives';
+import { getWorkspaceMeta } from '../lib/workspace';
+import { Card, Badge, PageHeader, fadeUp, staggerContainer, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { SUBJECT_COLORS } from '../lib/utils';
 
 export default function MockTests() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const attempts = useAppStore((s) => s.attempts);
 
   const generalTests = MOCK_TEST_BLUEPRINTS.filter((b) => b.subjects === 'all');
@@ -17,6 +19,17 @@ export default function MockTests() {
     if (!list.length) return null;
     return list.reduce((best, a) => (a.score > best.score ? a : best), list[0]);
   };
+
+  // Multi-Workspace OS, Stage 3A — MOCK_TEST_BLUEPRINTS is built against APFC's own subjects;
+  // offering these tests under a different workspace's branding would fabricate content.
+  if (activeWorkspaceId !== 'apfc') {
+    return (
+      <div>
+        <PageHeader eyebrow="Mock Tests" title="Mock Tests" />
+        <WorkspaceComingSoon icon={FileClock} workspaceLabel={getWorkspaceMeta(activeWorkspaceId).shortLabel} />
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Star, ChevronDown, Filter, Search } from 'lucide-react';
+import { Star, ChevronDown, Filter, Search, BookOpenCheck } from 'lucide-react';
 import { QUESTION_BANK } from '../data/questionBank';
 import { PYQ_BANK } from '../data/pyq';
 import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
 import { SYLLABUS } from '../data/syllabus';
 import { useAppStore } from '../lib/store';
+import { getWorkspaceMeta } from '../lib/workspace';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
-import { Card, Badge, PageHeader } from '../components/ui/Primitives';
+import { Card, Badge, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 import type { SubjectColorKey } from '../lib/types';
 import { buildQuestionCatalog, isAuthenticPyq, isGeneratedQuestion, type CatalogQuestion } from '../lib/questionCatalog';
 import { matchesQuestionSearch } from '../lib/questionSearch';
@@ -15,6 +16,7 @@ import { matchesQuestionSearch } from '../lib/questionSearch';
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
 
 export default function QuestionBank() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const [subject, setSubject] = useState<SubjectColorKey | 'all' | 'starred'>('all');
   const [difficulty, setDifficulty] = useState<'all' | (typeof DIFFICULTIES)[number]>('all');
   const [query, setQuery] = useState('');
@@ -47,6 +49,17 @@ export default function QuestionBank() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog, subject, difficulty, query, starred, bookmarkedPyqIds]);
+
+  // Multi-Workspace OS, Stage 3A — PYQ_BANK/QUESTION_BANK/GENERATED_QUESTION_BANK are APFC's own
+  // real data; showing them under a different workspace's branding would fabricate content.
+  if (activeWorkspaceId !== 'apfc') {
+    return (
+      <div>
+        <PageHeader eyebrow="Practice Bank" title="Question Bank" />
+        <WorkspaceComingSoon icon={BookOpenCheck} workspaceLabel={getWorkspaceMeta(activeWorkspaceId).shortLabel} />
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -20,6 +20,7 @@ const MODE_LABEL: Record<PomodoroSession['mode'], string> = {
 };
 
 export default function Pomodoro() {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const addSession = useAppStore((s) => s.addSession);
   const bumpFocusMinutes = useAppStore((s) => s.bumpFocusMinutes);
   const sessions = useAppStore((s) => s.sessions);
@@ -30,6 +31,13 @@ export default function Pomodoro() {
   const [running, setRunning] = useState(false);
   const [cyclesDone, setCyclesDone] = useState(0);
   const startedAtRef = useRef<string | null>(null);
+
+  // Multi-Workspace OS, Stage 3A — a workspace switch hides every non-'general' subject option
+  // (SYLLABUS is APFC-only); reset a stale selection so the <select> never holds a value that no
+  // longer has a matching <option>.
+  useEffect(() => {
+    if (activeWorkspaceId !== 'apfc') setSubject('general');
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     if (!running) return;
@@ -159,11 +167,15 @@ export default function Pomodoro() {
               className="mt-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             >
               <option value="general">General study</option>
-              {SYLLABUS.map((s) => (
-                <option key={s.id} value={s.colorKey}>
-                  {s.shortTitle}
-                </option>
-              ))}
+              {/* Multi-Workspace OS, Stage 3A — SYLLABUS is APFC's own subject list; offering it
+                  as a focus-session category under a different workspace would be fabricated
+                  categorisation for that workspace. */}
+              {activeWorkspaceId === 'apfc' &&
+                SYLLABUS.map((s) => (
+                  <option key={s.id} value={s.colorKey}>
+                    {s.shortTitle}
+                  </option>
+                ))}
             </select>
           )}
 
