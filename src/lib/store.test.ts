@@ -528,3 +528,80 @@ describe('Multi-Workspace OS Stage 3A — switcher-driven cloud-sync safety', ()
     expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
   });
 });
+
+// Multi-Workspace OS, Stage 3B-2A — PYQ-specific isolation. Stage 2's generic swap tests already
+// prove the mechanism in general (notes, completedTopics, etc.); this adds explicit coverage for
+// PYQ practice progress specifically, since that's what this stage's PYQ architecture depends on.
+describe('Multi-Workspace OS Stage 3B-2A — PYQ progress isolation across workspaces', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+    });
+  }
+  beforeEach(fullReset);
+
+  function pyqAttemptFixture(id: string): Parameters<ReturnType<typeof useAppStore.getState>['addPyqAttempt']>[0] {
+    return {
+      id,
+      submittedAt: '2026-01-01T00:00:00.000Z',
+      year: 2020,
+      subject: 'polity',
+      topicId: 't-1',
+      questionIds: [],
+      answers: {},
+      correctCount: 0,
+      wrongCount: 0,
+      unansweredCount: 0,
+      score: 0,
+      accuracy: 0,
+    };
+  }
+
+  it('a PYQ attempt recorded under APFC does not appear after switching to UPSC CSE', () => {
+    useAppStore.getState().addPyqAttempt(pyqAttemptFixture('apfc-a1'));
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().pyqAttempts).toEqual([]);
+  });
+
+  it('APFC and UPSC CSE accumulate entirely separate PYQ attempt histories, restored exactly on switch-back', () => {
+    useAppStore.getState().addPyqAttempt(pyqAttemptFixture('apfc-a1'));
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addPyqAttempt(pyqAttemptFixture('cse-a1'));
+    useAppStore.getState().addPyqAttempt(pyqAttemptFixture('cse-a2'));
+
+    expect(useAppStore.getState().pyqAttempts.map((a) => a.id).sort()).toEqual(['cse-a1', 'cse-a2']);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().pyqAttempts.map((a) => a.id)).toEqual(['apfc-a1']);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().pyqAttempts.map((a) => a.id).sort()).toEqual(['cse-a1', 'cse-a2']);
+  });
+
+  it('bookmarked PYQs and revision-queue progress are also isolated per workspace', () => {
+    useAppStore.getState().toggleBookmarkedPyq('apfc-pyq-1');
+    useAppStore.getState().recordRevisionCorrect('apfc-pyq-1', '2026-01-08');
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().bookmarkedPyqIds).toEqual([]);
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().bookmarkedPyqIds).toEqual(['apfc-pyq-1']);
+    expect(useAppStore.getState().revisionQueue['apfc-pyq-1'].box).toBe(2);
+  });
+});

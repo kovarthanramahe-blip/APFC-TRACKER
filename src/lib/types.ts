@@ -143,6 +143,36 @@ export interface PYQ extends PracticeQuestion {
   source?: string;
 }
 
+/**
+ * Multi-Workspace OS, Stage 3B-2A design check (proposal only — nothing constructs this type yet,
+ * no existing code reads it, and it is not wired into questionCatalog.ts, mockQuestionPool.ts, or
+ * any session engine). A UPSC CSE Mains question is a descriptive prose prompt scored by an
+ * examiner against marks + a word limit — it has no single objective correct answer. PYQ (via
+ * PracticeQuestion) mandates `options: PYQOption[]` and `correctOptionId: string`, so representing
+ * a Mains question as a PYQ would mean fabricating an answer key that does not exist in reality —
+ * explicitly out of bounds. This is the minimum additive shape a future stage would need instead:
+ * no `options`, no `correctOptionId`, nothing that implies an objective answer. Deliberately NOT
+ * built out further this stage — no Mains content has been imported (see data/pyqUpscCse.ts), so
+ * there is nothing yet for this type to describe; it exists purely to record the design decision
+ * so Stage 3B-2B (or later) doesn't have to re-derive it, and so no one is tempted to force Mains
+ * content into PYQ's MCQ shape in the meantime.
+ */
+export interface DescriptiveExamQuestion {
+  id: string;
+  subject: SubjectColorKey;
+  topicId: string;
+  year: number;
+  /** Free text rather than a closed union — which papers exist varies by exam/workspace (e.g.
+   * 'GS Paper I', 'Essay'), and this type is not APFC/UPSC-specific. */
+  paper: string;
+  question: string;
+  marks?: number;
+  wordLimit?: number;
+  verificationStatus: PYQVerificationStatus;
+  verificationNote?: string;
+  source?: string;
+}
+
 export interface PYQAttempt {
   id: string;
   submittedAt: string;

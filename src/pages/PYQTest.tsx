@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
+import { getPyqBankForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { SUBJECT_COLORS, getLocalDateString, cx, uuid } from '../lib/utils';
@@ -98,6 +99,14 @@ function BookmarkButton({ pyqId }: { pyqId: string }) {
 
 export default function PYQTest() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  // Multi-Workspace OS, Stage 3B-2A — resolves the gate below to real workspace content, but the
+  // rest of this large component deliberately still reads PYQ_BANK/SYLLABUS directly rather than
+  // this resolved value: every line that does is unreachable for a non-APFC workspace (the gate
+  // returns first), and PYQ_BANK/UPSC_CSE_PYQ_BANK are the same reference for 'apfc' either way.
+  // Fully threading the resolver through this file's ~18 internal PYQ_BANK/SYLLABUS call sites
+  // (including two module-level consts computed at import time) is deferred to whenever UPSC CSE
+  // actually has PYQ content to test that against — see data/pyqUpscCse.ts.
+  const pyqBank = useMemo(() => getPyqBankForWorkspace(activeWorkspaceId), [activeWorkspaceId]);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const addPyqAttempt = useAppStore((s) => s.addPyqAttempt);
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
@@ -387,10 +396,10 @@ export default function PYQTest() {
     setReviseChecked(false);
   }
 
-  // Multi-Workspace OS, Stage 3A — PYQ_BANK is APFC's own real data; guarding here (before any
-  // phase branch) covers every screen this page can be in, including a stray workspace switch
-  // mid-test, not just the initial 'select' screen.
-  if (activeWorkspaceId !== 'apfc') {
+  // Multi-Workspace OS, Stage 3B-2A — gate on the resolved pool actually having content, rather
+  // than a hardcoded workspace check; guarding here (before any phase branch) covers every screen
+  // this page can be in, including a stray workspace switch mid-test, not just the 'select' screen.
+  if (pyqBank.length === 0) {
     return (
       <div>
         <PageHeader eyebrow="Previous Year Questions" title="PYQs" />

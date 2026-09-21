@@ -2,9 +2,8 @@ import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Star, ChevronDown, Filter, Search, BookOpenCheck } from 'lucide-react';
 import { QUESTION_BANK } from '../data/questionBank';
-import { PYQ_BANK } from '../data/pyq';
 import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
-import { SYLLABUS } from '../data/syllabus';
+import { getPyqBankForWorkspace, getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
@@ -17,6 +16,7 @@ const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
 
 export default function QuestionBank() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const syllabus = useMemo(() => getSyllabusForWorkspace(activeWorkspaceId), [activeWorkspaceId]);
   const [subject, setSubject] = useState<SubjectColorKey | 'all' | 'starred'>('all');
   const [difficulty, setDifficulty] = useState<'all' | (typeof DIFFICULTIES)[number]>('all');
   const [query, setQuery] = useState('');
@@ -30,12 +30,21 @@ export default function QuestionBank() {
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const toggleBookmarkedPyq = useAppStore((s) => s.toggleBookmarkedPyq);
 
-  // The unified catalog (lib/questionCatalog.ts, Stage 4) over all three existing sources —
-  // PYQ_BANK, QUESTION_BANK, and GENERATED_QUESTION_BANK are all static module-level arrays, so
-  // this is built exactly once, never mutating or reordering any of them. GENERATED_QUESTION_BANK
+  // The unified catalog (lib/questionCatalog.ts, Stage 4) over all three existing sources.
+  // PYQ_BANK/QUESTION_BANK/GENERATED_QUESTION_BANK are all static module-level arrays, so this is
+  // built once per workspace, never mutating or reordering any of them. GENERATED_QUESTION_BANK
   // only ever contains generated questions that already cleared the Stage 6M approval gate
   // (data/generatedQuestionBank.ts) — a draft can never appear here.
-  const catalog = useMemo(() => buildQuestionCatalog(PYQ_BANK, QUESTION_BANK, GENERATED_QUESTION_BANK), []);
+  //
+  // Multi-Workspace OS, Stage 3B-2A — PYQs now resolve per workspace (data/registry.ts).
+  // QUESTION_BANK/GENERATED_QUESTION_BANK stay APFC-only (no UPSC CSE equivalent exists yet — out
+  // of scope for this stage), so a non-APFC workspace gets empty arrays for those two rather than
+  // ever seeing APFC's own practice/generated questions.
+  const pyqBank = useMemo(() => getPyqBankForWorkspace(activeWorkspaceId), [activeWorkspaceId]);
+  const catalog = useMemo(
+    () => buildQuestionCatalog(pyqBank, activeWorkspaceId === 'apfc' ? QUESTION_BANK : [], activeWorkspaceId === 'apfc' ? GENERATED_QUESTION_BANK : []),
+    [pyqBank, activeWorkspaceId],
+  );
 
   const isEntryStarred = (entry: CatalogQuestion) => (isAuthenticPyq(entry) ? bookmarkedPyqIds.includes(entry.id) : starred.includes(entry.id));
 
@@ -50,9 +59,10 @@ export default function QuestionBank() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog, subject, difficulty, query, starred, bookmarkedPyqIds]);
 
-  // Multi-Workspace OS, Stage 3A — PYQ_BANK/QUESTION_BANK/GENERATED_QUESTION_BANK are APFC's own
-  // real data; showing them under a different workspace's branding would fabricate content.
-  if (activeWorkspaceId !== 'apfc') {
+  // Multi-Workspace OS, Stage 3B-2A — gate on there actually being content to show (catalog is
+  // built from workspace-resolved sources above), rather than a hardcoded workspace check — this
+  // way a future workspace with real PYQs "just works" here with no further page changes.
+  if (catalog.length === 0) {
     return (
       <div>
         <PageHeader eyebrow="Practice Bank" title="Question Bank" />
@@ -90,7 +100,7 @@ export default function QuestionBank() {
           <FilterChip active={subject === 'starred'} onClick={() => setSubject('starred')}>
             <Star className="h-3 w-3" /> Starred ({starred.length + bookmarkedPyqIds.length})
           </FilterChip>
-          {SYLLABUS.map((s) => (
+          {syllabus.map((s) => (
             <FilterChip key={s.id} active={subject === s.colorKey} onClick={() => setSubject(s.colorKey)}>
               {s.shortTitle}
             </FilterChip>
