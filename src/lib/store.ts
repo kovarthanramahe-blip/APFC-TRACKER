@@ -24,6 +24,7 @@ import {
   type RelationshipEndpoint,
   type RelationshipType,
 } from './contentRelationships';
+import type { RepositoryImportPlan } from './repositoryImport';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -154,6 +155,16 @@ interface AppState {
   contentRelationships: ContentRelationship[];
   addContentRelationship: (input: { source: RelationshipEndpoint; target: RelationshipEndpoint; type: RelationshipType }) => CreateRelationshipResult;
   deleteContentRelationship: (id: string) => void;
+
+  // Repository Import/Restore — applies an already-built, already-validated RepositoryImportPlan
+  // (lib/repositoryImport.ts's buildRepositoryImportPlan: validation, collision detection, id
+  // remapping, and which relationships to skip have ALL already happened by the time this is
+  // called) as a single merge: every array in the plan is simply prepended to its matching field,
+  // exactly like addImportedContent/upsertNote/addContentRelationship already prepend their own new
+  // items. This action makes no decisions of its own, so there is nothing here that could leave a
+  // half-applied import — either the whole plan merges in this one set() call, or (the user
+  // cancels, so this is never called) nothing changes at all.
+  applyRepositoryImportPlan: (plan: RepositoryImportPlan) => void;
 
   // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
   // for now — there is still no switcher UI (Stage 2 makes the mechanism real and tested; a later
@@ -605,6 +616,13 @@ export const useAppStore = create<AppState>()(
         return result;
       },
       deleteContentRelationship: (id) => set((state) => ({ contentRelationships: state.contentRelationships.filter((r) => r.id !== id) })),
+
+      applyRepositoryImportPlan: (plan) =>
+        set((state) => ({
+          notes: [...plan.notesToAdd, ...state.notes],
+          importedContent: [...plan.importedContentToAdd, ...state.importedContent],
+          contentRelationships: [...plan.relationshipsToAdd, ...state.contentRelationships],
+        })),
 
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
       inactiveWorkspaceOwnedData: {},

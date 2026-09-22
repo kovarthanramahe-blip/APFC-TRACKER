@@ -215,7 +215,15 @@ describe('Repository Export — empty repository export', () => {
     const state = useAppStore.getState();
     expect(() => buildRepositoryExportSnapshot(state.importedContent, state.notes, state.contentRelationships, 'phd_research', 'T')).not.toThrow();
     const snapshot = buildRepositoryExportSnapshot(state.importedContent, state.notes, state.contentRelationships, 'phd_research', 'T');
-    expect(snapshot).toEqual({ workspaceId: 'phd_research', exportedAt: 'T', importedContent: [], notes: [], relationships: [] });
+    expect(snapshot).toEqual({
+      kind: 'repository-export',
+      schemaVersion: 1,
+      workspaceId: 'phd_research',
+      exportedAt: 'T',
+      importedContent: [],
+      notes: [],
+      relationships: [],
+    });
     expect(() => serializeRepositoryExportSnapshot(snapshot)).not.toThrow();
     expect(JSON.parse(serializeRepositoryExportSnapshot(snapshot))).toEqual(snapshot);
   });

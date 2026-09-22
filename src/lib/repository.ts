@@ -428,7 +428,21 @@ export { collectImportedContentTags, collectImportedContentCategories };
 // yet.
 // ============================================================================================
 
+/** A stable marker distinguishing a repository export from any other JSON file — the first thing
+ * lib/repositoryImport.ts's validator checks, before trusting anything else in the file. */
+export const REPOSITORY_EXPORT_KIND = 'repository-export' as const;
+
+/** Bumped only if RepositoryExportSnapshot's shape changes in a way that isn't safely readable by
+ * an older validator — added by the Repository Import/Restore stage specifically so a backup file
+ * can be safely validated before any of its content is trusted (see lib/repositoryImport.ts). This
+ * is the smallest backwards-compatible addition to the existing export shape: every field the
+ * previous stage already produced (workspaceId, exportedAt, importedContent, notes, relationships)
+ * is unchanged, this and `kind` are purely additive. */
+export const REPOSITORY_EXPORT_SCHEMA_VERSION = 1 as const;
+
 export interface RepositoryExportSnapshot {
+  kind: typeof REPOSITORY_EXPORT_KIND;
+  schemaVersion: typeof REPOSITORY_EXPORT_SCHEMA_VERSION;
   workspaceId: WorkspaceKind;
   exportedAt: string;
   importedContent: ImportedContent[];
@@ -453,6 +467,8 @@ export function buildRepositoryExportSnapshot(
   exportedAt: string = new Date().toISOString(),
 ): RepositoryExportSnapshot {
   return {
+    kind: REPOSITORY_EXPORT_KIND,
+    schemaVersion: REPOSITORY_EXPORT_SCHEMA_VERSION,
     workspaceId,
     exportedAt,
     importedContent: [...listImportedContentForWorkspace(importedContent, workspaceId)].sort((a, b) => a.id.localeCompare(b.id)),

@@ -415,7 +415,13 @@ describe('repository — export serialisation', () => {
 
   it('never touches lib/store.ts\'s existing exportAllData/importAllData format — produces its own separate shape', () => {
     const snapshot = buildRepositoryExportSnapshot([], [], [], 'phd_research', 'T');
-    expect(Object.keys(snapshot).sort()).toEqual(['exportedAt', 'importedContent', 'notes', 'relationships', 'workspaceId'].sort());
+    expect(Object.keys(snapshot).sort()).toEqual(['exportedAt', 'importedContent', 'kind', 'notes', 'relationships', 'schemaVersion', 'workspaceId'].sort());
+  });
+
+  it('carries a stable kind marker and schema version — the smallest backwards-compatible addition needed for the Repository Import/Restore stage to validate a backup before trusting it', () => {
+    const snapshot = buildRepositoryExportSnapshot([], [], [], 'phd_research', 'T');
+    expect(snapshot.kind).toBe('repository-export');
+    expect(snapshot.schemaVersion).toBe(1);
   });
 });
 
