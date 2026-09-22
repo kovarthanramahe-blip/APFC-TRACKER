@@ -3,12 +3,16 @@ import {
   UPSC_CSE_PRELIMS_PYQ_BANK,
   UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50_SUMMARY,
   UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100_SUMMARY,
+  UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_STRUCTURE_ISSUES,
+  UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_ATTACH_RESULT,
 } from './pyqUpscCsePrelims';
 import { UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50 } from './upscCsePrelimsPyqBatch2026Q1Q50Raw';
 import { UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100 } from './upscCsePrelimsPyqBatch2026Q51Q100Raw';
+import { UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A } from './upscCsePrelimsAnswerKey2026SetARaw';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from './upscCsePrelimsSyllabus';
 import { getMicrosyllabusItemById } from '../lib/upscCseSyllabus';
 import { buildUpscCsePrelimsBatchRecords, mergeUpscCsePrelimsPyqRecords } from '../lib/upscCsePrelimsPyqBatchImport';
+import { validateAnswerKeyStructure, attachUpscCsePrelimsAnswerKey } from '../lib/upscCsePrelimsAnswerKeyAttach';
 import type { PYQOption } from '../lib/types';
 import { SYLLABUS } from './syllabus';
 import { PYQ_BANK } from './pyq';
@@ -75,14 +79,121 @@ describe('UPSC CSE Prelims 2026 — exact question/option preservation across bo
   });
 });
 
-describe('UPSC CSE Prelims 2026 — no answer key', () => {
-  it('correctOptionId is absent (never fabricated) on every one of the 100 records', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.correctOptionId === undefined)).toBe(true);
-  });
-
-  it('both batch summaries report no_answer_key_supplied', () => {
+describe('UPSC CSE Prelims 2026 — Q1-50/Q51-100 batches themselves carried no answer key', () => {
+  it('both batch summaries report no_answer_key_supplied — the RAW batches never included one (the answer key below is a separate, later attachment)', () => {
     expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50_SUMMARY.answerKeyStatus).toBe('no_answer_key_supplied');
     expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100_SUMMARY.answerKeyStatus).toBe('no_answer_key_supplied');
+  });
+});
+
+describe('UPSC CSE Prelims 2026 — Set A answer key: structural validation', () => {
+  it('the persisted structure-issues export is empty — exactly 100 entries, Q1-Q100, only A/B/C/D, no missing/duplicate numbers', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_STRUCTURE_ISSUES).toEqual([]);
+  });
+
+  it('the raw answer-key file itself has exactly 100 entries covering Q1-Q100 with no duplicates', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey).toHaveLength(100);
+    const numbers = UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => e.questionNumber).sort((a, b) => a - b);
+    expect(numbers).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+  });
+
+  it('every entry\'s correctOptionId is one of a/b/c/d', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.every((e) => /^[a-dA-D]$/.test(e.correctOptionId))).toBe(true);
+  });
+
+  it('validateAnswerKeyStructure independently confirms zero issues against the Q1-Q100 range', () => {
+    const issues = validateAnswerKeyStructure(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A, { min: 1, max: 100 });
+    expect(issues).toEqual([]);
+  });
+
+  it('detects a wrong entry count (a truncated key) as an explicit issue rather than silently accepting it', () => {
+    const truncated = { ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A, answerKey: UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.slice(0, 99) };
+    const issues = validateAnswerKeyStructure(truncated, { min: 1, max: 100 });
+    expect(issues.some((i) => i.reason === 'wrong_entry_count')).toBe(true);
+    expect(issues.some((i) => i.reason === 'missing_question_number' && i.questionNumber === 100)).toBe(true);
+  });
+
+  it('detects a duplicate question number as an explicit issue', () => {
+    const duplicated = {
+      ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A,
+      answerKey: [...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.slice(0, 99), { questionNumber: 1, correctOptionId: 'a' }],
+    };
+    const issues = validateAnswerKeyStructure(duplicated, { min: 1, max: 100 });
+    expect(issues.some((i) => i.reason === 'duplicate_question_number' && i.questionNumber === 1)).toBe(true);
+    expect(issues.some((i) => i.reason === 'missing_question_number' && i.questionNumber === 100)).toBe(true);
+  });
+
+  it('detects an invalid option letter (outside A-D) as an explicit issue', () => {
+    const bad = {
+      ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A,
+      answerKey: UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => (e.questionNumber === 1 ? { ...e, correctOptionId: 'e' } : e)),
+    };
+    const issues = validateAnswerKeyStructure(bad, { min: 1, max: 100 });
+    expect(issues.some((i) => i.reason === 'invalid_option_letter' && i.questionNumber === 1)).toBe(true);
+  });
+});
+
+describe('UPSC CSE Prelims 2026 — Set A answer key: Q1-Q100 attachment', () => {
+  it('all 100 entries attached, zero skipped', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_ATTACH_RESULT.attached).toBe(100);
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_ATTACH_RESULT.skipped).toEqual([]);
+  });
+
+  it('every record in the bank now carries a correctOptionId', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.correctOptionId !== undefined)).toBe(true);
+  });
+
+  it('every record\'s correctOptionId matches the supplied answer key exactly, by question number', () => {
+    const byNumber = new Map(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => [e.questionNumber, e.correctOptionId]));
+    for (const record of UPSC_CSE_PRELIMS_PYQ_BANK) {
+      expect(record.correctOptionId).toBe(byNumber.get(record.questionNumber!));
+    }
+  });
+
+  it('every record\'s correctOptionId matches an existing option id for that exact question', () => {
+    for (const record of UPSC_CSE_PRELIMS_PYQ_BANK) {
+      expect(record.options.some((o) => o.id === record.correctOptionId)).toBe(true);
+    }
+  });
+
+  it('every record\'s answerKeySet is "A", preserving the Set-A designation', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.answerKeySet === 'A')).toBe(true);
+  });
+
+  it('does not touch mappingStatus/microsyllabusId — still 20 mapped, 80 needs_review after attaching answers', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'mapped')).toHaveLength(20);
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'needs_review')).toHaveLength(80);
+  });
+
+  it('does not touch question text, options, provenance, year, or paper', () => {
+    const allRaw = [...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50.questions, ...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100.questions];
+    for (const source of allRaw) {
+      const record = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.questionNumber === source.questionNumber)!;
+      expect(record.question).toBe(source.question);
+      expect(record.options).toEqual(source.options);
+      expect(record.year).toBe(2026);
+      expect(record.paper).toBe('GS Paper I');
+    }
+  });
+
+  it('an answer whose letter does not match any real option for that question is never force-attached (reported in skipped instead)', () => {
+    const badAnswerKey = {
+      ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A,
+      answerKey: UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => (e.questionNumber === 1 ? { ...e, correctOptionId: 'z' } : e)),
+    };
+    const preAnswerBank = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => ({ ...r, correctOptionId: undefined, answerKeySet: undefined }));
+    const result = attachUpscCsePrelimsAnswerKey(preAnswerBank, badAnswerKey);
+    expect(result.attached).toBe(99);
+    expect(result.skipped).toEqual([{ questionNumber: 1, reason: expect.stringContaining('"z"') }]);
+    const q1 = result.updated.find((r) => r.questionNumber === 1)!;
+    expect(q1.correctOptionId).toBeUndefined();
+  });
+
+  it('an answer key for a question number outside the bank is reported, never silently dropped', () => {
+    const preAnswerBank = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => ({ ...r, correctOptionId: undefined, answerKeySet: undefined }));
+    const extraEntryKey = { ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A, answerKey: [...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey, { questionNumber: 101, correctOptionId: 'a' }] };
+    const result = attachUpscCsePrelimsAnswerKey(preAnswerBank, extraEntryKey);
+    expect(result.skipped.some((s) => s.questionNumber === 101)).toBe(true);
   });
 });
 
@@ -162,10 +273,13 @@ describe('UPSC CSE Prelims 2026 — compatible with the existing interactive MCQ
     }
   });
 
-  // The one field PracticeQuestion still mandates that these records cannot honestly supply is
-  // correctOptionId — deliberately absent throughout (see "no answer key" above). Once a real
-  // answer key becomes available, a record here would need only correctOptionId (and a
-  // SubjectColorKey/topicId, which are APFC-specific and never assigned here) to become one.
+  it('correctOptionId — the one field these records previously could not honestly supply — is now present on every record, sourced only from the supplied Set A answer key', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => typeof r.correctOptionId === 'string')).toBe(true);
+  });
+
+  // PracticeQuestion still mandates `subject: SubjectColorKey` and `topicId` (both APFC-specific —
+  // see lib/upscCsePyqImport.ts's own header) and `explanation`, none of which this task adds or
+  // ever assigns here; that remains the one gap left between UpscCsePrelimsBatchPyq and PYQ itself.
 });
 
 describe('UPSC CSE Prelims 2026 — UPSC workspace isolation', () => {

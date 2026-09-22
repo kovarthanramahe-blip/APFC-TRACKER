@@ -97,6 +97,10 @@ export interface UpscCsePrelimsBatchPyq extends UpscCsePrelimsPyq {
    * when mappingStatus is 'mapped'. Never a guessed/best-effort id. */
   microsyllabusId?: string;
   mappingStatus: MicrosyllabusMappingStatus;
+  /** Which answer-key SET (e.g. "A") this record's correctOptionId was attached from — see
+   * lib/upscCsePrelimsAnswerKeyAttach.ts. Absent whenever correctOptionId itself is absent; never
+   * set independently of it. */
+  answerKeySet?: string;
 }
 
 // ============================================================================================
