@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -23,6 +23,7 @@ import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryN
 import { ImportToRepositoryModal } from '../components/repository/ImportToRepositoryModal';
 import { ExportRepositoryModal } from '../components/repository/ExportRepositoryModal';
 import { ImportRepositoryBackupModal } from '../components/repository/ImportRepositoryBackupModal';
+import { UpscCsePyqImportModal } from '../components/upscCse/UpscCsePyqImportModal';
 
 // Global Repository UI — a single, read-only browse/search surface across everything
 // lib/repository.ts's foundation already knows how to discover (Notes + every registered
@@ -309,6 +310,7 @@ export default function Repository() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportBackupModal, setShowImportBackupModal] = useState(false);
+  const [showUpscPyqImportModal, setShowUpscPyqImportModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<RepositoryEntry | null>(null);
   const [deletingEntry, setDeletingEntry] = useState<RepositoryEntry | null>(null);
 
@@ -393,6 +395,11 @@ export default function Repository() {
             <Button onClick={() => setShowImportModal(true)}>
               <Upload className="h-4 w-4" /> Import to Repository
             </Button>
+            {activeWorkspaceId === 'upsc_cse' && (
+              <Button variant="secondary" onClick={() => setShowUpscPyqImportModal(true)}>
+                <FileQuestion className="h-4 w-4" /> Import UPSC Prelims PYQ Source
+              </Button>
+            )}
           </div>
         }
       />
@@ -400,6 +407,7 @@ export default function Repository() {
       {showImportModal && <ImportToRepositoryModal onClose={() => setShowImportModal(false)} />}
       {showExportModal && <ExportRepositoryModal onClose={() => setShowExportModal(false)} />}
       {showImportBackupModal && <ImportRepositoryBackupModal onClose={() => setShowImportBackupModal(false)} />}
+      {showUpscPyqImportModal && <UpscCsePyqImportModal onClose={() => setShowUpscPyqImportModal(false)} />}
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
