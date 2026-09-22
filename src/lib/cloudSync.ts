@@ -44,6 +44,9 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     // Import-First Content Repository foundation — imported non-note content (question banks,
     // PYQs, research documents, etc.) is just as real as any other field here.
     ((data.importedContent as unknown[]) ?? []).length,
+    // Source <-> Research Document Linking — a relationship between two content items is real user
+    // data too, same reasoning as importedContent above.
+    ((data.contentRelationships as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }

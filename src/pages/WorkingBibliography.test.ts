@@ -22,6 +22,7 @@ import {
   parseAuthorsInput,
 } from '../lib/bibliography';
 import { getContentTags, getContentCategory, parseTagsInput } from '../lib/importedContentRepository';
+import { getOutgoingRelationships, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and PhdResearch.test.ts for the established convention). These tests
@@ -48,6 +49,7 @@ function fullReset() {
     personalStudyPlanTasks: [],
     revisionQueue: createRevisionQueue(),
     importedContent: [],
+    contentRelationships: [],
   });
 }
 
@@ -367,5 +369,83 @@ describe('existing research-document flow regression', () => {
     const all = useAppStore.getState().importedContent;
     expect(all).toHaveLength(1);
     expect(all[0].contentType).toBe('research_document');
+  });
+});
+
+// Source <-> Research Document Linking — this page (bibliography record -> research document) is
+// where a link is CREATED (pages/PhdResearch.tsx only displays/unlinks — see PhdResearch.test.ts).
+describe('bibliography -> research document linking', () => {
+  beforeEach(fullReset);
+
+  function addResearchDocument(title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const preview = buildImportPreview({ name: `${title}.md` }, { format: 'markdown', text: `# ${title}` });
+    const content = confirmImportedContent(preview, { workspaceId: 'phd_research', contentType: 'research_document', title });
+    useAppStore.getState().addImportedContent(content);
+    return content;
+  }
+
+  it('linking a bibliography record to a research document creates a relationship with the record as source', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = addResearchDocument('Chapter 1 Draft');
+    const record = addManualRecord({ title: 'Key Source' });
+
+    const result = useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc.id, type: 'cites' });
+    expect(result.status).toBe('ok');
+
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id);
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0].targetId).toBe(doc.id);
+    expect(outgoing[0].type).toBe('cites');
+    expect(RELATIONSHIP_TYPE_LABELS[outgoing[0].type]).toBe('Cites');
+  });
+
+  it('supports every relationship type (cites, supports, related_to)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc1 = addResearchDocument('Doc 1');
+    const doc2 = addResearchDocument('Doc 2');
+    const doc3 = addResearchDocument('Doc 3');
+    const record = addManualRecord({ title: 'Multi-linked Source' });
+
+    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc1.id, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc2.id, type: 'supports' });
+    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc3.id, type: 'related_to' });
+
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id);
+    expect(outgoing.map((r) => r.type).sort()).toEqual(['cites', 'related_to', 'supports']);
+  });
+
+  it('linking twice to the same document with the same type is rejected as a duplicate', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = addResearchDocument('Doc');
+    const record = addManualRecord({ title: 'Source' });
+
+    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc.id, type: 'cites' });
+    const second = useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc.id, type: 'cites' });
+    expect(second).toMatchObject({ status: 'error', reason: 'duplicate' });
+  });
+
+  it('a research document created in a different workspace cannot be linked (runtime rejection, never inferred)', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const apfcDoc = addImportedApfcDoc();
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Source' });
+
+    const result = useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: apfcDoc.id, type: 'cites' });
+    expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+
+    function addImportedApfcDoc() {
+      const preview = buildImportPreview({ name: 'apfc-note.md' }, { format: 'markdown', text: '# APFC note' });
+      const content = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'note' });
+      useAppStore.getState().addImportedContent(content);
+      return content;
+    }
+  });
+
+  it('no relationship is ever created automatically just by importing/creating content — only an explicit addContentRelationship call does', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addResearchDocument('Some Document');
+    addManualRecord({ title: 'Some Source' });
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
   });
 });

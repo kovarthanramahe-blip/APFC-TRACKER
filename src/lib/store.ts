@@ -17,6 +17,7 @@ import { getLocalDateString } from './utils';
 import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
 import type { ImportedContent } from './contentImport';
+import { createRelationship as createContentRelationship, type ContentRelationship, type CreateRelationshipResult, type RelationshipType } from './contentRelationships';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -126,7 +127,22 @@ interface AppState {
   importedContent: ImportedContent[];
   addImportedContent: (item: ImportedContent) => void;
   updateImportedContent: (id: string, updates: Partial<Omit<ImportedContent, 'id' | 'workspaceId'>>) => void;
+  // Cascade-deletes any relationship referencing this id too (see contentRelationships below) —
+  // otherwise a deleted item would leave dangling relationships pointing at nothing.
   deleteImportedContent: (id: string) => void;
+
+  // Source <-> Research Document Linking: a minimal, generic relationship between two
+  // ImportedContent items, workspace-scoped exactly like importedContent itself (archived/restored
+  // by setActiveWorkspaceId's swap, never per-item filtered) — see lib/contentRelationships.ts for
+  // the full model and its extensible RelationshipType union. `addContentRelationship` stamps
+  // `workspaceId` with the CURRENT activeWorkspaceId (never trusting a caller-supplied value, same
+  // discipline as addImportedContent) and validates sourceId/targetId against the CURRENT
+  // workspace's own `importedContent` ids — the mechanism that actually enforces "APFC relationships
+  // cannot reference UPSC/PhD content" etc. at runtime, returning a typed rejection instead of
+  // throwing or silently doing nothing.
+  contentRelationships: ContentRelationship[];
+  addContentRelationship: (input: { sourceId: string; targetId: string; type: RelationshipType }) => CreateRelationshipResult;
+  deleteContentRelationship: (id: string) => void;
 
   // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
   // for now — there is still no switcher UI (Stage 2 makes the mechanism real and tested; a later
@@ -175,6 +191,7 @@ interface WorkspaceOwnedData {
   personalStudyPlanTasks: PersonalPlanTask[];
   revisionQueue: RevisionQueue;
   importedContent: ImportedContent[];
+  contentRelationships: ContentRelationship[];
 }
 
 function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
@@ -193,6 +210,7 @@ function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
     personalStudyPlanTasks: [],
     revisionQueue: createRevisionQueue(),
     importedContent: [],
+    contentRelationships: [],
   };
 }
 
@@ -248,7 +266,12 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // user may already have archived snapshots there from using the Stage 3A workspace switcher) —
 // missing it in the archive would mean restoring a workspace via setActiveWorkspaceId later
 // produces a state with importedContent === undefined instead of [].
-export const APP_STORE_PERSIST_VERSION = 4;
+//
+// Version 5 (Source <-> Research Document Linking) adds `contentRelationships`
+// (ContentRelationship[] — see lib/contentRelationships.ts) the exact same way: another brand-new,
+// workspace-owned field with nothing pre-existing to migrate, defaulted to `[]` at both the
+// top-level active field and inside every inactiveWorkspaceOwnedData snapshot.
+export const APP_STORE_PERSIST_VERSION = 5;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -264,20 +287,28 @@ function stampWorkspaceIdOnObject(value: unknown): unknown {
   return { ...value, workspaceId: (value as { workspaceId?: WorkspaceKind }).workspaceId ?? DEFAULT_WORKSPACE_ID };
 }
 
-function withImportedContentDefault(value: unknown): unknown {
+/** Backfills `importedContent: []` and `contentRelationships: []` onto a workspace-owned data
+ * snapshot that predates one or both fields — used for both the active top-level state and every
+ * archived snapshot inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
+function withWorkspaceOwnedDefaults(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const snapshot = value as Record<string, unknown>;
-  return { ...snapshot, importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [] };
+  return {
+    ...snapshot,
+    importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [],
+    contentRelationships: Array.isArray(snapshot.contentRelationships) ? snapshot.contentRelationships : [],
+  };
 }
 
-/** Backfills `importedContent: []` onto every snapshot inside an inactiveWorkspaceOwnedData
- * archive (see withImportedContentDefault) — not just the top-level active fields. */
-function withImportedContentDefaultInArchive(rawArchive: unknown): Record<string, unknown> {
+/** Backfills `importedContent: []`/`contentRelationships: []` onto every snapshot inside an
+ * inactiveWorkspaceOwnedData archive (see withWorkspaceOwnedDefaults) — not just the top-level
+ * active fields. */
+function withWorkspaceOwnedDefaultsInArchive(rawArchive: unknown): Record<string, unknown> {
   if (!rawArchive || typeof rawArchive !== 'object' || Array.isArray(rawArchive)) return {};
   const archive = rawArchive as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(archive)) {
-    result[key] = withImportedContentDefault(archive[key]);
+    result[key] = withWorkspaceOwnedDefaults(archive[key]);
   }
   return result;
 }
@@ -301,8 +332,9 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     personalStudyPlanTasks: stampWorkspaceIdOnArray(state.personalStudyPlanTasks),
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
     importedContent: Array.isArray(state.importedContent) ? state.importedContent : [],
+    contentRelationships: Array.isArray(state.contentRelationships) ? state.contentRelationships : [],
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
-    inactiveWorkspaceOwnedData: withImportedContentDefaultInArchive(state.inactiveWorkspaceOwnedData),
+    inactiveWorkspaceOwnedData: withWorkspaceOwnedDefaultsInArchive(state.inactiveWorkspaceOwnedData),
   };
 }
 
@@ -501,7 +533,30 @@ export const useAppStore = create<AppState>()(
             return { ...c, ...safeUpdates };
           }),
         })),
-      deleteImportedContent: (id) => set((state) => ({ importedContent: state.importedContent.filter((c) => c.id !== id) })),
+      deleteImportedContent: (id) =>
+        set((state) => ({
+          importedContent: state.importedContent.filter((c) => c.id !== id),
+          // Cascade: a relationship pointing at content that no longer exists is never left
+          // dangling — see contentRelationships below.
+          contentRelationships: state.contentRelationships.filter((r) => r.sourceId !== id && r.targetId !== id),
+        })),
+
+      contentRelationships: [],
+      addContentRelationship: (input) => {
+        const state = get();
+        const validContentIds = new Set(state.importedContent.map((c) => c.id));
+        const result = createContentRelationship(state.contentRelationships, validContentIds, {
+          workspaceId: state.activeWorkspaceId,
+          sourceId: input.sourceId,
+          targetId: input.targetId,
+          type: input.type,
+        });
+        if (result.status === 'ok') {
+          set({ contentRelationships: [result.relationship, ...state.contentRelationships] });
+        }
+        return result;
+      },
+      deleteContentRelationship: (id) => set((state) => ({ contentRelationships: state.contentRelationships.filter((r) => r.id !== id) })),
 
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
       inactiveWorkspaceOwnedData: {},
@@ -532,6 +587,7 @@ export const useAppStore = create<AppState>()(
             personalStudyPlanTasks: state.personalStudyPlanTasks,
             revisionQueue: state.revisionQueue,
             importedContent: state.importedContent,
+            contentRelationships: state.contentRelationships,
           };
           const incoming = state.inactiveWorkspaceOwnedData[id] ?? emptyWorkspaceOwnedData();
           return {
@@ -557,6 +613,7 @@ export const useAppStore = create<AppState>()(
           personalStudyPlanTasks: [],
           revisionQueue: createRevisionQueue(),
           importedContent: [],
+          contentRelationships: [],
           // Multi-Workspace OS, Stage 2 — "reset ALL data" means every workspace's data, not just
           // the active one's; a no-op today since nothing has ever populated this archive.
           inactiveWorkspaceOwnedData: {},
@@ -589,6 +646,7 @@ export function exportAllData() {
     personalStudyPlanTasks: state.personalStudyPlanTasks,
     revisionQueue: state.revisionQueue,
     importedContent: state.importedContent,
+    contentRelationships: state.contentRelationships,
     // Multi-Workspace OS, Stage 2 — activeWorkspaceId travels WITH the flat fields above (notes,
     // completedTopics, etc.) because they only mean "this workspace's data" together with it; and
     // every OTHER workspace's archived data is equally real user data (see AppState's doc-comment)
@@ -619,6 +677,7 @@ export function importAllData(json: string) {
     personalStudyPlanTasks: data.personalStudyPlanTasks ?? [],
     revisionQueue: data.revisionQueue ?? createRevisionQueue(),
     importedContent: data.importedContent ?? [],
+    contentRelationships: data.contentRelationships ?? [],
     activeWorkspaceId: (data.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: data.inactiveWorkspaceOwnedData ?? {},
   });

@@ -15,6 +15,7 @@ import {
   getContentCategory,
   parseTagsInput,
 } from '../lib/importedContentRepository';
+import { getIncomingRelationships, getOutgoingRelationships } from '../lib/contentRelationships';
 
 // This page has no rendering test here (the project has no React Testing Library / DOM test
 // environment — see StudyPlan.test.ts and every other *.test.ts file in this repo, which all test
@@ -43,6 +44,7 @@ function fullReset() {
     personalStudyPlanTasks: [],
     revisionQueue: createRevisionQueue(),
     importedContent: [],
+    contentRelationships: [],
   });
 }
 
@@ -340,5 +342,81 @@ describe('PhD Research page — search/filter respects workspace isolation', () 
 
     useAppStore.getState().setActiveWorkspaceId('phd_research');
     expect(queryImportedContent(useAppStore.getState().importedContent, { search: 'fieldwork' }).map((i) => i.id)).toEqual([phdDoc.id]);
+  });
+});
+
+// Source <-> Research Document Linking — this page only DISPLAYS linked bibliography records and
+// unlinks them; creating a link happens on the Working Bibliography page (see
+// WorkingBibliography.test.ts's "bibliography -> research document linking" describe block).
+describe('research document — linked sources / bibliography display + unlinking', () => {
+  beforeEach(fullReset);
+
+  function addBibliographyRecord(title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview({ title }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(content);
+    return content;
+  }
+
+  it('a research document shows every bibliography record linked to it, with its relationship type', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Thesis Chapter' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const source = addBibliographyRecord('Key Reference');
+
+    useAppStore.getState().addContentRelationship({ sourceId: source.id, targetId: doc.id, type: 'supports' });
+
+    const incoming = getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id);
+    expect(incoming).toHaveLength(1);
+    expect(incoming[0].sourceId).toBe(source.id);
+    expect(incoming[0].type).toBe('supports');
+  });
+
+  it('a research document with no links shows none, without throwing', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Unlinked Chapter' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    expect(() => getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id)).not.toThrow();
+    expect(getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id)).toEqual([]);
+  });
+
+  it('unlinking removes the relationship, updating both the document\'s incoming view and the source\'s outgoing view', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Chapter' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const source = addBibliographyRecord('Source');
+    const result = useAppStore.getState().addContentRelationship({ sourceId: source.id, targetId: doc.id, type: 'cites' });
+    if (result.status !== 'ok') throw new Error('expected ok');
+
+    useAppStore.getState().deleteContentRelationship(result.relationship.id);
+
+    expect(getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id)).toEqual([]);
+    expect(getOutgoingRelationships(useAppStore.getState().contentRelationships, source.id)).toEqual([]);
+  });
+
+  it('workspace isolation: a link visible in phd_research disappears after switching workspace', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Chapter' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const source = addBibliographyRecord('Source');
+    useAppStore.getState().addContentRelationship({ sourceId: source.id, targetId: doc.id, type: 'cites' });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id)).toHaveLength(1);
+  });
+
+  it('regression: existing research-document search/filter is unaffected by the presence of a linked bibliography record', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Fieldwork Notes' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const source = addBibliographyRecord('Source');
+    useAppStore.getState().addContentRelationship({ sourceId: source.id, targetId: doc.id, type: 'cites' });
+
+    const researchDocuments = selectImportedContentByType(useAppStore.getState().importedContent, 'research_document');
+    expect(researchDocuments.map((d) => d.id)).toEqual([doc.id]);
+    expect(queryImportedContent(researchDocuments, { search: 'Fieldwork' }).map((d) => d.id)).toEqual([doc.id]);
   });
 });

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal } from 'lucide-react';
+import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -9,6 +9,7 @@ import {
   buildImportPreview,
   confirmImportedContent,
   selectImportedContentByType,
+  getImportedContentById,
   SUPPORTED_IMPORT_EXTENSIONS,
   IMPORT_FORMAT_LABELS,
   type ImportPreview,
@@ -24,6 +25,7 @@ import {
   getContentCategory,
   parseTagsInput,
 } from '../lib/importedContentRepository';
+import { RELATIONSHIP_TYPE_LABELS, getIncomingRelationships, type ContentRelationship } from '../lib/contentRelationships';
 
 // PhD Research workspace repository — the import-first FILE -> EXTRACT -> PREVIEW -> CONFIRM ->
 // SAVE -> DISPLAY pipeline (lib/contentImport.ts), plus repository organisation (search, tags,
@@ -48,6 +50,8 @@ export default function PhdResearch() {
   const addImportedContent = useAppStore((s) => s.addImportedContent);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
+  const contentRelationships = useAppStore((s) => s.contentRelationships);
+  const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -58,12 +62,14 @@ export default function PhdResearch() {
   const [previewCategory, setPreviewCategory] = useState('');
   const [viewing, setViewing] = useState<ImportedContent | null>(null);
   const [editing, setEditing] = useState<ImportedContent | null>(null);
+  const [linksDoc, setLinksDoc] = useState<ImportedContent | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
 
   const researchDocuments = useMemo(() => selectImportedContentByType(importedContent, 'research_document'), [importedContent]);
+  const bibliographyRecords = useMemo(() => selectImportedContentByType(importedContent, 'bibliography'), [importedContent]);
   const availableTags = useMemo(() => collectImportedContentTags(researchDocuments), [researchDocuments]);
   const availableCategories = useMemo(() => collectImportedContentCategories(researchDocuments), [researchDocuments]);
   const filteredDocuments = useMemo(
@@ -303,6 +309,14 @@ export default function PhdResearch() {
                   <Button variant="secondary" size="sm" onClick={() => setEditing(doc)}>
                     <Pencil className="h-3.5 w-3.5" /> Edit tags
                   </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setLinksDoc(doc)}>
+                    <Link2 className="h-3.5 w-3.5" /> Sources
+                    {getIncomingRelationships(contentRelationships, doc.id).length > 0 && (
+                      <span className="ml-0.5 rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">
+                        {getIncomingRelationships(contentRelationships, doc.id).length}
+                      </span>
+                    )}
+                  </Button>
                   <Button variant="danger" size="sm" onClick={() => deleteImportedContent(doc.id)}>
                     <Trash2 className="h-3.5 w-3.5" /> Delete
                   </Button>
@@ -320,6 +334,15 @@ export default function PhdResearch() {
           existingCategories={availableCategories}
           onCancel={() => setEditing(null)}
           onSave={handleSaveMetadata}
+        />
+      )}
+      {linksDoc && (
+        <LinkedSourcesModal
+          document={linksDoc}
+          bibliographyRecords={bibliographyRecords}
+          relationships={contentRelationships}
+          onUnlink={(relationshipId) => deleteContentRelationship(relationshipId)}
+          onClose={() => setLinksDoc(null)}
         />
       )}
     </div>
@@ -524,6 +547,74 @@ function EditMetadataModal({
             Cancel
           </Button>
           <Button onClick={() => onSave(tagsInput, categoryInput)}>Save</Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Source <-> Research Document Linking, display side. Read-only + unlink only — creating a link
+// happens exclusively from the Working Bibliography record's own "Linked Research Documents"
+// modal (pages/WorkingBibliography.tsx), matching exactly what this stage scoped each page to.
+function LinkedSourcesModal({
+  document,
+  bibliographyRecords,
+  relationships,
+  onUnlink,
+  onClose,
+}: {
+  document: ImportedContent;
+  bibliographyRecords: ImportedContent[];
+  relationships: ContentRelationship[];
+  onUnlink: (relationshipId: string) => void;
+  onClose: () => void;
+}) {
+  const linked = getIncomingRelationships(relationships, document.id)
+    .map((relationship) => ({ relationship, source: getImportedContentById(bibliographyRecords, relationship.sourceId) }))
+    .filter((entry): entry is { relationship: (typeof relationships)[number]; source: ImportedContent } => !!entry.source);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg rounded-t-2xl sm:inset-0 sm:top-16 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">Linked Sources / Bibliography — {document.title}</h3>
+          <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+          {linked.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              No bibliography records linked yet. Open a record in Working Bibliography and use "Linked Research Documents" to link it here.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {linked.map(({ relationship, source }) => (
+                <div key={relationship.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{source.title}</p>
+                    <Badge tone="brand" className="mt-1">
+                      {RELATIONSHIP_TYPE_LABELS[relationship.type]}
+                    </Badge>
+                  </div>
+                  <button
+                    onClick={() => onUnlink(relationship.id)}
+                    aria-label="Unlink"
+                    title="Unlink"
+                    className="shrink-0 rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                  >
+                    <Unlink className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end border-t border-slate-100 dark:border-slate-800 px-5 py-4">
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
         </div>
       </div>
     </>
