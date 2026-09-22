@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -13,10 +13,12 @@ import {
   computeRepositoryStatistics,
   REPOSITORY_CONTENT_TYPE_REGISTRY,
   getRepositoryContentTypeMeta,
+  repositoryContentTypeSupports,
   type RepositoryEntry,
   type RepositoryContentType,
 } from '../lib/repository';
-import { collectImportedContentTags, collectImportedContentCategories, type ImportedContentSortOrder } from '../lib/importedContentRepository';
+import { collectImportedContentTags, collectImportedContentCategories, parseTagsInput, type ImportedContentSortOrder } from '../lib/importedContentRepository';
+import type { ImportedContentMetadata } from '../lib/contentImport';
 import { navigationTargetFor } from '../lib/repositoryNavigation';
 import { ImportToRepositoryModal } from '../components/repository/ImportToRepositoryModal';
 
@@ -30,6 +32,17 @@ import { ImportToRepositoryModal } from '../components/repository/ImportToReposi
 // new editor here. Content types with no dedicated page yet (question_bank, descriptive_questions,
 // pyq, other — see lib/repository.ts's own registry notes) are still listed and searchable, just
 // without a navigation target, since there is nowhere real to send the user yet.
+//
+// Repository Item Management (this stage) — Edit and Delete actions, both gated on the existing
+// repository capability registry (repositoryContentTypeSupports), never hardcoded per type. Edit
+// on a Note never opens a second Note editor here — it navigates to the existing Notes page (the
+// only place a Note's content is ever edited); Edit on any other type opens a small metadata-only
+// form (title/tags/category) that calls the SAME updateImportedContent store action
+// pages/PhdResearch.tsx's own metadata editor calls — rawContent/provenance are never touched by
+// it. Delete calls the existing deleteImportedContent/deleteNote store actions directly (the exact
+// cascade-over-contentRelationships behaviour those actions already implement, unchanged by this
+// stage), behind a confirmation modal (never window.confirm) that names the item, its content
+// type, and its workspace.
 
 const SORT_OPTIONS: { value: ImportedContentSortOrder; label: string }[] = [
   { value: 'newest', label: 'Newest first' },
@@ -43,21 +56,41 @@ const ORIGIN_LABELS: Record<RepositoryEntry['origin'], string> = {
   created: 'Created',
 };
 
-function ResultCard({ entry }: { entry: RepositoryEntry }) {
+/** Whether a repository result should show an Edit action at all — always read from the registry,
+ * never hardcoded, so a future capability change is reflected automatically. */
+export function canEditEntry(entry: RepositoryEntry): boolean {
+  return repositoryContentTypeSupports(entry.contentType, 'editable');
+}
+
+/** The Delete equivalent of canEditEntry. */
+export function canDeleteEntry(entry: RepositoryEntry): boolean {
+  return repositoryContentTypeSupports(entry.contentType, 'deletable');
+}
+
+function ResultCard({
+  entry,
+  onEdit,
+  onDelete,
+}: {
+  entry: RepositoryEntry;
+  onEdit: (entry: RepositoryEntry) => void;
+  onDelete: (entry: RepositoryEntry) => void;
+}) {
   const meta = getRepositoryContentTypeMeta(entry.contentType);
   const target = navigationTargetFor(entry);
   const workspaceLabel = getWorkspaceMeta(entry.workspaceId).shortLabel;
   const date = new Date(entry.createdAt);
   const dateLabel = Number.isNaN(date.getTime()) ? null : date.toLocaleDateString('en-IN');
+  const title = entry.title || 'Untitled';
 
-  const body = (
-    <>
+  return (
+    <Card className="h-full p-4 flex flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <Badge tone="brand">{meta.label}</Badge>
         <Badge tone="neutral">{workspaceLabel}</Badge>
         {entry.category && <Badge tone="gold">{entry.category}</Badge>}
       </div>
-      <h4 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{entry.title || 'Untitled'}</h4>
+      <h4 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{title}</h4>
       <p className="mt-1 text-xs text-slate-400">
         {ORIGIN_LABELS[entry.origin]}
         {dateLabel && <> · {dateLabel}</>}
@@ -71,33 +104,188 @@ function ResultCard({ entry }: { entry: RepositoryEntry }) {
           ))}
         </div>
       )}
-      {target && (
-        <p className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400">
-          {target.label} <ArrowRight className="h-3 w-3" />
-        </p>
-      )}
+      <div className="mt-3 flex flex-1 items-end">
+        <div className="flex flex-wrap items-center gap-2">
+          {target && (
+            <Link
+              to={target.to}
+              aria-label={`${target.label}: ${title} (${meta.label})`}
+              className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 hover:bg-brand-100 dark:hover:bg-brand-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
+            >
+              {target.label} <ArrowRight className="h-3 w-3" />
+            </Link>
+          )}
+          {canEditEntry(entry) && (
+            <Button variant="secondary" size="sm" onClick={() => onEdit(entry)} aria-label={`Edit ${title} (${meta.label})`}>
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </Button>
+          )}
+          {canDeleteEntry(entry) && (
+            <Button variant="danger" size="sm" onClick={() => onDelete(entry)} aria-label={`Delete ${title} (${meta.label})`}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function buildEditedMetadata(tagsInput: string, categoryInput: string): ImportedContentMetadata | undefined {
+  const tags = parseTagsInput(tagsInput);
+  const category = categoryInput.trim();
+  if (tags.length === 0 && !category) return undefined;
+  const metadata: ImportedContentMetadata = {};
+  if (tags.length > 0) metadata.tags = tags;
+  if (category) metadata.category = category;
+  return metadata;
+}
+
+/**
+ * Metadata-only edit for a non-Note repository entry — title, tags, category. Never touches
+ * rawContent, sourceFilename, originalFormat, or import origin: those simply aren't fields this
+ * form has any input for, so onSave's payload can never carry them. Saves through the EXISTING
+ * updateImportedContent store action (the same one pages/PhdResearch.tsx's own metadata editor
+ * calls) — no second persistence path.
+ */
+function EditMetadataModal({
+  entry,
+  existingCategories,
+  onCancel,
+  onSave,
+}: {
+  entry: RepositoryEntry;
+  existingCategories: string[];
+  onCancel: () => void;
+  onSave: (title: string, metadata: ImportedContentMetadata | undefined) => void;
+}) {
+  const [titleInput, setTitleInput] = useState(entry.title);
+  const [tagsInput, setTagsInput] = useState(entry.tags.join(', '));
+  const [categoryInput, setCategoryInput] = useState(entry.category ?? '');
+  const showTags = repositoryContentTypeSupports(entry.contentType, 'taggable');
+  const showCategory = repositoryContentTypeSupports(entry.contentType, 'categorisable');
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm" onClick={onCancel} />
+      <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md rounded-t-2xl sm:inset-0 sm:top-24 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">Edit — {entry.title || 'Untitled'}</h3>
+          <button onClick={onCancel} aria-label="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <label htmlFor="edit-title" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Title
+            </label>
+            <input
+              id="edit-title"
+              value={titleInput}
+              onChange={(e) => setTitleInput(e.target.value)}
+              placeholder="Title"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+          </div>
+          {showTags && (
+            <div>
+              <label htmlFor="edit-tags" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Tags (comma-separated)
+              </label>
+              <input
+                id="edit-tags"
+                value={tagsInput}
+                onChange={(e) => setTagsInput(e.target.value)}
+                placeholder="e.g. fieldwork, chapter-1"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              />
+            </div>
+          )}
+          {showCategory && (
+            <div>
+              <label htmlFor="edit-category" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Category
+              </label>
+              <input
+                id="edit-category"
+                list="repository-edit-category-suggestions"
+                value={categoryInput}
+                onChange={(e) => setCategoryInput(e.target.value)}
+                placeholder="e.g. Literature Review"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              />
+              <datalist id="repository-edit-category-suggestions">
+                {existingCategories.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800 px-5 py-4">
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSave(titleInput.trim() || entry.title, buildEditedMetadata(tagsInput, categoryInput))} disabled={!titleInput.trim()}>
+            Save Changes
+          </Button>
+        </div>
+      </div>
     </>
   );
+}
 
-  if (target) {
-    return (
-      <Link
-        to={target.to}
-        aria-label={`${target.label}: ${entry.title || 'Untitled'} (${meta.label})`}
-        className="block h-full rounded-2xl surface p-4 shadow-sm shadow-slate-900/5 transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
-      >
-        {body}
-      </Link>
-    );
-  }
-
-  return <Card className="h-full p-4">{body}</Card>;
+/** Delete confirmation — the app's own modal styling (backdrop + panel + header/footer), never
+ * window.confirm(). Names the item's title, content type, and workspace explicitly, per this
+ * stage's own requirement. */
+function DeleteConfirmModal({ entry, onCancel, onConfirm }: { entry: RepositoryEntry; onCancel: () => void; onConfirm: () => void }) {
+  const meta = getRepositoryContentTypeMeta(entry.contentType);
+  const workspaceLabel = getWorkspaceMeta(entry.workspaceId).label;
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm" onClick={onCancel} />
+      <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-sm rounded-t-2xl sm:inset-0 sm:top-24 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Delete item</h3>
+          <button onClick={onCancel} aria-label="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <p>This cannot be undone. Any relationships linking this item to other repository content will also be removed.</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+            <p className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{entry.title || 'Untitled'}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Badge tone="brand">{meta.label}</Badge>
+              <Badge tone="neutral">{workspaceLabel}</Badge>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800 px-5 py-4">
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={onConfirm}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export default function Repository() {
+  const navigate = useNavigate();
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
   const notes = useAppStore((s) => s.notes);
+  const updateImportedContent = useAppStore((s) => s.updateImportedContent);
+  const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
+  const deleteNote = useAppStore((s) => s.deleteNote);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContentType, setSelectedContentType] = useState<RepositoryContentType | ''>('');
@@ -105,6 +293,8 @@ export default function Repository() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState<ImportedContentSortOrder>('newest');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<RepositoryEntry | null>(null);
+  const [deletingEntry, setDeletingEntry] = useState<RepositoryEntry | null>(null);
 
   // The store's importedContent/notes fields already only ever hold the ACTIVE workspace's own
   // data (see lib/store.ts's setActiveWorkspaceId swap) — queryRepository/listRepositoryEntries
@@ -142,6 +332,30 @@ export default function Repository() {
 
   function toggleTagFilter(tag: string) {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+  }
+
+  // Edit on a Note never opens a second Note editor here — the existing Notes page is the only
+  // place a Note's content is ever edited (see components/repository/ImportToRepositoryModal.tsx's
+  // own header note on the same rule for import).
+  function handleEditRequest(entry: RepositoryEntry) {
+    if (entry.entityType === 'note') {
+      navigate('/notes');
+      return;
+    }
+    setEditingEntry(entry);
+  }
+
+  function handleEditSave(title: string, metadata: ImportedContentMetadata | undefined) {
+    if (!editingEntry) return;
+    updateImportedContent(editingEntry.entityId, { title, metadata });
+    setEditingEntry(null);
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingEntry) return;
+    if (deletingEntry.entityType === 'note') deleteNote(deletingEntry.entityId);
+    else deleteImportedContent(deletingEntry.entityId);
+    setDeletingEntry(null);
   }
 
   const workspaceLabel = getWorkspaceMeta(activeWorkspaceId).label;
@@ -316,12 +530,17 @@ export default function Repository() {
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {results.map((entry) => (
-                <ResultCard key={`${entry.entityType}:${entry.entityId}`} entry={entry} />
+                <ResultCard key={`${entry.entityType}:${entry.entityId}`} entry={entry} onEdit={handleEditRequest} onDelete={setDeletingEntry} />
               ))}
             </div>
           )}
         </>
       )}
+
+      {editingEntry && (
+        <EditMetadataModal entry={editingEntry} existingCategories={availableCategories} onCancel={() => setEditingEntry(null)} onSave={handleEditSave} />
+      )}
+      {deletingEntry && <DeleteConfirmModal entry={deletingEntry} onCancel={() => setDeletingEntry(null)} onConfirm={handleDeleteConfirm} />}
     </div>
   );
 }
