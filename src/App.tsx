@@ -12,6 +12,7 @@ import { RewardCelebration } from './components/RewardCelebration';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
+const UpscCseSyllabus = lazy(() => import('./pages/UpscCseSyllabus'));
 const QuestionBank = lazy(() => import('./pages/QuestionBank'));
 const PYQTest = lazy(() => import('./pages/PYQTest'));
 const MockTests = lazy(() => import('./pages/MockTests'));
@@ -48,6 +49,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/syllabus" element={<Syllabus />} />
+          <Route path="/upsc-syllabus" element={<UpscCseSyllabus />} />
           <Route path="/pyq" element={<QuestionBank />} />
           <Route path="/pyq-test" element={<PYQTest />} />
           <Route path="/mock-tests" element={<MockTests />} />

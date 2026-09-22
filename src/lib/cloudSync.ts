@@ -47,6 +47,8 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     // Source <-> Research Document Linking — a relationship between two content items is real user
     // data too, same reasoning as importedContent above.
     ((data.contentRelationships as unknown[]) ?? []).length,
+    // UPSC CSE Syllabus UI — coverage state per microsyllabus id is real user data too.
+    Object.keys((data.upscCseSyllabusCoverage as object) ?? {}).length,
   ];
   return counts.some((c) => c > 0);
 }

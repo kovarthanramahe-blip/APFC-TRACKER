@@ -25,12 +25,21 @@ import {
   type RelationshipType,
 } from './contentRelationships';
 import type { RepositoryImportPlan } from './repositoryImport';
+import type { UpscCseCoverageState, UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
   completedTopics: Record<string, boolean>;
   toggleTopic: (topicId: string) => void;
   markSubjectTopics: (topicIds: string[], value: boolean) => void;
+
+  // UPSC CSE Syllabus UI — coverage state per microsyllabus id (see lib/upscCseSyllabusCoverage.ts).
+  // A completely separate map from completedTopics above: different id space (microsyllabus ids,
+  // never APFC topic ids), different value shape (a 4-state enum, not a boolean). Workspace-owned
+  // exactly like completedTopics — archived/restored by setActiveWorkspaceId's swap below, so this
+  // is structurally absent whenever a workspace other than upsc_cse is active.
+  upscCseSyllabusCoverage: UpscCseSyllabusCoverage;
+  setUpscCseCoverageState: (microsyllabusId: string, coverageState: UpscCseCoverageState) => void;
 
   // Notes
   notes: Note[];
@@ -200,6 +209,7 @@ interface AppState {
  */
 interface WorkspaceOwnedData {
   completedTopics: Record<string, boolean>;
+  upscCseSyllabusCoverage: UpscCseSyllabusCoverage;
   notes: Note[];
   attempts: MockTestAttempt[];
   pyqAttempts: PYQAttempt[];
@@ -219,6 +229,7 @@ interface WorkspaceOwnedData {
 function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
   return {
     completedTopics: {},
+    upscCseSyllabusCoverage: {},
     notes: [],
     attempts: [],
     pyqAttempts: [],
@@ -303,7 +314,13 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // 'imported_content'` onto it when missing — never invented data, exactly what was already
 // implicitly true. Reaches the same two places as every prior workspace-owned backfill: the active
 // top-level field, and every snapshot inside inactiveWorkspaceOwnedData.
-export const APP_STORE_PERSIST_VERSION = 6;
+//
+// Version 7 (UPSC CSE Syllabus UI) adds `upscCseSyllabusCoverage` (Record<microsyllabusId,
+// UpscCseCoverageState> — see lib/upscCseSyllabusCoverage.ts) the exact same way as
+// importedContent/contentRelationships before it: another brand-new, workspace-owned field with
+// nothing pre-existing to migrate (no prior version could have ever produced one), defaulted to
+// `{}` at both the top-level active field and inside every inactiveWorkspaceOwnedData snapshot.
+export const APP_STORE_PERSIST_VERSION = 7;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -331,17 +348,23 @@ function stampRelationshipEntityTypes(value: unknown): unknown {
   });
 }
 
-/** Backfills `importedContent: []` and `contentRelationships: []` (with every entry's entity types
- * stamped — see stampRelationshipEntityTypes) onto a workspace-owned data snapshot that predates
- * one or more of these — used for both the active top-level state and every archived snapshot
- * inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Backfills `importedContent: []`, `contentRelationships: []` (with every entry's entity types
+ * stamped — see stampRelationshipEntityTypes) and `upscCseSyllabusCoverage: {}` onto a
+ * workspace-owned data snapshot that predates one or more of these — used for both the active
+ * top-level state and every archived snapshot inside inactiveWorkspaceOwnedData (see
+ * withWorkspaceOwnedDefaultsInArchive). */
 function withWorkspaceOwnedDefaults(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const snapshot = value as Record<string, unknown>;
+  if (!isPlainObject(value)) return value;
+  const snapshot = value;
   return {
     ...snapshot,
     importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [],
     contentRelationships: stampRelationshipEntityTypes(Array.isArray(snapshot.contentRelationships) ? snapshot.contentRelationships : []),
+    upscCseSyllabusCoverage: isPlainObject(snapshot.upscCseSyllabusCoverage) ? snapshot.upscCseSyllabusCoverage : {},
   };
 }
 
@@ -378,6 +401,7 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
     importedContent: Array.isArray(state.importedContent) ? state.importedContent : [],
     contentRelationships: stampRelationshipEntityTypes(Array.isArray(state.contentRelationships) ? state.contentRelationships : []),
+    upscCseSyllabusCoverage: isPlainObject(state.upscCseSyllabusCoverage) ? state.upscCseSyllabusCoverage : {},
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: withWorkspaceOwnedDefaultsInArchive(state.inactiveWorkspaceOwnedData),
   };
@@ -409,6 +433,10 @@ export const useAppStore = create<AppState>()(
           });
           return { completedTopics: next };
         }),
+
+      upscCseSyllabusCoverage: {},
+      setUpscCseCoverageState: (microsyllabusId, coverageState) =>
+        set((state) => ({ upscCseSyllabusCoverage: { ...state.upscCseSyllabusCoverage, [microsyllabusId]: coverageState } })),
 
       notes: [],
       upsertNote: (note) =>
@@ -640,6 +668,7 @@ export const useAppStore = create<AppState>()(
           if (id === state.activeWorkspaceId) return state;
           const outgoingSnapshot: WorkspaceOwnedData = {
             completedTopics: state.completedTopics,
+            upscCseSyllabusCoverage: state.upscCseSyllabusCoverage,
             notes: state.notes,
             attempts: state.attempts,
             pyqAttempts: state.pyqAttempts,
@@ -666,6 +695,7 @@ export const useAppStore = create<AppState>()(
       resetAllData: () =>
         set({
           completedTopics: {},
+          upscCseSyllabusCoverage: {},
           notes: [],
           attempts: [],
           pyqAttempts: [],
@@ -697,6 +727,7 @@ export function exportAllData() {
   const state = useAppStore.getState();
   const data = {
     completedTopics: state.completedTopics,
+    upscCseSyllabusCoverage: state.upscCseSyllabusCoverage,
     notes: state.notes,
     attempts: state.attempts,
     pyqAttempts: state.pyqAttempts,
@@ -728,6 +759,7 @@ export function importAllData(json: string) {
   const data = JSON.parse(json);
   useAppStore.setState({
     completedTopics: data.completedTopics ?? {},
+    upscCseSyllabusCoverage: data.upscCseSyllabusCoverage ?? {},
     notes: data.notes ?? [],
     attempts: data.attempts ?? [],
     pyqAttempts: data.pyqAttempts ?? [],

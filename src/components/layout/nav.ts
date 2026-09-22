@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   ListChecks,
+  ListTree,
   BookOpenCheck,
   FileClock,
   FileQuestion,
@@ -23,6 +24,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/syllabus', label: 'Syllabus', icon: ListChecks },
+  { to: '/upsc-syllabus', label: 'UPSC CSE Syllabus', icon: ListTree },
   { to: '/pyq', label: 'Question Bank', icon: BookOpenCheck },
   { to: '/pyq-test', label: 'PYQs', icon: FileQuestion },
   { to: '/mock-tests', label: 'Mock Tests', icon: FileClock },
