@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink } from 'lucide-react';
+import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink, NotebookPen } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -17,6 +17,7 @@ import {
   type ImportedContentMetadata,
 } from '../lib/contentImport';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
+import { LinkedNotesModal } from '../components/phdResearch/LinkedNotesModal';
 import {
   queryImportedContent,
   collectImportedContentTags,
@@ -25,7 +26,7 @@ import {
   getContentCategory,
   parseTagsInput,
 } from '../lib/importedContentRepository';
-import { RELATIONSHIP_TYPE_LABELS, getIncomingRelationships, type ContentRelationship } from '../lib/contentRelationships';
+import { RELATIONSHIP_TYPE_LABELS, getIncomingRelationships, getOutgoingRelationships, type ContentRelationship } from '../lib/contentRelationships';
 
 // PhD Research workspace repository — the import-first FILE -> EXTRACT -> PREVIEW -> CONFIRM ->
 // SAVE -> DISPLAY pipeline (lib/contentImport.ts), plus repository organisation (search, tags,
@@ -50,7 +51,9 @@ export default function PhdResearch() {
   const addImportedContent = useAppStore((s) => s.addImportedContent);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
+  const notes = useAppStore((s) => s.notes);
   const contentRelationships = useAppStore((s) => s.contentRelationships);
+  const addContentRelationship = useAppStore((s) => s.addContentRelationship);
   const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +66,7 @@ export default function PhdResearch() {
   const [viewing, setViewing] = useState<ImportedContent | null>(null);
   const [editing, setEditing] = useState<ImportedContent | null>(null);
   const [linksDoc, setLinksDoc] = useState<ImportedContent | null>(null);
+  const [notesLinkingDoc, setNotesLinkingDoc] = useState<ImportedContent | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -86,6 +90,19 @@ export default function PhdResearch() {
 
   function toggleTagFilter(tag: string) {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+  }
+
+  // A bibliography record links TO a document (source = bibliography, target = document — see
+  // WorkingBibliography.tsx's LinkedDocumentsModal), so a document's own linked sources are its
+  // INCOMING relationships from other imported_content items.
+  function linkedSourceCount(docId: string) {
+    return getIncomingRelationships(contentRelationships, docId, 'imported_content').filter((r) => r.sourceType === 'imported_content').length;
+  }
+
+  // A document links TO a note (source = document, target = note — see LinkedNotesModal), so a
+  // document's own linked notes are its OUTGOING relationships whose target is a note.
+  function linkedNoteCount(docId: string) {
+    return getOutgoingRelationships(contentRelationships, docId, 'imported_content').filter((r) => r.targetType === 'note').length;
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -311,10 +328,14 @@ export default function PhdResearch() {
                   </Button>
                   <Button variant="secondary" size="sm" onClick={() => setLinksDoc(doc)}>
                     <Link2 className="h-3.5 w-3.5" /> Sources
-                    {getIncomingRelationships(contentRelationships, doc.id).length > 0 && (
-                      <span className="ml-0.5 rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">
-                        {getIncomingRelationships(contentRelationships, doc.id).length}
-                      </span>
+                    {linkedSourceCount(doc.id) > 0 && (
+                      <span className="ml-0.5 rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">{linkedSourceCount(doc.id)}</span>
+                    )}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setNotesLinkingDoc(doc)}>
+                    <NotebookPen className="h-3.5 w-3.5" /> Notes
+                    {linkedNoteCount(doc.id) > 0 && (
+                      <span className="ml-0.5 rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">{linkedNoteCount(doc.id)}</span>
                     )}
                   </Button>
                   <Button variant="danger" size="sm" onClick={() => deleteImportedContent(doc.id)}>
@@ -343,6 +364,19 @@ export default function PhdResearch() {
           relationships={contentRelationships}
           onUnlink={(relationshipId) => deleteContentRelationship(relationshipId)}
           onClose={() => setLinksDoc(null)}
+        />
+      )}
+      {notesLinkingDoc && (
+        <LinkedNotesModal
+          sourceId={notesLinkingDoc.id}
+          sourceLabel={notesLinkingDoc.title}
+          notes={notes}
+          relationships={contentRelationships}
+          onLink={(noteId, type) =>
+            addContentRelationship({ source: { id: notesLinkingDoc.id, type: 'imported_content' }, target: { id: noteId, type: 'note' }, type })
+          }
+          onUnlink={(relationshipId) => deleteContentRelationship(relationshipId)}
+          onClose={() => setNotesLinkingDoc(null)}
         />
       )}
     </div>
@@ -569,7 +603,8 @@ function LinkedSourcesModal({
   onUnlink: (relationshipId: string) => void;
   onClose: () => void;
 }) {
-  const linked = getIncomingRelationships(relationships, document.id)
+  const linked = getIncomingRelationships(relationships, document.id, 'imported_content')
+    .filter((r) => r.sourceType === 'imported_content')
     .map((relationship) => ({ relationship, source: getImportedContentById(bibliographyRecords, relationship.sourceId) }))
     .filter((entry): entry is { relationship: (typeof relationships)[number]; source: ImportedContent } => !!entry.source);
 

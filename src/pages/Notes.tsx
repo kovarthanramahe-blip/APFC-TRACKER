@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Markdown from 'markdown-to-jsx';
-import { Plus, Search, Pin, Trash2, X, NotebookPen, ChevronRight, ChevronLeft, FolderOpen, Upload, Eye, Pencil } from 'lucide-react';
+import { Plus, Search, Pin, Trash2, X, NotebookPen, ChevronRight, ChevronLeft, FolderOpen, Upload, Eye, Pencil, Unlink, Link2 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
 import { getWorkspaceMeta } from '../lib/workspace';
@@ -10,6 +10,8 @@ import { SUBJECT_COLORS, cx, uuid } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import type { Note, SubjectColorKey } from '../lib/types';
 import { importNoteFile, SUPPORTED_IMPORT_EXTENSIONS } from '../lib/noteImport';
+import { getImportedContentById, type ImportedContent } from '../lib/contentImport';
+import { getIncomingRelationships, RELATIONSHIP_TYPE_LABELS, type ContentRelationship } from '../lib/contentRelationships';
 
 const TOPIC_TITLES: Record<string, string> = Object.fromEntries(SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, t.title])));
 const TOPIC_SUBJECTS: Record<string, SubjectColorKey> = Object.fromEntries(
@@ -576,6 +578,7 @@ function NoteEditor({
               )}
             </div>
           )}
+          {!isNew && <LinkedResearchSection noteId={note.id} />}
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 px-5 py-4">
           {!isNew ? (
@@ -589,5 +592,60 @@ function NoteEditor({
         </div>
       </motion.div>
     </>
+  );
+}
+
+// Notes <-> Research Repository Linking — read-only display + unlink only. A note never creates a
+// link itself; that always happens from the research document's or bibliography record's own
+// "Linked Notes" modal (see components/phdResearch/LinkedNotesModal.tsx), where an existing note is
+// explicitly selected — never inferred from this note's title, tags, or content. Only shown for a
+// PhD Research workspace note (research documents/bibliography only exist there), and only once the
+// note has been saved at least once (a brand-new, not-yet-saved note cannot have anything already
+// linked to it).
+function LinkedResearchSection({ noteId }: { noteId: string }) {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const importedContent = useAppStore((s) => s.importedContent);
+  const contentRelationships = useAppStore((s) => s.contentRelationships);
+  const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
+
+  if (activeWorkspaceId !== 'phd_research') return null;
+
+  const linked = getIncomingRelationships(contentRelationships, noteId, 'note')
+    .map((relationship) => ({ relationship, source: getImportedContentById(importedContent, relationship.sourceId) }))
+    .filter((entry): entry is { relationship: ContentRelationship; source: ImportedContent } => !!entry.source);
+
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <Link2 className="h-3.5 w-3.5" /> Linked Research
+      </p>
+      {linked.length === 0 ? (
+        <p className="text-xs text-slate-400">
+          Not linked to any research document or bibliography record yet. Link this note from a document's or record's own "Linked Notes" action.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {linked.map(({ relationship, source }) => (
+            <div key={relationship.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1.5">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-slate-700 dark:text-slate-200">{source.title}</p>
+                <div className="mt-0.5 flex items-center gap-1">
+                  <Badge tone="neutral">{source.contentType === 'bibliography' ? 'Bibliography' : 'Research Document'}</Badge>
+                  <Badge tone="brand">{RELATIONSHIP_TYPE_LABELS[relationship.type]}</Badge>
+                </div>
+              </div>
+              <button
+                onClick={() => deleteContentRelationship(relationship.id)}
+                aria-label="Unlink"
+                title="Unlink"
+                className="shrink-0 rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+              >
+                <Unlink className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

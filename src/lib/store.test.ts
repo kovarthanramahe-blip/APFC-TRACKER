@@ -6,6 +6,7 @@ import { hasMeaningfulData } from './cloudSync';
 import { selectImportedContentByType, type ImportedContent } from './contentImport';
 import { PYQ_BANK } from '../data/pyq';
 import type { ContentRelationship } from './contentRelationships';
+import type { Note } from './types';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
 // works directly outside React for in-memory state (persist's localStorage access is safely
@@ -849,7 +850,7 @@ describe('Import-First Content Repository — importedContent collection', () =>
 // persisted and workspace-scoped exactly like importedContent itself (see lib/store.ts's
 // WorkspaceOwnedData). These tests exercise the store actions directly, the same way the linking
 // UI (pages/WorkingBibliography.tsx, pages/PhdResearch.tsx) eventually does.
-describe('Source <-> Research Document Linking — contentRelationships', () => {
+describe('Repository relationships — contentRelationships (ImportedContent <-> ImportedContent, and Notes <-> Research Repository)', () => {
   function fullReset() {
     useAppStore.setState({
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
@@ -885,26 +886,47 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
     };
   }
 
+  function noteFixture(overrides: Partial<Note> = {}): Note {
+    return {
+      id: overrides.id ?? 'note1',
+      subject: overrides.subject ?? 'general',
+      title: overrides.title ?? 'A note',
+      content: overrides.content ?? 'Note content',
+      createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
+      updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
+      pinned: overrides.pinned ?? false,
+      workspaceId: overrides.workspaceId,
+      topicId: overrides.topicId,
+    };
+  }
+
   function relationshipFixture(overrides: Partial<ContentRelationship> = {}): ContentRelationship {
     return {
       id: overrides.id ?? 'r1',
       workspaceId: overrides.workspaceId ?? 'phd_research',
       sourceId: overrides.sourceId ?? 'c1',
+      sourceType: overrides.sourceType ?? 'imported_content',
       targetId: overrides.targetId ?? 'c2',
+      targetType: overrides.targetType ?? 'imported_content',
       type: overrides.type ?? 'cites',
       createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
     };
   }
 
-  describe('create / delete', () => {
+  const ic = (id: string) => ({ id, type: 'imported_content' as const });
+  const note = (id: string) => ({ id, type: 'note' as const });
+
+  describe('create / delete (imported-content <-> imported-content, existing behaviour)', () => {
     it('addContentRelationship creates a relationship stamped with the active workspace', () => {
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2', contentType: 'bibliography' }));
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'c2', targetId: 'c1', type: 'cites' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('c2'), target: ic('c1'), type: 'cites' });
       expect(result.status).toBe('ok');
       expect(useAppStore.getState().contentRelationships).toHaveLength(1);
       expect(useAppStore.getState().contentRelationships[0].workspaceId).toBe('phd_research');
+      expect(useAppStore.getState().contentRelationships[0].sourceType).toBe('imported_content');
+      expect(useAppStore.getState().contentRelationships[0].targetType).toBe('imported_content');
     });
 
     it('deleteContentRelationship removes exactly the matching relationship', () => {
@@ -912,8 +934,8 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c3' }));
-      const r1 = useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c3', type: 'supports' });
+      const r1 = useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c3'), type: 'supports' });
       expect(useAppStore.getState().contentRelationships).toHaveLength(2);
 
       if (r1.status !== 'ok') throw new Error('expected ok');
@@ -923,11 +945,11 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
     });
   });
 
-  describe('runtime validation (self-link / duplicate / unknown ids)', () => {
+  describe('imported-content endpoint validation', () => {
     it('rejects a self-link', () => {
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c1', type: 'cites' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c1'), type: 'cites' });
       expect(result).toMatchObject({ status: 'error', reason: 'self_link' });
       expect(useAppStore.getState().contentRelationships).toEqual([]);
     });
@@ -936,8 +958,8 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
       expect(result).toMatchObject({ status: 'error', reason: 'duplicate' });
       expect(useAppStore.getState().contentRelationships).toHaveLength(1);
     });
@@ -945,8 +967,50 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
     it('rejects a sourceId/targetId that does not exist in the current workspace at all', () => {
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'does-not-exist', type: 'cites' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('does-not-exist'), type: 'cites' });
       expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+    });
+  });
+
+  describe('note endpoint validation', () => {
+    it('a note can be the target of a relationship whose source is an imported_content item', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      const result = useAppStore.getState().addContentRelationship({ source: ic('c1'), target: note('note1'), type: 'cites' });
+      expect(result.status).toBe('ok');
+      expect(useAppStore.getState().contentRelationships[0]).toMatchObject({ sourceId: 'c1', sourceType: 'imported_content', targetId: 'note1', targetType: 'note' });
+    });
+
+    it('a note can be the source of a relationship too', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      const result = useAppStore.getState().addContentRelationship({ source: note('note1'), target: ic('c1'), type: 'related_to' });
+      expect(result.status).toBe('ok');
+    });
+
+    it('rejects a note id that does not exist in the active workspace\'s notes', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      const result = useAppStore.getState().addContentRelationship({ source: ic('c1'), target: note('does-not-exist'), type: 'cites' });
+      expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+    });
+
+    it('an id that is a valid ImportedContent id is never accepted as a note id (ids stay unambiguous across the two collections)', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'shared-id' }));
+      const result = useAppStore.getState().addContentRelationship({ source: ic('shared-id'), target: note('shared-id'), type: 'cites' });
+      // 'shared-id' is not in state.notes, so as a note target it is invalid — even though the
+      // exact same string IS a valid imported_content id.
+      expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+    });
+
+    it('rejects a self-link between a note and itself', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      const result = useAppStore.getState().addContentRelationship({ source: note('note1'), target: note('note1'), type: 'cites' });
+      expect(result).toMatchObject({ status: 'error', reason: 'self_link' });
     });
   });
 
@@ -955,7 +1019,7 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
 
       useAppStore.getState().setActiveWorkspaceId('apfc');
       expect(useAppStore.getState().contentRelationships).toEqual([]);
@@ -972,7 +1036,7 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
 
       // Attempting to link the (now archived, invisible) apfc-doc id from upsc_cse must fail —
       // it is not a member of upsc_cse's own importedContent ids.
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'apfc-doc', targetId: 'cse-doc', type: 'related_to' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('apfc-doc'), target: ic('cse-doc'), type: 'related_to' });
       expect(result).toMatchObject({ status: 'error', reason: 'invalid_source' });
       expect(useAppStore.getState().contentRelationships).toEqual([]);
     });
@@ -983,7 +1047,7 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'phd-doc', workspaceId: 'phd_research' }));
 
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'phd-doc', targetId: 'cse-doc', type: 'cites' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('phd-doc'), target: ic('cse-doc'), type: 'cites' });
       expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
     });
 
@@ -993,17 +1057,41 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('apfc');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'apfc-doc', workspaceId: 'apfc' }));
 
-      const result = useAppStore.getState().addContentRelationship({ sourceId: 'apfc-doc', targetId: 'phd-doc', type: 'cites' });
+      const result = useAppStore.getState().addContentRelationship({ source: ic('apfc-doc'), target: ic('phd-doc'), type: 'cites' });
       expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+    });
+
+    it('a note from a different (archived-away) workspace cannot be linked — same runtime rejection as imported content', () => {
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      useAppStore.getState().upsertNote(noteFixture({ id: 'apfc-note' }));
+      useAppStore.getState().setActiveWorkspaceId('phd_research'); // archives the apfc note away
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'phd-doc' }));
+
+      const result = useAppStore.getState().addContentRelationship({ source: ic('phd-doc'), target: note('apfc-note'), type: 'cites' });
+      expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+      expect(useAppStore.getState().contentRelationships).toEqual([]);
+    });
+
+    it('a note relationship created in phd_research is invisible after switching workspace, and restored on switch-back', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: note('note1'), type: 'cites' });
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().contentRelationships).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().contentRelationships).toHaveLength(1);
     });
   });
 
-  describe('cascade delete — deleteImportedContent removes dangling relationships', () => {
+  describe('cascade delete — deleteImportedContent / deleteNote remove dangling relationships', () => {
     it('deleting content referenced as a relationship SOURCE removes that relationship', () => {
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
 
       useAppStore.getState().deleteImportedContent('c1');
       expect(useAppStore.getState().contentRelationships).toEqual([]);
@@ -1013,7 +1101,7 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
 
       useAppStore.getState().deleteImportedContent('c2');
       expect(useAppStore.getState().contentRelationships).toEqual([]);
@@ -1024,10 +1112,41 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c3' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
 
       useAppStore.getState().deleteImportedContent('c3');
       expect(useAppStore.getState().contentRelationships).toHaveLength(1);
+    });
+
+    it('deleting a note referenced as a relationship TARGET removes that relationship', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: note('note1'), type: 'cites' });
+
+      useAppStore.getState().deleteNote('note1');
+      expect(useAppStore.getState().contentRelationships).toEqual([]);
+    });
+
+    it('deleting a note referenced as a relationship SOURCE removes that relationship', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      useAppStore.getState().addContentRelationship({ source: note('note1'), target: ic('c1'), type: 'related_to' });
+
+      useAppStore.getState().deleteNote('note1');
+      expect(useAppStore.getState().contentRelationships).toEqual([]);
+    });
+
+    it('deleting an imported_content item never removes a relationship whose endpoint id merely coincides but is typed "note"', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'shared-id' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'shared-id' }));
+      useAppStore.getState().addContentRelationship({ source: note('shared-id'), target: ic('c2'), type: 'cites' });
+
+      useAppStore.getState().deleteImportedContent('shared-id'); // deletes the IMPORTED_CONTENT item with this id, not the note
+      expect(useAppStore.getState().contentRelationships).toHaveLength(1); // the note-sourced relationship survives
     });
   });
 
@@ -1056,6 +1175,34 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       const migrated = migrateAppStorage(fixture, 4) as any;
       expect(migrated.inactiveWorkspaceOwnedData.apfc.contentRelationships).toEqual([]);
     });
+
+    it('Version 6 — a pre-existing relationship with no sourceType/targetType (Stage-5 shape) migrates to sourceType/targetType: "imported_content"', () => {
+      const preV6Relationship = { id: 'old-r1', workspaceId: 'phd_research', sourceId: 'c1', targetId: 'c2', type: 'cites', createdAt: '2026-01-01T00:00:00.000Z' };
+      const fixture = { contentRelationships: [preV6Relationship], activeWorkspaceId: 'phd_research', inactiveWorkspaceOwnedData: {} };
+      const migrated = migrateAppStorage(fixture, 5) as any;
+      expect(migrated.contentRelationships[0]).toEqual({ ...preV6Relationship, sourceType: 'imported_content', targetType: 'imported_content' });
+    });
+
+    it('Version 6 migration reaches relationships already archived inside inactiveWorkspaceOwnedData too', () => {
+      const preV6Relationship = { id: 'old-r1', workspaceId: 'apfc', sourceId: 'c1', targetId: 'c2', type: 'cites', createdAt: '2026-01-01T00:00:00.000Z' };
+      const fixture = { inactiveWorkspaceOwnedData: { apfc: { contentRelationships: [preV6Relationship] } } };
+      const migrated = migrateAppStorage(fixture, 5) as any;
+      expect(migrated.inactiveWorkspaceOwnedData.apfc.contentRelationships[0]).toMatchObject({ sourceType: 'imported_content', targetType: 'imported_content' });
+    });
+
+    it('Version 6 migration never overwrites a relationship that already carries real entity types', () => {
+      const alreadyTyped = relationshipFixture({ id: 'r1', sourceType: 'note', targetType: 'imported_content' });
+      const fixture = { contentRelationships: [alreadyTyped], activeWorkspaceId: 'phd_research', inactiveWorkspaceOwnedData: {} };
+      const migrated = migrateAppStorage(fixture, 5) as any;
+      expect(migrated.contentRelationships[0]).toEqual(alreadyTyped);
+    });
+
+    it('the full migration (an old blob with no contentRelationships at all, straight through to current) is idempotent end-to-end', () => {
+      const oldBlob = { notes: [{ id: 'n1', subject: 'general', title: 'T', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false }] };
+      const once = migrateAppStorage(oldBlob, 1);
+      const twice = migrateAppStorage(once, 1);
+      expect(twice).toEqual(once);
+    });
   });
 
   describe('export / import', () => {
@@ -1063,7 +1210,7 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
       const json = exportAllData();
 
       fullReset();
@@ -1072,6 +1219,18 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       importAllData(json);
       expect(useAppStore.getState().contentRelationships).toHaveLength(1);
       expect(useAppStore.getState().contentRelationships[0].sourceId).toBe('c1');
+    });
+
+    it('exportAllData / importAllData round-trip a note<->imported_content relationship, including its entity types', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: note('note1'), type: 'supports' });
+      const json = exportAllData();
+
+      fullReset();
+      importAllData(json);
+      expect(useAppStore.getState().contentRelationships[0]).toMatchObject({ sourceId: 'c1', sourceType: 'imported_content', targetId: 'note1', targetType: 'note' });
     });
 
     it('importAllData defaults contentRelationships to [] for an older export that predates this field', () => {
@@ -1093,7 +1252,7 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1', title: 'Untouched' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'c1', targetId: 'c2', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
       expect(useAppStore.getState().importedContent.find((c) => c.id === 'c1')?.title).toBe('Untouched');
     });
 
@@ -1101,10 +1260,55 @@ describe('Source <-> Research Document Linking — contentRelationships', () => 
       useAppStore.getState().setActiveWorkspaceId('phd_research');
       useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1', contentType: 'research_document' }));
       useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
-      useAppStore.getState().addContentRelationship({ sourceId: 'bib1', targetId: 'doc1', type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
 
       expect(selectImportedContentByType(useAppStore.getState().importedContent, 'research_document').map((c) => c.id)).toEqual(['doc1']);
       expect(selectImportedContentByType(useAppStore.getState().importedContent, 'bibliography').map((c) => c.id)).toEqual(['bib1']);
+    });
+
+    it('bibliography <-> research-document relationships are completely unaffected by Notes also being able to link', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1', contentType: 'research_document' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+      useAppStore.getState().addContentRelationship({ source: ic('doc1'), target: note('note1'), type: 'related_to' });
+
+      const all = useAppStore.getState().contentRelationships;
+      expect(all).toHaveLength(2);
+      const bibToDoc = all.find((r) => r.sourceId === 'bib1');
+      expect(bibToDoc).toMatchObject({ targetId: 'doc1', targetType: 'imported_content', type: 'cites' });
+    });
+  });
+
+  describe('regression: existing Notes editing/import behaviour is unaffected', () => {
+    it('upsertNote and deleteNote work exactly as before when no relationships exist', () => {
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n1', title: 'Plain note' }));
+      expect(useAppStore.getState().notes).toHaveLength(1);
+      useAppStore.getState().deleteNote('n1');
+      expect(useAppStore.getState().notes).toEqual([]);
+    });
+
+    it('adding a relationship never mutates the note itself', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1', title: 'Untouched Note', content: 'Original' }));
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: note('note1'), type: 'cites' });
+
+      const stored = useAppStore.getState().notes.find((n) => n.id === 'note1');
+      expect(stored?.title).toBe('Untouched Note');
+      expect(stored?.content).toBe('Original');
+    });
+
+    it('deleting a note not referenced by any relationship is a safe no-op on contentRelationships', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c2' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+      useAppStore.getState().addContentRelationship({ source: ic('c1'), target: ic('c2'), type: 'cites' });
+
+      useAppStore.getState().deleteNote('note1');
+      expect(useAppStore.getState().contentRelationships).toHaveLength(1);
     });
   });
 });

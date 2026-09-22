@@ -17,7 +17,13 @@ import { getLocalDateString } from './utils';
 import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
 import type { ImportedContent } from './contentImport';
-import { createRelationship as createContentRelationship, type ContentRelationship, type CreateRelationshipResult, type RelationshipType } from './contentRelationships';
+import {
+  createRelationship as createContentRelationship,
+  type ContentRelationship,
+  type CreateRelationshipResult,
+  type RelationshipEndpoint,
+  type RelationshipType,
+} from './contentRelationships';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -28,6 +34,8 @@ interface AppState {
   // Notes
   notes: Note[];
   upsertNote: (note: Note) => void;
+  // Cascade-deletes any relationship referencing this note (type 'note') too — same discipline as
+  // deleteImportedContent below, so a deleted note never leaves a dangling relationship behind.
   deleteNote: (id: string) => void;
   togglePinNote: (id: string) => void;
 
@@ -131,17 +139,20 @@ interface AppState {
   // otherwise a deleted item would leave dangling relationships pointing at nothing.
   deleteImportedContent: (id: string) => void;
 
-  // Source <-> Research Document Linking: a minimal, generic relationship between two
-  // ImportedContent items, workspace-scoped exactly like importedContent itself (archived/restored
-  // by setActiveWorkspaceId's swap, never per-item filtered) — see lib/contentRelationships.ts for
-  // the full model and its extensible RelationshipType union. `addContentRelationship` stamps
-  // `workspaceId` with the CURRENT activeWorkspaceId (never trusting a caller-supplied value, same
-  // discipline as addImportedContent) and validates sourceId/targetId against the CURRENT
-  // workspace's own `importedContent` ids — the mechanism that actually enforces "APFC relationships
-  // cannot reference UPSC/PhD content" etc. at runtime, returning a typed rejection instead of
-  // throwing or silently doing nothing.
+  // Repository relationships: a minimal, generic relationship between two entities in the PhD
+  // Research repository, workspace-scoped exactly like importedContent itself (archived/restored by
+  // setActiveWorkspaceId's swap, never per-item filtered) — see lib/contentRelationships.ts for the
+  // full model and its extensible RelationshipType union. Each endpoint explicitly names which
+  // collection it belongs to (RelationshipEntityType: 'imported_content' | 'note') — added so Notes
+  // (lib/types.ts's Note, a separate collection from ImportedContent) can participate in the same
+  // relationship model without converting Notes into ImportedContent or building a second model.
+  // `addContentRelationship` stamps `workspaceId` with the CURRENT activeWorkspaceId (never
+  // trusting a caller-supplied value, same discipline as addImportedContent) and validates each
+  // endpoint's id against the CURRENT workspace's own `importedContent`/`notes` ids (by its type) —
+  // the mechanism that actually enforces "APFC relationships cannot reference UPSC/PhD content"
+  // etc. at runtime, returning a typed rejection instead of throwing or silently doing nothing.
   contentRelationships: ContentRelationship[];
-  addContentRelationship: (input: { sourceId: string; targetId: string; type: RelationshipType }) => CreateRelationshipResult;
+  addContentRelationship: (input: { source: RelationshipEndpoint; target: RelationshipEndpoint; type: RelationshipType }) => CreateRelationshipResult;
   deleteContentRelationship: (id: string) => void;
 
   // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
@@ -271,7 +282,17 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // (ContentRelationship[] — see lib/contentRelationships.ts) the exact same way: another brand-new,
 // workspace-owned field with nothing pre-existing to migrate, defaulted to `[]` at both the
 // top-level active field and inside every inactiveWorkspaceOwnedData snapshot.
-export const APP_STORE_PERSIST_VERSION = 5;
+//
+// Version 6 (Notes <-> Research Repository Linking) extends every EXISTING contentRelationships
+// entry rather than adding a new field: each relationship endpoint now explicitly carries an
+// entity type (RelationshipEntityType: 'imported_content' | 'note' — see
+// lib/contentRelationships.ts), so a bare id is never ambiguous between the two collections. Every
+// relationship created before this version was necessarily between two ImportedContent items (Note
+// linking didn't exist yet), so migrating one is simply stamping `sourceType`/`targetType:
+// 'imported_content'` onto it when missing — never invented data, exactly what was already
+// implicitly true. Reaches the same two places as every prior workspace-owned backfill: the active
+// top-level field, and every snapshot inside inactiveWorkspaceOwnedData.
+export const APP_STORE_PERSIST_VERSION = 6;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -287,16 +308,29 @@ function stampWorkspaceIdOnObject(value: unknown): unknown {
   return { ...value, workspaceId: (value as { workspaceId?: WorkspaceKind }).workspaceId ?? DEFAULT_WORKSPACE_ID };
 }
 
-/** Backfills `importedContent: []` and `contentRelationships: []` onto a workspace-owned data
- * snapshot that predates one or both fields — used for both the active top-level state and every
- * archived snapshot inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
+/** Version 6 — backfills `sourceType`/`targetType: 'imported_content'` onto a relationship that
+ * predates entity-type endpoints (see lib/contentRelationships.ts's RelationshipEntityType). Every
+ * such relationship was, by construction, between two ImportedContent items. */
+function stampRelationshipEntityTypes(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const r = item as { sourceType?: string; targetType?: string };
+    return { ...item, sourceType: r.sourceType ?? 'imported_content', targetType: r.targetType ?? 'imported_content' };
+  });
+}
+
+/** Backfills `importedContent: []` and `contentRelationships: []` (with every entry's entity types
+ * stamped — see stampRelationshipEntityTypes) onto a workspace-owned data snapshot that predates
+ * one or more of these — used for both the active top-level state and every archived snapshot
+ * inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
 function withWorkspaceOwnedDefaults(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const snapshot = value as Record<string, unknown>;
   return {
     ...snapshot,
     importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [],
-    contentRelationships: Array.isArray(snapshot.contentRelationships) ? snapshot.contentRelationships : [],
+    contentRelationships: stampRelationshipEntityTypes(Array.isArray(snapshot.contentRelationships) ? snapshot.contentRelationships : []),
   };
 }
 
@@ -332,7 +366,7 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     personalStudyPlanTasks: stampWorkspaceIdOnArray(state.personalStudyPlanTasks),
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
     importedContent: Array.isArray(state.importedContent) ? state.importedContent : [],
-    contentRelationships: Array.isArray(state.contentRelationships) ? state.contentRelationships : [],
+    contentRelationships: stampRelationshipEntityTypes(Array.isArray(state.contentRelationships) ? state.contentRelationships : []),
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: withWorkspaceOwnedDefaultsInArchive(state.inactiveWorkspaceOwnedData),
   };
@@ -380,7 +414,13 @@ export const useAppStore = create<AppState>()(
           }
           return { notes: [stamped, ...state.notes] };
         }),
-      deleteNote: (id) => set((state) => ({ notes: state.notes.filter((n) => n.id !== id) })),
+      deleteNote: (id) =>
+        set((state) => ({
+          notes: state.notes.filter((n) => n.id !== id),
+          contentRelationships: state.contentRelationships.filter(
+            (r) => !((r.sourceId === id && r.sourceType === 'note') || (r.targetId === id && r.targetType === 'note')),
+          ),
+        })),
       togglePinNote: (id) =>
         set((state) => ({
           notes: state.notes.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n)),
@@ -537,18 +577,26 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           importedContent: state.importedContent.filter((c) => c.id !== id),
           // Cascade: a relationship pointing at content that no longer exists is never left
-          // dangling — see contentRelationships below.
-          contentRelationships: state.contentRelationships.filter((r) => r.sourceId !== id && r.targetId !== id),
+          // dangling — see contentRelationships below. Type-checked too: an id that happens to
+          // coincide with a Note's id (astronomically unlikely, but never assumed impossible — see
+          // lib/contentRelationships.ts's module header) must never cascade-delete a note-endpoint
+          // relationship by mistake.
+          contentRelationships: state.contentRelationships.filter(
+            (r) => !((r.sourceId === id && r.sourceType === 'imported_content') || (r.targetId === id && r.targetType === 'imported_content')),
+          ),
         })),
 
       contentRelationships: [],
       addContentRelationship: (input) => {
         const state = get();
-        const validContentIds = new Set(state.importedContent.map((c) => c.id));
-        const result = createContentRelationship(state.contentRelationships, validContentIds, {
+        const pools = {
+          importedContentIds: new Set(state.importedContent.map((c) => c.id)),
+          noteIds: new Set(state.notes.map((n) => n.id)),
+        };
+        const result = createContentRelationship(state.contentRelationships, pools, {
           workspaceId: state.activeWorkspaceId,
-          sourceId: input.sourceId,
-          targetId: input.targetId,
+          source: input.source,
+          target: input.target,
           type: input.type,
         });
         if (result.status === 'ok') {

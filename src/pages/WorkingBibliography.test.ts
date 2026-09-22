@@ -22,7 +22,7 @@ import {
   parseAuthorsInput,
 } from '../lib/bibliography';
 import { getContentTags, getContentCategory, parseTagsInput } from '../lib/importedContentRepository';
-import { getOutgoingRelationships, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
+import { getOutgoingRelationships, getIncomingRelationships, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and PhdResearch.test.ts for the established convention). These tests
@@ -390,10 +390,10 @@ describe('bibliography -> research document linking', () => {
     const doc = addResearchDocument('Chapter 1 Draft');
     const record = addManualRecord({ title: 'Key Source' });
 
-    const result = useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc.id, type: 'cites' });
+    const result = useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
     expect(result.status).toBe('ok');
 
-    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id);
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id, 'imported_content');
     expect(outgoing).toHaveLength(1);
     expect(outgoing[0].targetId).toBe(doc.id);
     expect(outgoing[0].type).toBe('cites');
@@ -407,11 +407,11 @@ describe('bibliography -> research document linking', () => {
     const doc3 = addResearchDocument('Doc 3');
     const record = addManualRecord({ title: 'Multi-linked Source' });
 
-    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc1.id, type: 'cites' });
-    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc2.id, type: 'supports' });
-    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc3.id, type: 'related_to' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc1.id, type: 'imported_content' }, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc2.id, type: 'imported_content' }, type: 'supports' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc3.id, type: 'imported_content' }, type: 'related_to' });
 
-    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id);
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id, 'imported_content');
     expect(outgoing.map((r) => r.type).sort()).toEqual(['cites', 'related_to', 'supports']);
   });
 
@@ -420,8 +420,8 @@ describe('bibliography -> research document linking', () => {
     const doc = addResearchDocument('Doc');
     const record = addManualRecord({ title: 'Source' });
 
-    useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc.id, type: 'cites' });
-    const second = useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: doc.id, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
+    const second = useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
     expect(second).toMatchObject({ status: 'error', reason: 'duplicate' });
   });
 
@@ -431,7 +431,7 @@ describe('bibliography -> research document linking', () => {
     useAppStore.getState().setActiveWorkspaceId('phd_research');
     const record = addManualRecord({ title: 'Source' });
 
-    const result = useAppStore.getState().addContentRelationship({ sourceId: record.id, targetId: apfcDoc.id, type: 'cites' });
+    const result = useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: apfcDoc.id, type: 'imported_content' }, type: 'cites' });
     expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
 
     function addImportedApfcDoc() {
@@ -447,5 +447,83 @@ describe('bibliography -> research document linking', () => {
     addResearchDocument('Some Document');
     addManualRecord({ title: 'Some Source' });
     expect(useAppStore.getState().contentRelationships).toEqual([]);
+  });
+});
+
+// Notes <-> Research Repository Linking — a bibliography record can ALSO explicitly link to a Note
+// (record = source, note = target), created directly from this page's own "Linked Notes" action —
+// see components/phdResearch/LinkedNotesModal.tsx, shared with pages/PhdResearch.tsx.
+describe('bibliography -> note linking', () => {
+  beforeEach(fullReset);
+
+  function addNote(id: string, title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().upsertNote({ id, subject: 'general', title, content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+  }
+
+  it('a bibliography record can link to an existing note', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Source With Notes' });
+    addNote('n1', 'My Reading Note');
+
+    const result = useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'cites' });
+    expect(result.status).toBe('ok');
+
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id, 'imported_content').filter((r) => r.targetType === 'note');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0].targetId).toBe('n1');
+  });
+
+  it("the note's own incoming view resolves back to the bibliography record", () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Source' });
+    addNote('n1', 'Note');
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'supports' });
+
+    const incoming = getIncomingRelationships(useAppStore.getState().contentRelationships, 'n1', 'note');
+    expect(incoming).toHaveLength(1);
+    expect(incoming[0].sourceId).toBe(record.id);
+    expect(incoming[0].type).toBe('supports');
+  });
+
+  it('rejects linking to a note id that does not exist', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Source' });
+    const result = useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'ghost-note', type: 'note' }, type: 'cites' });
+    expect(result).toMatchObject({ status: 'error', reason: 'invalid_target' });
+  });
+
+  it('unlinking a note removes the relationship', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Source' });
+    addNote('n1', 'Note');
+    const result = useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'cites' });
+    if (result.status !== 'ok') throw new Error('expected ok');
+
+    useAppStore.getState().deleteContentRelationship(result.relationship.id);
+    expect(getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id, 'imported_content')).toEqual([]);
+  });
+
+  it('deleting the note cascades and removes the relationship (both sides update)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Source' });
+    addNote('n1', 'Note');
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'cites' });
+
+    useAppStore.getState().deleteNote('n1');
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
+  });
+
+  it('regression: linking a note does not affect existing bibliography search/filter/edit behaviour', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Fieldwork Source' });
+    addNote('n1', 'Note');
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'cites' });
+
+    const all = selectImportedContentByType(useAppStore.getState().importedContent, 'bibliography');
+    expect(queryBibliography(all, { search: 'Fieldwork' }).map((r) => r.id)).toEqual([record.id]);
+
+    useAppStore.getState().updateImportedContent(record.id, { title: 'Renamed Source' });
+    expect(useAppStore.getState().importedContent.find((c) => c.id === record.id)?.title).toBe('Renamed Source');
   });
 });

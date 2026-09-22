@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, Plus, X, BookMarked, Trash2, Eye, Pencil, Search, Tag, SlidersHorizontal, ExternalLink, Link2, Unlink } from 'lucide-react';
+import { GraduationCap, Upload, Plus, X, BookMarked, Trash2, Eye, Pencil, Search, Tag, SlidersHorizontal, ExternalLink, Link2, Unlink, NotebookPen } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
+import { LinkedNotesModal } from '../components/phdResearch/LinkedNotesModal';
 import { cx } from '../lib/utils';
 import {
   extractContentFromFile,
@@ -135,6 +136,7 @@ export default function WorkingBibliography() {
   const addImportedContent = useAppStore((s) => s.addImportedContent);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
+  const notes = useAppStore((s) => s.notes);
   const contentRelationships = useAppStore((s) => s.contentRelationships);
   const addContentRelationship = useAppStore((s) => s.addContentRelationship);
   const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
@@ -157,6 +159,7 @@ export default function WorkingBibliography() {
 
   const [viewing, setViewing] = useState<ImportedContent | null>(null);
   const [linkingRecord, setLinkingRecord] = useState<ImportedContent | null>(null);
+  const [notesLinkingRecord, setNotesLinkingRecord] = useState<ImportedContent | null>(null);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -201,6 +204,14 @@ export default function WorkingBibliography() {
 
   function toggleTagFilter(tag: string) {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+  }
+
+  function linkedDocumentCount(recordId: string) {
+    return getOutgoingRelationships(contentRelationships, recordId, 'imported_content').filter((r) => r.targetType === 'imported_content').length;
+  }
+
+  function linkedNoteCount(recordId: string) {
+    return getOutgoingRelationships(contentRelationships, recordId, 'imported_content').filter((r) => r.targetType === 'note').length;
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -632,9 +643,22 @@ export default function WorkingBibliography() {
                           className="relative rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
                         >
                           <Link2 className="h-3.5 w-3.5" />
-                          {getOutgoingRelationships(contentRelationships, record.id).length > 0 && (
+                          {linkedDocumentCount(record.id) > 0 && (
                             <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-brand-600 text-[9px] font-semibold text-white">
-                              {getOutgoingRelationships(contentRelationships, record.id).length}
+                              {linkedDocumentCount(record.id)}
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setNotesLinkingRecord(record)}
+                          aria-label="Linked notes"
+                          title="Linked notes"
+                          className="relative rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <NotebookPen className="h-3.5 w-3.5" />
+                          {linkedNoteCount(record.id) > 0 && (
+                            <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-brand-600 text-[9px] font-semibold text-white">
+                              {linkedNoteCount(record.id)}
                             </span>
                           )}
                         </button>
@@ -687,9 +711,24 @@ export default function WorkingBibliography() {
           record={linkingRecord}
           researchDocuments={researchDocuments}
           relationships={contentRelationships}
-          onLink={(targetId, type) => addContentRelationship({ sourceId: linkingRecord.id, targetId, type })}
+          onLink={(targetId, type) =>
+            addContentRelationship({ source: { id: linkingRecord.id, type: 'imported_content' }, target: { id: targetId, type: 'imported_content' }, type })
+          }
           onUnlink={(relationshipId) => deleteContentRelationship(relationshipId)}
           onClose={() => setLinkingRecord(null)}
+        />
+      )}
+      {notesLinkingRecord && (
+        <LinkedNotesModal
+          sourceId={notesLinkingRecord.id}
+          sourceLabel={notesLinkingRecord.title}
+          notes={notes}
+          relationships={contentRelationships}
+          onLink={(noteId, type) =>
+            addContentRelationship({ source: { id: notesLinkingRecord.id, type: 'imported_content' }, target: { id: noteId, type: 'note' }, type })
+          }
+          onUnlink={(relationshipId) => deleteContentRelationship(relationshipId)}
+          onClose={() => setNotesLinkingRecord(null)}
         />
       )}
     </div>
@@ -865,7 +904,8 @@ function LinkedDocumentsModal({
   const [selectedType, setSelectedType] = useState<RelationshipType>('cites');
   const [linkError, setLinkError] = useState<string | null>(null);
 
-  const linked = getOutgoingRelationships(relationships, record.id)
+  const linked = getOutgoingRelationships(relationships, record.id, 'imported_content')
+    .filter((r) => r.targetType === 'imported_content')
     .map((relationship) => ({ relationship, document: getImportedContentById(researchDocuments, relationship.targetId) }))
     .filter((entry): entry is { relationship: (typeof relationships)[number]; document: ImportedContent } => !!entry.document);
 
