@@ -16,6 +16,7 @@ import {
   parseTagsInput,
 } from '../lib/importedContentRepository';
 import { getIncomingRelationships, getOutgoingRelationships } from '../lib/contentRelationships';
+import { countRelatedContent } from '../lib/relatedContentSummary';
 
 // This page has no rendering test here (the project has no React Testing Library / DOM test
 // environment — see StudyPlan.test.ts and every other *.test.ts file in this repo, which all test
@@ -482,5 +483,51 @@ describe('research document — linked notes (create, display, unlink)', () => {
 
     expect(getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id, 'imported_content').filter((r) => r.sourceType === 'imported_content')).toHaveLength(1);
     expect(getOutgoingRelationships(useAppStore.getState().contentRelationships, doc.id, 'imported_content').filter((r) => r.targetType === 'note')).toHaveLength(1);
+  });
+});
+
+// Related Content Summary (this stage) — the research document card shows countRelatedContent's
+// `notes` and `bibliographyRecords` fields specifically (never `researchDocuments`, since a
+// document does not summarise other documents on its own card). These tests pin down exactly that
+// segment composition, matching pages/PhdResearch.tsx's own countRelatedContent(...) call.
+describe('research document card — related content summary segment composition', () => {
+  beforeEach(fullReset);
+
+  function addDoc(title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview({ title }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(content);
+    return content;
+  }
+
+  function addBibliographyRecord(title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview({ title }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(content);
+    return content;
+  }
+
+  function addNote(id: string, title: string) {
+    useAppStore.getState().upsertNote({ id, subject: 'general', title, content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+  }
+
+  it('a document with a linked note and a linked bibliography source shows Notes:1 and Sources:1', () => {
+    const doc = addDoc('Chapter');
+    const source = addBibliographyRecord('Source');
+    addNote('n1', 'Note');
+    useAppStore.getState().addContentRelationship({ source: { id: source.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'related_to' });
+
+    const state = useAppStore.getState();
+    const related = countRelatedContent(state.contentRelationships, doc.id, 'imported_content', state.importedContent, state.notes);
+    expect(related.notes).toBe(1);
+    expect(related.bibliographyRecords).toBe(1);
+  });
+
+  it('a document with no relationships shows the empty-state, i.e. total 0', () => {
+    const doc = addDoc('Untouched');
+    const state = useAppStore.getState();
+    const related = countRelatedContent(state.contentRelationships, doc.id, 'imported_content', state.importedContent, state.notes);
+    expect(related.total).toBe(0);
   });
 });

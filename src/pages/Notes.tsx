@@ -12,6 +12,8 @@ import type { Note, SubjectColorKey } from '../lib/types';
 import { importNoteFile, SUPPORTED_IMPORT_EXTENSIONS } from '../lib/noteImport';
 import { getImportedContentById, type ImportedContent } from '../lib/contentImport';
 import { getIncomingRelationships, RELATIONSHIP_TYPE_LABELS, type ContentRelationship } from '../lib/contentRelationships';
+import { countRelatedContent } from '../lib/relatedContentSummary';
+import { RelatedContentSummary } from '../components/phdResearch/RelatedContentSummary';
 
 const TOPIC_TITLES: Record<string, string> = Object.fromEntries(SYLLABUS.flatMap((s) => s.topics.map((t) => [t.id, t.title])));
 const TOPIC_SUBJECTS: Record<string, SubjectColorKey> = Object.fromEntries(
@@ -605,6 +607,7 @@ function NoteEditor({
 function LinkedResearchSection({ noteId }: { noteId: string }) {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
+  const notes = useAppStore((s) => s.notes);
   const contentRelationships = useAppStore((s) => s.contentRelationships);
   const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
 
@@ -614,15 +617,27 @@ function LinkedResearchSection({ noteId }: { noteId: string }) {
     .map((relationship) => ({ relationship, source: getImportedContentById(importedContent, relationship.sourceId) }))
     .filter((entry): entry is { relationship: ContentRelationship; source: ImportedContent } => !!entry.source);
 
+  // Non-interactive — the full detail already renders directly below this summary (no separate
+  // modal to open for a note, unlike the document/bibliography sides — see RelatedContentSummary's
+  // own doc comment).
+  const related = countRelatedContent(contentRelationships, noteId, 'note', importedContent, notes);
+
   return (
     <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        <Link2 className="h-3.5 w-3.5" /> Linked Research
-      </p>
-      {linked.length === 0 ? (
-        <p className="text-xs text-slate-400">
-          Not linked to any research document or bibliography record yet. Link this note from a document's or record's own "Linked Notes" action.
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <Link2 className="h-3.5 w-3.5" /> Linked Research
         </p>
+        <RelatedContentSummary
+          prefix=""
+          segments={[
+            { count: related.researchDocuments, singularLabel: 'Document', pluralLabel: 'Documents' },
+            { count: related.bibliographyRecords, singularLabel: 'Source', pluralLabel: 'Sources' },
+          ]}
+        />
+      </div>
+      {linked.length === 0 ? (
+        <p className="text-xs text-slate-400">Link this note from a document's or record's own "Linked Notes" action.</p>
       ) : (
         <div className="space-y-1.5">
           {linked.map(({ relationship, source }) => (

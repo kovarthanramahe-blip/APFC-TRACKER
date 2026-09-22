@@ -18,6 +18,7 @@ import {
 } from '../lib/contentImport';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { LinkedNotesModal } from '../components/phdResearch/LinkedNotesModal';
+import { RelatedContentSummary } from '../components/phdResearch/RelatedContentSummary';
 import {
   queryImportedContent,
   collectImportedContentTags,
@@ -27,6 +28,7 @@ import {
   parseTagsInput,
 } from '../lib/importedContentRepository';
 import { RELATIONSHIP_TYPE_LABELS, getIncomingRelationships, getOutgoingRelationships, type ContentRelationship } from '../lib/contentRelationships';
+import { countRelatedContent } from '../lib/relatedContentSummary';
 
 // PhD Research workspace repository — the import-first FILE -> EXTRACT -> PREVIEW -> CONFIRM ->
 // SAVE -> DISPLAY pipeline (lib/contentImport.ts), plus repository organisation (search, tags,
@@ -296,6 +298,7 @@ export default function PhdResearch() {
           {filteredDocuments.map((doc) => {
             const tags = getContentTags(doc);
             const category = getContentCategory(doc);
+            const related = countRelatedContent(contentRelationships, doc.id, 'imported_content', importedContent, notes);
             return (
               <Card key={doc.id} className="flex h-full flex-col p-4">
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -319,6 +322,25 @@ export default function PhdResearch() {
                     ))}
                   </div>
                 )}
+                <RelatedContentSummary
+                  className="mt-2"
+                  segments={[
+                    {
+                      count: related.notes,
+                      singularLabel: 'Note',
+                      pluralLabel: 'Notes',
+                      accessibleLabel: `View ${related.notes} note${related.notes === 1 ? '' : 's'} linked to ${doc.title}`,
+                      onOpen: () => setNotesLinkingDoc(doc),
+                    },
+                    {
+                      count: related.bibliographyRecords,
+                      singularLabel: 'Source',
+                      pluralLabel: 'Sources',
+                      accessibleLabel: `View ${related.bibliographyRecords} bibliography source${related.bibliographyRecords === 1 ? '' : 's'} linked to ${doc.title}`,
+                      onOpen: () => setLinksDoc(doc),
+                    },
+                  ]}
+                />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Button variant="secondary" size="sm" onClick={() => setViewing(doc)}>
                     <Eye className="h-3.5 w-3.5" /> View

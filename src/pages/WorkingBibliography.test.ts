@@ -23,6 +23,7 @@ import {
 } from '../lib/bibliography';
 import { getContentTags, getContentCategory, parseTagsInput } from '../lib/importedContentRepository';
 import { getOutgoingRelationships, getIncomingRelationships, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
+import { countRelatedContent } from '../lib/relatedContentSummary';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and PhdResearch.test.ts for the established convention). These tests
@@ -525,5 +526,48 @@ describe('bibliography -> note linking', () => {
 
     useAppStore.getState().updateImportedContent(record.id, { title: 'Renamed Source' });
     expect(useAppStore.getState().importedContent.find((c) => c.id === record.id)?.title).toBe('Renamed Source');
+  });
+});
+
+// Related Content Summary (this stage) — the bibliography row shows countRelatedContent's
+// `researchDocuments` and `notes` fields specifically, matching pages/WorkingBibliography.tsx's
+// own countRelatedContent(...) call.
+describe('bibliography row — related content summary segment composition', () => {
+  beforeEach(fullReset);
+
+  function addResearchDocument(title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const preview = buildImportPreview({ name: `${title}.md` }, { format: 'markdown', text: `# ${title}` });
+    const content = confirmImportedContent(preview, { workspaceId: 'phd_research', contentType: 'research_document', title });
+    useAppStore.getState().addImportedContent(content);
+    return content;
+  }
+
+  function addNote(id: string, title: string) {
+    useAppStore.getState().upsertNote({ id, subject: 'general', title, content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+  }
+
+  it('a record linked to two documents and one note shows Documents:2 and Notes:1', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Multi-linked Source' });
+    const doc1 = addResearchDocument('Doc 1');
+    const doc2 = addResearchDocument('Doc 2');
+    addNote('n1', 'Note');
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc1.id, type: 'imported_content' }, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc2.id, type: 'imported_content' }, type: 'supports' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'related_to' });
+
+    const state = useAppStore.getState();
+    const related = countRelatedContent(state.contentRelationships, record.id, 'imported_content', state.importedContent, state.notes);
+    expect(related.researchDocuments).toBe(2);
+    expect(related.notes).toBe(1);
+  });
+
+  it('a record with no relationships shows the empty-state, i.e. total 0', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const record = addManualRecord({ title: 'Untouched Source' });
+    const state = useAppStore.getState();
+    const related = countRelatedContent(state.contentRelationships, record.id, 'imported_content', state.importedContent, state.notes);
+    expect(related.total).toBe(0);
   });
 });

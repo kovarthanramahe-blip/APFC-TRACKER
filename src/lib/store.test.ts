@@ -7,6 +7,7 @@ import { selectImportedContentByType, type ImportedContent } from './contentImpo
 import { PYQ_BANK } from '../data/pyq';
 import type { ContentRelationship } from './contentRelationships';
 import type { Note } from './types';
+import { countRelatedContent } from './relatedContentSummary';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
 // works directly outside React for in-memory state (persist's localStorage access is safely
@@ -1310,5 +1311,166 @@ describe('Repository relationships — contentRelationships (ImportedContent <->
       useAppStore.getState().deleteNote('note1');
       expect(useAppStore.getState().contentRelationships).toHaveLength(1);
     });
+  });
+});
+
+// Related Content Summary — lib/relatedContentSummary.ts's countRelatedContent is a purely
+// derived read over the real store's contentRelationships/importedContent/notes, never a stored
+// value of its own (see that module's doc comment). These tests exercise it directly against a
+// real, mutating store — exactly what pages/PhdResearch.tsx, pages/WorkingBibliography.tsx and
+// pages/Notes.tsx call after every render — proving counts are always in sync with no cache to
+// invalidate: link, unlink, delete content, delete a note, or switch workspace, and re-read.
+describe('Related Content Summary — count correctness across the relationship lifecycle', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+      importedContent: [],
+      contentRelationships: [],
+    });
+  }
+  beforeEach(fullReset);
+
+  function contentFixture(overrides: Partial<ImportedContent> = {}): ImportedContent {
+    return {
+      id: overrides.id ?? 'c1',
+      workspaceId: overrides.workspaceId ?? 'phd_research',
+      contentType: overrides.contentType ?? 'research_document',
+      title: overrides.title ?? 'Item',
+      rawContent: overrides.rawContent ?? '',
+      provenance: overrides.provenance ?? { sourceFilename: 'x.md', originalFormat: 'markdown', importedAt: '2026-01-01T00:00:00.000Z' },
+      metadata: overrides.metadata,
+    };
+  }
+
+  function noteFixture(overrides: Partial<Note> = {}): Note {
+    return {
+      id: overrides.id ?? 'note1',
+      subject: overrides.subject ?? 'general',
+      title: overrides.title ?? 'Note',
+      content: overrides.content ?? 'x',
+      createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
+      updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
+      pinned: overrides.pinned ?? false,
+      workspaceId: overrides.workspaceId,
+      topicId: overrides.topicId,
+    };
+  }
+
+  const ic = (id: string) => ({ id, type: 'imported_content' as const });
+  const noteEndpoint = (id: string) => ({ id, type: 'note' as const });
+
+  function currentCounts(entityId: string, entityType: 'imported_content' | 'note') {
+    const state = useAppStore.getState();
+    return countRelatedContent(state.contentRelationships, entityId, entityType, state.importedContent, state.notes);
+  }
+
+  it('count updates immediately after linking', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1', contentType: 'research_document' }));
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+    expect(currentCounts('doc1', 'imported_content').bibliographyRecords).toBe(0);
+
+    useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+    expect(currentCounts('doc1', 'imported_content').bibliographyRecords).toBe(1);
+  });
+
+  it('count updates immediately after unlinking', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+    const result = useAppStore.getState().addContentRelationship({ source: ic('doc1'), target: noteEndpoint('note1'), type: 'related_to' });
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(currentCounts('doc1', 'imported_content').notes).toBe(1);
+
+    useAppStore.getState().deleteContentRelationship(result.relationship.id);
+    expect(currentCounts('doc1', 'imported_content').notes).toBe(0);
+  });
+
+  it('count updates immediately after deleting the LINKED content (cascade)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+    useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+    expect(currentCounts('doc1', 'imported_content').bibliographyRecords).toBe(1);
+
+    useAppStore.getState().deleteImportedContent('bib1'); // cascades the relationship away too
+    expect(currentCounts('doc1', 'imported_content').bibliographyRecords).toBe(0);
+  });
+
+  it('count updates immediately after deleting a linked NOTE (cascade)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().upsertNote(noteFixture({ id: 'note1' }));
+    useAppStore.getState().addContentRelationship({ source: ic('doc1'), target: noteEndpoint('note1'), type: 'related_to' });
+    expect(currentCounts('doc1', 'imported_content').notes).toBe(1);
+
+    useAppStore.getState().deleteNote('note1');
+    expect(currentCounts('doc1', 'imported_content').notes).toBe(0);
+  });
+
+  it('count updates immediately after deleting the item the count is FOR (nothing crashes, and the relationship itself is gone too)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+    useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+
+    useAppStore.getState().deleteImportedContent('doc1');
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
+    expect(() => currentCounts('bib1', 'imported_content')).not.toThrow();
+    expect(currentCounts('bib1', 'imported_content').researchDocuments).toBe(0);
+  });
+
+  it('workspace isolation: counts reflect only the active workspace\'s own relationships', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+    useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+    expect(currentCounts('doc1', 'imported_content').bibliographyRecords).toBe(1);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    // doc1/bib1/their relationship are all archived away — nothing in the active (apfc) workspace
+    // has that id at all, so the count is correctly zero, not an error.
+    expect(currentCounts('doc1', 'imported_content').total).toBe(0);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(currentCounts('doc1', 'imported_content').bibliographyRecords).toBe(1);
+  });
+
+  it('switching to a workspace that never had this content keeps counts at zero, not stale', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+    useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // never visited before, starts empty
+    expect(currentCounts('doc1', 'imported_content')).toEqual({ notes: 0, researchDocuments: 0, bibliographyRecords: 0, other: 0, total: 0 });
+  });
+
+  it('regression: existing relationship functionality (creation, cascade, isolation) is unaffected by counting', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'doc1' }));
+    useAppStore.getState().addImportedContent(contentFixture({ id: 'bib1', contentType: 'bibliography' }));
+    const result = useAppStore.getState().addContentRelationship({ source: ic('bib1'), target: ic('doc1'), type: 'cites' });
+    expect(result.status).toBe('ok');
+    expect(useAppStore.getState().contentRelationships).toHaveLength(1);
+    // Reading counts never mutates the store.
+    currentCounts('doc1', 'imported_content');
+    currentCounts('bib1', 'imported_content');
+    expect(useAppStore.getState().contentRelationships).toHaveLength(1);
+    expect(useAppStore.getState().importedContent).toHaveLength(2);
   });
 });

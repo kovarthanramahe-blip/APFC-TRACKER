@@ -4,6 +4,7 @@ import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import { confirmImportedContent, getImportedContentById, type ImportPreview } from '../lib/contentImport';
 import { getIncomingRelationships } from '../lib/contentRelationships';
+import { countRelatedContent } from '../lib/relatedContentSummary';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and every other page test file for the established convention). These
@@ -151,5 +152,35 @@ describe('Notes — regression: existing Notes editing/import behaviour is unaff
     useAppStore.getState().upsertNote({ id: 'apfc-n1', subject: 'general', title: 'APFC Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
     expect(useAppStore.getState().notes).toHaveLength(1);
     expect(getIncomingRelationships(useAppStore.getState().contentRelationships, 'apfc-n1', 'note')).toEqual([]);
+  });
+});
+
+// Related Content Summary (this stage) — the note's LinkedResearchSection header shows
+// countRelatedContent's `researchDocuments` and `bibliographyRecords` fields specifically (never
+// `notes`, since a note does not summarise other notes on its own header), matching
+// pages/Notes.tsx's own countRelatedContent(...) call.
+describe('note header — related content summary segment composition', () => {
+  beforeEach(fullReset);
+
+  it('a note linked from one document and one bibliography record shows Documents:1 and Sources:1', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+    const doc = addResearchDocument('Doc');
+    const bib = addBibliographyRecord('Source');
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: bib.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'supports' });
+
+    const state = useAppStore.getState();
+    const related = countRelatedContent(state.contentRelationships, 'n1', 'note', state.importedContent, state.notes);
+    expect(related.researchDocuments).toBe(1);
+    expect(related.bibliographyRecords).toBe(1);
+  });
+
+  it('a note with no relationships shows the empty-state, i.e. total 0', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Unlinked', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+    const state = useAppStore.getState();
+    const related = countRelatedContent(state.contentRelationships, 'n1', 'note', state.importedContent, state.notes);
+    expect(related.total).toBe(0);
   });
 });

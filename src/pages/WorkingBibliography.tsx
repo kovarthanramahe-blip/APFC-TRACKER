@@ -5,6 +5,7 @@ import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { LinkedNotesModal } from '../components/phdResearch/LinkedNotesModal';
+import { RelatedContentSummary } from '../components/phdResearch/RelatedContentSummary';
 import { cx } from '../lib/utils';
 import {
   extractContentFromFile,
@@ -44,6 +45,7 @@ import {
   type RelationshipType,
   type ContentRelationship,
 } from '../lib/contentRelationships';
+import { countRelatedContent } from '../lib/relatedContentSummary';
 
 // PhD Research — Working Bibliography. A structured, searchable source repository sitting
 // alongside the research-document repository (pages/PhdResearch.tsx), reusing the same
@@ -593,6 +595,7 @@ export default function WorkingBibliography() {
                 const fields = getBibliographyFields(record);
                 const tags = getContentTags(record);
                 const category = getContentCategory(record);
+                const related = countRelatedContent(contentRelationships, record.id, 'imported_content', importedContent, notes);
                 return (
                   <tr key={record.id} className={cx(ri % 2 === 1 && 'bg-slate-50/60 dark:bg-slate-800/30')}>
                     <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top">
@@ -600,6 +603,25 @@ export default function WorkingBibliography() {
                       <Badge tone={isManuallyCreated(record) ? 'neutral' : 'success'} className="mt-1">
                         {isManuallyCreated(record) ? 'Manually added' : (record.provenance.sourceFilename ?? 'Imported')}
                       </Badge>
+                      <RelatedContentSummary
+                        className="mt-1"
+                        segments={[
+                          {
+                            count: related.researchDocuments,
+                            singularLabel: 'Document',
+                            pluralLabel: 'Documents',
+                            accessibleLabel: `View ${related.researchDocuments} research document${related.researchDocuments === 1 ? '' : 's'} linked to ${record.title}`,
+                            onOpen: () => setLinkingRecord(record),
+                          },
+                          {
+                            count: related.notes,
+                            singularLabel: 'Note',
+                            pluralLabel: 'Notes',
+                            accessibleLabel: `View ${related.notes} note${related.notes === 1 ? '' : 's'} linked to ${record.title}`,
+                            onOpen: () => setNotesLinkingRecord(record),
+                          },
+                        ]}
+                      />
                     </td>
                     <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top text-slate-600 dark:text-slate-300">
                       {fields.authors && fields.authors.length > 0 ? fields.authors.join(', ') : '—'}
