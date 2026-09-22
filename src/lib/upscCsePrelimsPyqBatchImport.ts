@@ -44,8 +44,11 @@ export interface UpscCsePrelimsPyqBatchQuestion {
   /** null (not just absent) is how the supplied batch format spells "no answer key" — mapped to
    * `undefined` on the resulting record, matching UpscCsePrelimsPyq.correctOptionId's own contract. */
   correctOptionId: string | null;
-  subject: string;
-  microsyllabusHint: string;
+  /** null when the batch's own preparation step didn't classify this question at all — distinct
+   * from a classified-but-unmatched hint (see resolveMicrosyllabusHint), and always needs_review
+   * either way, since there is nothing to resolve against. */
+  subject: string | null;
+  microsyllabusHint: string | null;
   /** As supplied by the batch — a blanket "this needs classifying" flag on every question in
    * practice, not itself a resolution. Never treated as the final mappingStatus; this module
    * computes that independently via resolveMicrosyllabusHint. */
@@ -69,7 +72,10 @@ export interface UpscCsePrelimsPyqBatchFile {
   stage: string;
   paper: string;
   year: number;
-  questionRange: string;
+  /** Informational only — never parsed or relied on for anything (question numbers themselves are
+   * what matters). Different batches have supplied this as a string ("1-50") or a two-element
+   * array ([51, 100]); both are accepted verbatim. */
+  questionRange: string | number[];
   source: UpscCsePrelimsPyqBatchSource;
   /** Freeform notes from whatever externally produced this batch (e.g. "no answer key was
    * supplied") — informational only; nothing in this module reads it, but it is preserved on the
@@ -203,9 +209,11 @@ export function buildUpscCsePrelimsBatchRecords(
       continue;
     }
 
-    const mapping: MicrosyllabusHintResolution = paper
-      ? resolveMicrosyllabusHint(tree, paper.id, q.subject, q.microsyllabusHint)
-      : { status: 'needs_review', reason: `Batch paper "${batch.paper}" does not match any paper in this syllabus tree.` };
+    const mapping: MicrosyllabusHintResolution = !paper
+      ? { status: 'needs_review', reason: `Batch paper "${batch.paper}" does not match any paper in this syllabus tree.` }
+      : q.subject === null || q.microsyllabusHint === null
+        ? { status: 'needs_review', reason: 'No subject/microsyllabus classification was supplied for this question.' }
+        : resolveMicrosyllabusHint(tree, paper.id, q.subject, q.microsyllabusHint);
 
     records.push({
       id: deriveCandidateId(batch.year, batch.paper, q.questionNumber),
@@ -215,8 +223,8 @@ export function buildUpscCsePrelimsBatchRecords(
       question: q.question,
       options: q.options,
       correctOptionId: q.correctOptionId ?? undefined,
-      subject: q.subject,
-      topic: q.microsyllabusHint,
+      subject: q.subject ?? undefined,
+      topic: q.microsyllabusHint ?? undefined,
       microsyllabusId: mapping.microsyllabusId,
       mappingStatus: mapping.status,
       provenance: {

@@ -141,6 +141,38 @@ describe('buildUpscCsePrelimsBatchRecords', () => {
   });
 });
 
+describe('buildUpscCsePrelimsBatchRecords — null subject/microsyllabusHint (unclassified batch)', () => {
+  it('a question with subject/microsyllabusHint both null is needs_review, never a crash, never a guess', () => {
+    const batch = fixtureBatch({
+      questions: [
+        {
+          questionNumber: 1,
+          question: 'Unclassified fixture question?',
+          options: [
+            { id: 'a', text: 'Opt A' },
+            { id: 'b', text: 'Opt B' },
+          ],
+          correctOptionId: null,
+          subject: null,
+          microsyllabusHint: null,
+          mappingStatus: 'review_required',
+        },
+      ],
+    });
+    const conversion = buildUpscCsePrelimsBatchRecords(batch, UPSC_CSE_PRELIMS_SYLLABUS);
+    expect(conversion.records).toHaveLength(1);
+    expect(conversion.records[0].mappingStatus).toBe('needs_review');
+    expect(conversion.records[0].microsyllabusId).toBeUndefined();
+    expect(conversion.records[0].subject).toBeUndefined();
+    expect(conversion.records[0].topic).toBeUndefined();
+  });
+
+  it('accepts a numeric-array questionRange (e.g. [51, 100]) exactly like a string range', () => {
+    const batch = fixtureBatch({ questionRange: [51, 100] });
+    expect(() => buildUpscCsePrelimsBatchRecords(batch, UPSC_CSE_PRELIMS_SYLLABUS)).not.toThrow();
+  });
+});
+
 describe('mergeUpscCsePrelimsPyqRecords — re-import safety', () => {
   const conversion = buildUpscCsePrelimsBatchRecords(fixtureBatch(), UPSC_CSE_PRELIMS_SYLLABUS);
 
