@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -19,7 +19,7 @@ import {
 } from '../lib/repository';
 import { collectImportedContentTags, collectImportedContentCategories, parseTagsInput, type ImportedContentSortOrder } from '../lib/importedContentRepository';
 import type { ImportedContentMetadata } from '../lib/contentImport';
-import { navigationTargetFor } from '../lib/repositoryNavigation';
+import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { ImportToRepositoryModal } from '../components/repository/ImportToRepositoryModal';
 
 // Global Repository UI — a single, read-only browse/search surface across everything
@@ -90,7 +90,12 @@ function ResultCard({
         <Badge tone="neutral">{workspaceLabel}</Badge>
         {entry.category && <Badge tone="gold">{entry.category}</Badge>}
       </div>
-      <h4 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{title}</h4>
+      <Link
+        to={repositoryDetailPathFor(entry.entityType, entry.entityId)}
+        className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 rounded"
+      >
+        {title}
+      </Link>
       <p className="mt-1 text-xs text-slate-400">
         {ORIGIN_LABELS[entry.origin]}
         {dateLabel && <> · {dateLabel}</>}
@@ -106,6 +111,13 @@ function ResultCard({
       )}
       <div className="mt-3 flex flex-1 items-end">
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={repositoryDetailPathFor(entry.entityType, entry.entityId)}
+            aria-label={`View details: ${title} (${meta.label})`}
+            className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
+          >
+            <Eye className="h-3 w-3" /> View
+          </Link>
           {target && (
             <Link
               to={target.to}
@@ -148,7 +160,7 @@ function buildEditedMetadata(tagsInput: string, categoryInput: string): Imported
  * updateImportedContent store action (the same one pages/PhdResearch.tsx's own metadata editor
  * calls) — no second persistence path.
  */
-function EditMetadataModal({
+export function EditMetadataModal({
   entry,
   existingCategories,
   onCancel,
@@ -239,7 +251,7 @@ function EditMetadataModal({
 /** Delete confirmation — the app's own modal styling (backdrop + panel + header/footer), never
  * window.confirm(). Names the item's title, content type, and workspace explicitly, per this
  * stage's own requirement. */
-function DeleteConfirmModal({ entry, onCancel, onConfirm }: { entry: RepositoryEntry; onCancel: () => void; onConfirm: () => void }) {
+export function DeleteConfirmModal({ entry, onCancel, onConfirm }: { entry: RepositoryEntry; onCancel: () => void; onConfirm: () => void }) {
   const meta = getRepositoryContentTypeMeta(entry.contentType);
   const workspaceLabel = getWorkspaceMeta(entry.workspaceId).label;
   return (
