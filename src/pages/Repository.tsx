@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -21,6 +21,7 @@ import { collectImportedContentTags, collectImportedContentCategories, parseTags
 import type { ImportedContentMetadata } from '../lib/contentImport';
 import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { ImportToRepositoryModal } from '../components/repository/ImportToRepositoryModal';
+import { ExportRepositoryModal } from '../components/repository/ExportRepositoryModal';
 
 // Global Repository UI — a single, read-only browse/search surface across everything
 // lib/repository.ts's foundation already knows how to discover (Notes + every registered
@@ -305,6 +306,7 @@ export default function Repository() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState<ImportedContentSortOrder>('newest');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<RepositoryEntry | null>(null);
   const [deletingEntry, setDeletingEntry] = useState<RepositoryEntry | null>(null);
 
@@ -379,13 +381,19 @@ export default function Repository() {
         title="Repository"
         description={`Browse and search everything stored in your ${workspaceLabel} workspace — notes, research documents, bibliography records, and more as they're added.`}
         action={
-          <Button onClick={() => setShowImportModal(true)}>
-            <Upload className="h-4 w-4" /> Import to Repository
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowExportModal(true)}>
+              <Download className="h-4 w-4" /> Export Repository
+            </Button>
+            <Button onClick={() => setShowImportModal(true)}>
+              <Upload className="h-4 w-4" /> Import to Repository
+            </Button>
+          </div>
         }
       />
 
       {showImportModal && <ImportToRepositoryModal onClose={() => setShowImportModal(false)} />}
+      {showExportModal && <ExportRepositoryModal onClose={() => setShowExportModal(false)} />}
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
