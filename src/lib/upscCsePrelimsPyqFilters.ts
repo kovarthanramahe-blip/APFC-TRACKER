@@ -164,3 +164,12 @@ export function computeEligibleRevisionIds(
   const incorrectIds = bank.filter((p) => revisionStatusOf(revisionStatusMap, p.id) === 'incorrect').map((p) => p.id);
   return [...new Set([...incorrectIds, ...bookmarkedIds])];
 }
+
+const VALID_REVISION_FILTER_VALUES: readonly UpscCsePrelimsRevisionFilter[] = ['all', 'correct', 'incorrect', 'unattempted'];
+
+/** Parses a `?revisionFilter=` URL query value (e.g. from a UPSC CSE Study Dashboard "Today's
+ * Study" deep link) into a real UpscCsePrelimsRevisionFilter — never trusts an arbitrary string
+ * straight through; anything unrecognised (including a missing param) falls back to 'all'. */
+export function parseRevisionFilterParam(value: string | null): UpscCsePrelimsRevisionFilter {
+  return value && (VALID_REVISION_FILTER_VALUES as readonly string[]).includes(value) ? (value as UpscCsePrelimsRevisionFilter) : 'all';
+}

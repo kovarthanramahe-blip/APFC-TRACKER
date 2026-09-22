@@ -228,6 +228,7 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'studyPlanGeneratedAt',
         'theme',
         'upscCsePrelimsPyqAttempts',
+        'upscCseStudyTasks',
         'upscCseSyllabusCoverage',
       ].sort(),
     );

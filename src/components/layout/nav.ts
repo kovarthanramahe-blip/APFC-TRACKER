@@ -13,6 +13,7 @@ import {
   Settings,
   GraduationCap,
   Library,
+  Compass,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/syllabus', label: 'Syllabus', icon: ListChecks },
+  { to: '/upsc-dashboard', label: 'UPSC CSE Dashboard', icon: Compass },
   { to: '/upsc-syllabus', label: 'UPSC CSE Syllabus', icon: ListTree },
   { to: '/pyq', label: 'Question Bank', icon: BookOpenCheck },
   { to: '/pyq-test', label: 'PYQs', icon: FileQuestion },

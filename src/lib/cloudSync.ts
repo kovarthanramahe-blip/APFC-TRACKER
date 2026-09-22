@@ -51,6 +51,8 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     Object.keys((data.upscCseSyllabusCoverage as object) ?? {}).length,
     // UPSC CSE Practice & Analytics — practice attempts are real user data too.
     ((data.upscCsePrelimsPyqAttempts as unknown[]) ?? []).length,
+    // UPSC CSE Study Dashboard — user-authored study tasks are real user data too.
+    ((data.upscCseStudyTasks as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }

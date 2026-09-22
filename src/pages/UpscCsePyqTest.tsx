@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -41,6 +41,7 @@ import {
   questionSubject,
   questionMicrosyllabusId,
   UNMAPPED_MICROSYLLABUS,
+  parseRevisionFilterParam,
   type UpscCsePrelimsRevisionFilter,
 } from '../lib/upscCsePrelimsPyqFilters';
 import {
@@ -203,13 +204,21 @@ export default function UpscCsePyqTest() {
   const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
   const recordRevisionIncorrect = useAppStore((s) => s.recordRevisionIncorrect);
 
-  const [phase, setPhase] = useState<Phase>('select');
+  // Deep-link support: the UPSC CSE Study Dashboard's "Today's Study" items arrive as
+  // /upsc-pyq-test?microsyllabusId=...&revisionFilter=...&view=revision|revise — read once at
+  // mount (useState's lazy initializer), same convention as pages/UpscCseSyllabus.tsx's own
+  // ?microsyllabusId= deep link and pages/PYQTest.tsx's own ?mode=weak_topics auto-start below.
+  const [searchParams] = useSearchParams();
+  const initialView = searchParams.get('view');
+  const autoStartRevisionRef = useRef(false);
+
+  const [phase, setPhase] = useState<Phase>(() => (initialView === 'revision' ? 'bookmarks' : 'select'));
 
   const [year, setYear] = useState<number | 'all'>('all');
   const [paper, setPaper] = useState<string | 'all'>('all');
   const [subject, setSubject] = useState<string | 'all'>('all');
-  const [microsyllabusId, setMicrosyllabusId] = useState<string | 'all'>('all');
-  const [revisionFilter, setRevisionFilter] = useState<UpscCsePrelimsRevisionFilter>('all');
+  const [microsyllabusId, setMicrosyllabusId] = useState<string | 'all'>(() => searchParams.get('microsyllabusId') ?? 'all');
+  const [revisionFilter, setRevisionFilter] = useState<UpscCsePrelimsRevisionFilter>(() => parseRevisionFilterParam(searchParams.get('revisionFilter')));
   const [countChoice, setCountChoice] = useState<CountChoice>(10);
 
   const session = useQuestionSession<UpscCsePrelimsBatchPyq>(SCORING);
@@ -408,6 +417,18 @@ export default function UpscCsePyqTest() {
     setReviseAnswer(null);
     setReviseChecked(false);
   }
+
+  // Deep-link support: /upsc-pyq-test?view=revise auto-starts the same Revise Now session as the
+  // "select" screen's own button, once per page load — mirrors pages/PYQTest.tsx's own
+  // ?mode=weak_topics auto-start. If nothing is due, this simply does nothing and the user lands
+  // on the select screen, exactly like clicking the (disabled) button manually would.
+  useEffect(() => {
+    if (autoStartRevisionRef.current) return;
+    if (initialView !== 'revise') return;
+    autoStartRevisionRef.current = true;
+    if (dueRevisionItems.length > 0) startRevision();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialView, dueRevisionItems]);
 
   if (activeWorkspaceId !== 'upsc_cse') {
     return (
