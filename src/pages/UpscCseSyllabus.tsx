@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ListTree, Search } from 'lucide-react';
 import { useAppStore } from '../lib/store';
@@ -9,6 +10,7 @@ import {
   getPapersForStage,
   getSubjectsForPaper,
   getMicrosyllabusForSubject,
+  resolveMicrosyllabusPath,
   type UpscCseExamStage,
   type UpscCseSyllabusTree,
   type UpscCseSyllabusPaper,
@@ -99,16 +101,26 @@ function MicrosyllabusRow({
   subject,
   coverage,
   onSetCoverage,
+  isDeepLinked,
+  deepLinkRef,
 }: {
   item: UpscCseMicrosyllabusItem;
   paper: UpscCseSyllabusPaper;
   subject: UpscCseSyllabusSubject;
   coverage: UpscCseSyllabusCoverage;
   onSetCoverage: (microsyllabusId: string, state: UpscCseCoverageState) => void;
+  isDeepLinked?: boolean;
+  deepLinkRef?: React.Ref<HTMLLIElement>;
 }) {
   const state = getCoverageState(coverage, item.id);
   return (
-    <li className="flex items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+    <li
+      ref={isDeepLinked ? deepLinkRef : undefined}
+      className={cx(
+        'flex items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors',
+        isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60',
+      )}
+    >
       <div className="min-w-0 flex-1">
         <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
           {paper.shortTitle} › {subject.title}
@@ -130,6 +142,8 @@ function SubjectSection({
   isOpen,
   onToggle,
   query,
+  deepLinkMicrosyllabusId,
+  deepLinkRef,
 }: {
   tree: UpscCseSyllabusTree;
   paper: UpscCseSyllabusPaper;
@@ -139,13 +153,16 @@ function SubjectSection({
   isOpen: boolean;
   onToggle: () => void;
   query: string;
+  deepLinkMicrosyllabusId?: string;
+  deepLinkRef?: React.Ref<HTMLLIElement>;
 }) {
   const allItems = useMemo(() => getMicrosyllabusForSubject(tree, subject.id), [tree, subject.id]);
   const items = useMemo(() => filterMicrosyllabusBySubject(tree, subject.id, query), [tree, subject.id, query]);
   const summary = useMemo(() => computeCoverageSummary(allItems.map((m) => m.id), coverage), [allItems, coverage]);
+  const containsDeepLink = !!deepLinkMicrosyllabusId && allItems.some((m) => m.id === deepLinkMicrosyllabusId);
 
   if (query.trim() && items.length === 0) return null;
-  const expanded = isOpen || !!query.trim();
+  const expanded = isOpen || !!query.trim() || containsDeepLink;
 
   return (
     <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 overflow-hidden">
@@ -173,7 +190,16 @@ function SubjectSection({
           >
             <ul className="border-t border-slate-200/70 dark:border-slate-800 px-2 py-1.5 space-y-0.5">
               {items.map((item) => (
-                <MicrosyllabusRow key={item.id} item={item} paper={paper} subject={subject} coverage={coverage} onSetCoverage={onSetCoverage} />
+                <MicrosyllabusRow
+                  key={item.id}
+                  item={item}
+                  paper={paper}
+                  subject={subject}
+                  coverage={coverage}
+                  onSetCoverage={onSetCoverage}
+                  isDeepLinked={item.id === deepLinkMicrosyllabusId}
+                  deepLinkRef={item.id === deepLinkMicrosyllabusId ? deepLinkRef : undefined}
+                />
               ))}
               {items.length === 0 && <li className="py-3 text-center text-xs text-slate-400">No microsyllabus items match "{query}".</li>}
             </ul>
@@ -190,16 +216,21 @@ function PaperSection({
   coverage,
   onSetCoverage,
   query,
+  deepLinkMicrosyllabusId,
+  deepLinkRef,
 }: {
   tree: UpscCseSyllabusTree;
   paper: UpscCseSyllabusPaper;
   coverage: UpscCseSyllabusCoverage;
   onSetCoverage: (microsyllabusId: string, state: UpscCseCoverageState) => void;
   query: string;
+  deepLinkMicrosyllabusId?: string;
+  deepLinkRef?: React.Ref<HTMLLIElement>;
 }) {
   const subjects = useMemo(() => getSubjectsForPaper(tree, paper.id), [tree, paper.id]);
   const microsyllabusIds = useMemo(() => tree.microsyllabus.filter((m) => m.paperId === paper.id).map((m) => m.id), [tree, paper.id]);
   const summary = useMemo(() => computeCoverageSummary(microsyllabusIds, coverage), [microsyllabusIds, coverage]);
+  const containsDeepLink = !!deepLinkMicrosyllabusId && microsyllabusIds.includes(deepLinkMicrosyllabusId);
 
   const [isPaperOpen, setPaperOpen] = useState(true);
   const [openSubjectIds, setOpenSubjectIds] = useState<string[]>(() => (subjects[0] ? [subjects[0].id] : []));
@@ -207,7 +238,7 @@ function PaperSection({
   const visibleSubjects = useMemo(() => subjects.filter((s) => subjectHasMicrosyllabusMatch(tree, s.id, query)), [subjects, tree, query]);
 
   if (query.trim() && visibleSubjects.length === 0) return null;
-  const paperExpanded = isPaperOpen || !!query.trim();
+  const paperExpanded = isPaperOpen || !!query.trim() || containsDeepLink;
 
   return (
     <Card className="overflow-hidden">
@@ -247,6 +278,8 @@ function PaperSection({
                   isOpen={openSubjectIds.includes(subject.id)}
                   onToggle={() => setOpenSubjectIds((prev) => (prev.includes(subject.id) ? prev.filter((i) => i !== subject.id) : [...prev, subject.id]))}
                   query={query}
+                  deepLinkMicrosyllabusId={deepLinkMicrosyllabusId}
+                  deepLinkRef={deepLinkRef}
                 />
               ))}
             </div>
@@ -257,13 +290,36 @@ function PaperSection({
   );
 }
 
+// Deep-link support: "Study this microsyllabus" from PYQ review arrives as
+// /upsc-syllabus?microsyllabusId=... — resolves which stage (Prelims/Mains) actually contains it,
+// searching Prelims first since that's this app's only populated PYQ source today.
+export function resolveDeepLinkStage(microsyllabusId: string): UpscCseExamStage | undefined {
+  for (const tab of STAGE_TABS) {
+    if (resolveMicrosyllabusPath(tab.tree, microsyllabusId)) return tab.stage;
+  }
+  return undefined;
+}
+
 export default function UpscCseSyllabus() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const coverage = useAppStore((s) => s.upscCseSyllabusCoverage);
   const setUpscCseCoverageState = useAppStore((s) => s.setUpscCseCoverageState);
 
-  const [activeStage, setActiveStage] = useState<UpscCseExamStage>('prelims');
+  const [searchParams] = useSearchParams();
+  const deepLinkMicrosyllabusId = searchParams.get('microsyllabusId') ?? undefined;
+  const deepLinkRef = useRef<HTMLLIElement>(null);
+
+  const [activeStage, setActiveStage] = useState<UpscCseExamStage>(
+    () => (deepLinkMicrosyllabusId && resolveDeepLinkStage(deepLinkMicrosyllabusId)) || 'prelims',
+  );
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!deepLinkMicrosyllabusId) return;
+    const t = setTimeout(() => deepLinkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkMicrosyllabusId]);
 
   const activeTree = STAGE_TABS.find((t) => t.stage === activeStage)!.tree;
   const papers = useMemo(() => getPapersForStage(activeTree), [activeTree]);
@@ -331,7 +387,16 @@ export default function UpscCseSyllabus() {
 
       <div className="space-y-3">
         {papers.map((paper) => (
-          <PaperSection key={paper.id} tree={activeTree} paper={paper} coverage={coverage} onSetCoverage={setUpscCseCoverageState} query={query} />
+          <PaperSection
+            key={paper.id}
+            tree={activeTree}
+            paper={paper}
+            coverage={coverage}
+            onSetCoverage={setUpscCseCoverageState}
+            query={query}
+            deepLinkMicrosyllabusId={deepLinkMicrosyllabusId}
+            deepLinkRef={deepLinkRef}
+          />
         ))}
       </div>
     </div>

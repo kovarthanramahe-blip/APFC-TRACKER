@@ -6,6 +6,7 @@ import { NAV_ITEMS } from '../components/layout/nav';
 import { getPapersForStage, getSubjectsForPaper, getMicrosyllabusForSubject, resolveMicrosyllabusPath } from '../lib/upscCseSyllabus';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
+import { resolveDeepLinkStage } from './UpscCseSyllabus';
 import { computeCoverageSummary, getCoverageState } from '../lib/upscCseSyllabusCoverage';
 import { subjectHasMicrosyllabusMatch } from '../lib/upscCseSyllabusSearch';
 import { SYLLABUS } from '../data/syllabus';
@@ -236,5 +237,21 @@ describe('UPSC CSE Syllabus page — stable microsyllabus IDs', () => {
     fullReset();
     importAllData(json);
     expect(Object.keys(useAppStore.getState().upscCseSyllabusCoverage)).toEqual([id]);
+  });
+});
+
+describe('UPSC CSE Syllabus page — "Study this microsyllabus" deep-link resolution (from PYQ review)', () => {
+  it('resolves a Prelims microsyllabus id to the "prelims" stage', () => {
+    const id = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus[0].id;
+    expect(resolveDeepLinkStage(id)).toBe('prelims');
+  });
+
+  it('resolves a Mains microsyllabus id to the "mains" stage', () => {
+    const id = UPSC_CSE_MAINS_SYLLABUS.microsyllabus[0].id;
+    expect(resolveDeepLinkStage(id)).toBe('mains');
+  });
+
+  it('returns undefined for an id that exists in neither tree (never guesses a stage)', () => {
+    expect(resolveDeepLinkStage('not-a-real-id')).toBeUndefined();
   });
 });

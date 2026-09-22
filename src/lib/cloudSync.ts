@@ -49,6 +49,8 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     ((data.contentRelationships as unknown[]) ?? []).length,
     // UPSC CSE Syllabus UI — coverage state per microsyllabus id is real user data too.
     Object.keys((data.upscCseSyllabusCoverage as object) ?? {}).length,
+    // UPSC CSE Practice & Analytics — practice attempts are real user data too.
+    ((data.upscCsePrelimsPyqAttempts as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }

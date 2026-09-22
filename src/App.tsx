@@ -15,6 +15,7 @@ const Syllabus = lazy(() => import('./pages/Syllabus'));
 const UpscCseSyllabus = lazy(() => import('./pages/UpscCseSyllabus'));
 const QuestionBank = lazy(() => import('./pages/QuestionBank'));
 const PYQTest = lazy(() => import('./pages/PYQTest'));
+const UpscCsePyqTest = lazy(() => import('./pages/UpscCsePyqTest'));
 const MockTests = lazy(() => import('./pages/MockTests'));
 const MockTestRunner = lazy(() => import('./pages/MockTestRunner'));
 const MockTestResult = lazy(() => import('./pages/MockTestResult'));
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/upsc-syllabus" element={<UpscCseSyllabus />} />
           <Route path="/pyq" element={<QuestionBank />} />
           <Route path="/pyq-test" element={<PYQTest />} />
+          <Route path="/upsc-pyq-test" element={<UpscCsePyqTest />} />
           <Route path="/mock-tests" element={<MockTests />} />
           <Route path="/mock-tests/run/:blueprintId" element={<MockTestRunner />} />
           <Route path="/mock-tests/result/:attemptId" element={<MockTestResult />} />
