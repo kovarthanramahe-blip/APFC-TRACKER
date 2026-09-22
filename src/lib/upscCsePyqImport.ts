@@ -62,6 +62,15 @@ export interface UpscCsePrelimsPyqProvenance {
   /** Freeform, user-supplied attribution (e.g. "Official UPSC CSE 2023 Prelims GS Paper I") —
    * never auto-filled or guessed, matching lib/contentImport.ts's ImportedContentProvenance.sourceNote. */
   sourceNote?: string;
+  /** How the source material was supplied (e.g. "user_provided_text") — optional because the plain
+   * text DETECT pipeline above never sets it; a pre-structured batch importer (see
+   * lib/upscCsePrelimsPyqBatchImport.ts) preserves whatever its own source metadata states,
+   * verbatim, rather than inventing a value. */
+  sourceKind?: string;
+  /** Whether the ORIGINAL source material included an answer key — distinct from this record's own
+   * `correctOptionId` (which may still be absent even when true, if the answer key didn't cover
+   * every question). Optional for the same reason as `sourceKind`. */
+  answerKeyProvided?: boolean;
 }
 
 /**
@@ -359,8 +368,11 @@ export interface UpscCsePrelimsImportPreview {
 /** A stable id derived from what's actually known (year + paper + question number) when all three
  * are present — so re-parsing the SAME source twice produces the SAME ids, matching this
  * codebase's existing "stable id" discipline (see lib/contentRelationships.ts's own header). Falls
- * back to a fresh uuid when any part is missing, since there is nothing stable to derive from. */
-function deriveCandidateId(year: number | undefined, paper: string | undefined, questionNumber: number | undefined): string {
+ * back to a fresh uuid when any part is missing, since there is nothing stable to derive from.
+ * Exported so lib/upscCsePrelimsPyqBatchImport.ts's pre-structured batch importer derives ids the
+ * exact same way as this module's own text DETECT pipeline — one canonical id scheme, never two
+ * that could silently drift apart for the same year+paper+questionNumber. */
+export function deriveCandidateId(year: number | undefined, paper: string | undefined, questionNumber: number | undefined): string {
   if (year !== undefined && paper !== undefined && questionNumber !== undefined) {
     const paperSlug = paper.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     return `upsc-cse-pyq-${year}-${paperSlug}-${questionNumber}`;
