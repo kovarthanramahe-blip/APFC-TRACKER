@@ -5,7 +5,7 @@ import { DEFAULT_WORKSPACE_ID, ACTIVE_WORKSPACES, WORKSPACES } from '../lib/work
 import { NAV_ITEMS } from '../components/layout/nav';
 import { confirmImportedContent, type ImportPreview } from '../lib/contentImport';
 import { queryRepository, listRepositoryEntries, computeRepositoryStatistics } from '../lib/repository';
-import { navigationTargetFor } from './Repository';
+import { navigationTargetFor } from '../lib/repositoryNavigation';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and every other *.test.ts file, which all test exported pure functions

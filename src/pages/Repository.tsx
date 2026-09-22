@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -17,6 +17,8 @@ import {
   type RepositoryContentType,
 } from '../lib/repository';
 import { collectImportedContentTags, collectImportedContentCategories, type ImportedContentSortOrder } from '../lib/importedContentRepository';
+import { navigationTargetFor } from '../lib/repositoryNavigation';
+import { ImportToRepositoryModal } from '../components/repository/ImportToRepositoryModal';
 
 // Global Repository UI — a single, read-only browse/search surface across everything
 // lib/repository.ts's foundation already knows how to discover (Notes + every registered
@@ -40,21 +42,6 @@ const ORIGIN_LABELS: Record<RepositoryEntry['origin'], string> = {
   manual: 'Manually added',
   created: 'Created',
 };
-
-/** Where clicking a result should go — the existing page that owns this content type, never a new
- * editor. Content types with no dedicated persistence UI yet have no target (see module header). */
-export function navigationTargetFor(entry: RepositoryEntry): { to: string; label: string } | undefined {
-  switch (entry.contentType) {
-    case 'note':
-      return { to: '/notes', label: 'Open in Notes' };
-    case 'research_document':
-      return { to: '/phd-research', label: 'Open in PhD Research' };
-    case 'bibliography':
-      return { to: '/phd-research/bibliography', label: 'Open in Working Bibliography' };
-    default:
-      return undefined;
-  }
-}
 
 function ResultCard({ entry }: { entry: RepositoryEntry }) {
   const meta = getRepositoryContentTypeMeta(entry.contentType);
@@ -117,6 +104,7 @@ export default function Repository() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState<ImportedContentSortOrder>('newest');
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // The store's importedContent/notes fields already only ever hold the ACTIVE workspace's own
   // data (see lib/store.ts's setActiveWorkspaceId swap) — queryRepository/listRepositoryEntries
@@ -164,7 +152,14 @@ export default function Repository() {
         eyebrow="Repository"
         title="Repository"
         description={`Browse and search everything stored in your ${workspaceLabel} workspace — notes, research documents, bibliography records, and more as they're added.`}
+        action={
+          <Button onClick={() => setShowImportModal(true)}>
+            <Upload className="h-4 w-4" /> Import to Repository
+          </Button>
+        }
       />
+
+      {showImportModal && <ImportToRepositoryModal onClose={() => setShowImportModal(false)} />}
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
