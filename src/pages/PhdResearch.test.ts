@@ -66,10 +66,10 @@ describe('PhD Research route/page registration', () => {
     expect(ACTIVE_WORKSPACES.some((w) => w.id === 'phd_research')).toBe(true);
   });
 
-  it('a "PhD Research" nav item points at /phd-dashboard (the dashboard tab; Research Documents is reachable from there via the tab switcher)', () => {
+  it('a "PhD Dashboard" nav item points at /phd-dashboard (the dashboard tab; Research Documents is reachable from there via the tab switcher)', () => {
     const item = NAV_ITEMS.find((n) => n.to === '/phd-dashboard');
     expect(item).toBeDefined();
-    expect(item?.label).toBe('PhD Research');
+    expect(item?.label).toBe('PhD Dashboard');
   });
 });
 

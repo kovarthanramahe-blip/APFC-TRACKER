@@ -2,7 +2,7 @@ import { type ReactNode, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { GraduationCap, Menu, X, Moon, Sun, Laptop } from 'lucide-react';
-import { NAV_ITEMS, MOBILE_NAV_ITEMS } from './nav';
+import { getNavItemsForWorkspace, getMobileNavItemsForWorkspace, resolveActiveNavItem } from './nav';
 import { useAppStore } from '../../lib/store';
 import { ACTIVE_WORKSPACES, getWorkspaceMeta } from '../../lib/workspace';
 import { daysUntil } from '../../lib/utils';
@@ -97,6 +97,7 @@ function CountdownChip() {
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const workspace = getWorkspaceMeta(activeWorkspaceId);
+  const navItems = getNavItemsForWorkspace(activeWorkspaceId);
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 py-6">
@@ -114,11 +115,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === '/'}
+            end={item.end ?? item.to === '/'}
             onClick={onNavigate}
             className={({ isActive }) =>
               cx(
@@ -145,11 +146,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
-  // Match exactly, or as a path segment prefix (e.g. "/mock-tests/run/1" matches "/mock-tests")
-  // — a plain startsWith would also match "/pyq-test" against "/pyq", which is wrong.
-  const activeLabel =
-    NAV_ITEMS.find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname === n.to || location.pathname.startsWith(`${n.to}/`)))?.label ??
-    'APFC Tracker';
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  // Looked up from the ACTIVE workspace's own nav list (never the union of all three) — the same
+  // discipline "no stale workspace navigation remains visible" applies to the header title, not
+  // just the sidebar. `end` items (see nav.ts) only match exactly, same rule NavLink itself uses,
+  // so e.g. "/phd-research/bibliography" resolves to "Working Bibliography", never falling back to
+  // "Research Documents" just because that route is also a path prefix.
+  const activeLabel = resolveActiveNavItem(getNavItemsForWorkspace(activeWorkspaceId), location.pathname)?.label ?? getWorkspaceMeta(activeWorkspaceId).shortLabel;
 
   return (
     <div className="min-h-screen bg-grid">
@@ -227,11 +230,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 dark:border-slate-800/70 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] lg:hidden">
         <div className="flex items-center justify-around py-2">
-          {MOBILE_NAV_ITEMS.map((item) => (
+          {getMobileNavItemsForWorkspace(activeWorkspaceId).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === '/'}
+              end={item.end ?? item.to === '/'}
               className={({ isActive }) =>
                 cx(
                   'flex flex-col items-center gap-0.5 rounded-lg px-3 py-1.5 text-[10px] font-medium transition-colors',
