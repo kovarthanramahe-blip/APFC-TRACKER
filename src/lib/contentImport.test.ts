@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import JSZip from 'jszip';
 import {
   SUPPORTED_IMPORT_EXTENSIONS,
   MAX_IMPORT_FILE_SIZE_BYTES,
@@ -13,12 +14,57 @@ import {
   isDescriptiveContentType,
   parseCsvRows,
   csvRowsToMarkdownTable,
+  buildMarkdownFromPdfPages,
+  htmlToMarkdown,
+  DOCX_STYLE_MAP,
+  truncateForPreview,
+  PREVIEW_TRUNCATION_LIMIT_CHARS,
   IMPORTED_CONTENT_TYPES,
   OBJECTIVE_QUESTION_CONTENT_TYPES,
   DESCRIPTIVE_CONTENT_TYPES,
   deriveContentTitle,
   type ImportedContentType,
+  type PdfPageTextItem,
 } from './contentImport';
+
+// A small, self-contained DOCX builder for real mammoth/turndown extraction tests — a hand-rolled
+// zip of the minimal OOXML parts mammoth needs (no styles.xml: mammoth's DEFAULT style map already
+// matches Word's built-in Heading1-6/Title/Subtitle by their raw style ID, e.g. `p.Heading1 =>
+// h1:fresh` — see contentImport.ts's own DOCX_STYLE_MAP comment — so a styles.xml definition isn't
+// required for that matching to work, only harmless "style not defined" warnings mammoth ignores).
+async function buildDocxFile(paragraphs: { text: string; style?: string }[], filename = 'test.docx'): Promise<File> {
+  const zip = new JSZip();
+  zip.file(
+    '[Content_Types].xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>',
+  );
+  zip.file(
+    '_rels/.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>',
+  );
+  const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const body = paragraphs
+    .map((p) => {
+      const styleTag = p.style ? `<w:pPr><w:pStyle w:val="${p.style}"/></w:pPr>` : '';
+      return `<w:p>${styleTag}<w:r><w:t xml:space="preserve">${escape(p.text)}</w:t></w:r></w:p>`;
+    })
+    .join('');
+  zip.file(
+    'word/document.xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array' });
+  return new File([Buffer.from(bytes)], filename, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+}
 
 describe('1. supported file types', () => {
   it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json', () => {
@@ -344,5 +390,202 @@ describe('7. no fabricated question creation', () => {
       const preview = buildImportPreview(file, extracted.content);
       expect(preview.content).toBe(raw);
     }
+  });
+});
+
+describe('8. PDF page-boundary preservation (buildMarkdownFromPdfPages)', () => {
+  it('marks each page that contributes real text with its own real, 1-based page number', () => {
+    const pages: PdfPageTextItem[][] = [
+      [{ text: 'First page content', fontSize: 12 }],
+      [{ text: 'Second page content', fontSize: 12 }],
+      [{ text: 'Third page content', fontSize: 12 }],
+    ];
+    const markdown = buildMarkdownFromPdfPages(pages);
+    expect(markdown).toContain('[Page 1]');
+    expect(markdown).toContain('[Page 2]');
+    expect(markdown).toContain('[Page 3]');
+    // Markers appear in real page order, before their own page's content.
+    expect(markdown.indexOf('[Page 1]')).toBeLessThan(markdown.indexOf('First page content'));
+    expect(markdown.indexOf('[Page 1]')).toBeLessThan(markdown.indexOf('[Page 2]'));
+    expect(markdown.indexOf('[Page 2]')).toBeLessThan(markdown.indexOf('Second page content'));
+  });
+
+  it('a blank page in the middle gets no marker, but the real page numbers on either side are never renumbered to close the gap', () => {
+    const pages: PdfPageTextItem[][] = [
+      [{ text: 'Page one text', fontSize: 12 }],
+      [], // blank page — no extractable text
+      [{ text: 'Page three text', fontSize: 12 }],
+    ];
+    const markdown = buildMarkdownFromPdfPages(pages);
+    expect(markdown).toContain('[Page 1]');
+    expect(markdown).not.toContain('[Page 2]'); // the blank page contributes nothing, not even a marker
+    expect(markdown).toContain('[Page 3]'); // real position preserved — never renumbered to "[Page 2]"
+  });
+
+  it('a single-page document still gets a page marker', () => {
+    const pages: PdfPageTextItem[][] = [[{ text: 'Only page', fontSize: 12 }]];
+    expect(buildMarkdownFromPdfPages(pages)).toContain('[Page 1]');
+  });
+
+  it('an all-blank document still produces an empty string — a marker is never fabricated for content that does not exist', () => {
+    const pages: PdfPageTextItem[][] = [[], [{ text: '   ', fontSize: 12 }], []];
+    expect(buildMarkdownFromPdfPages(pages)).toBe('');
+  });
+
+  it('heading/list heuristics still apply within each page, alongside its marker', () => {
+    const pages: PdfPageTextItem[][] = [[{ text: 'Chapter One', fontSize: 24 }, { text: 'Body text.', fontSize: 12 }]];
+    const markdown = buildMarkdownFromPdfPages(pages);
+    expect(markdown).toContain('[Page 1]');
+    expect(markdown).toContain('## Chapter One');
+  });
+});
+
+// NOTE on DOCX test scope: extractMarkdownFromDocx/extractContentFromFile call
+// mammoth.convertToHtml({ arrayBuffer }) — the correct API this app's real, Vite-bundled browser
+// build resolves via mammoth's package.json "browser" field (confirmed: mammoth ships genuinely
+// different Node (lib/unzip.js, {buffer}-only) and browser (browser/unzip.js, {arrayBuffer}-only)
+// implementations, swapped in by bundlers via that field). This repo's Vitest runner executes
+// tests in Node, where that swap never happens — verified exhaustively (resolve.conditions,
+// ssr.resolve.mainFields/conditions, ssr.target, test.server.deps.inline, and a per-file
+// `@vitest-environment happy-dom` override were all tried and none changed the outcome) — so
+// extractContentFromFile('docx') cannot be exercised end-to-end here. This is a genuine Node-vs-
+// browser environment limitation of the test runner, not a defect in the extraction code, which is
+// exactly why the task calls for a browser smoke test through the real Import Centre for DOCX (see
+// the task report) — that is the actual end-to-end coverage for the real File -> mammoth path.
+// These tests instead cover the same real logic at its natural seams: htmlToMarkdown (the pure
+// HTML -> Markdown half of extractMarkdownFromDocx, no mammoth involved) directly on real HTML
+// strings, and DOCX_STYLE_MAP (the exact constant extractMarkdownFromDocx passes to mammoth)
+// verified against real mammoth output via its Node-native {buffer} input — a different, equally
+// real mammoth API, just not the one the browser path happens to use.
+describe('9. DOCX extraction — htmlToMarkdown + DOCX_STYLE_MAP (mammoth + turndown pipeline)', () => {
+  it('htmlToMarkdown converts headings and paragraphs to Markdown, preserving structure', async () => {
+    const html = '<h1>Chapter One</h1><p>This is the first paragraph of body text.</p><h2>Section A</h2><p>More body text here.</p>';
+    const markdown = await htmlToMarkdown(html);
+    expect(markdown).toContain('# Chapter One');
+    expect(markdown).toContain('This is the first paragraph of body text.');
+    expect(markdown).toContain('## Section A');
+    expect(markdown).toContain('More body text here.');
+  });
+
+  it('htmlToMarkdown never fabricates structure — a plain paragraph gets no heading styling', async () => {
+    const markdown = await htmlToMarkdown('<p>First paragraph.</p><p>Second paragraph.</p>');
+    expect(markdown).not.toMatch(/^#/m);
+    expect(markdown).toContain('First paragraph.');
+    expect(markdown).toContain('Second paragraph.');
+  });
+
+  it('htmlToMarkdown of empty HTML produces an empty string, never fabricated content', async () => {
+    expect(await htmlToMarkdown('')).toBe('');
+  });
+
+  it("DOCX_STYLE_MAP maps Word's built-in Heading1/Heading2/Title/Subtitle to the right HTML heading levels — verified against mammoth's own real conversion", async () => {
+    const mammoth = (await import('mammoth')).default;
+    const file = await buildDocxFile([
+      { text: 'My Document Title', style: 'Title' },
+      { text: 'A subtitle', style: 'Subtitle' },
+      { text: 'Chapter One', style: 'Heading1' },
+      { text: 'Body text.' },
+      { text: 'Section A', style: 'Heading2' },
+    ]);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const { value: html } = await mammoth.convertToHtml({ buffer }, { styleMap: DOCX_STYLE_MAP });
+    expect(html).toContain('<h1>My Document Title</h1>');
+    expect(html).toContain('<h2>A subtitle</h2>');
+    expect(html).toContain('<h1>Chapter One</h1>');
+    expect(html).toContain('<h2>Section A</h2>');
+    expect(html).toContain('<p>Body text.</p>');
+    // And the full real pipeline (mammoth HTML -> htmlToMarkdown) end-to-end on that same real HTML:
+    const markdown = await htmlToMarkdown(html);
+    expect(markdown).toContain('# My Document Title');
+    expect(markdown).toContain('## A subtitle');
+    expect(markdown).toContain('# Chapter One');
+    expect(markdown).toContain('## Section A');
+  });
+
+  it('a corrupted/non-DOCX byte stream is rejected by mammoth rather than silently producing fabricated content', async () => {
+    const mammoth = (await import('mammoth')).default;
+    const buffer = Buffer.from('this is not a real docx — just plain garbage bytes');
+    await expect(mammoth.convertToHtml({ buffer }, { styleMap: DOCX_STYLE_MAP })).rejects.toThrow();
+  });
+
+  it('a DOCX with no paragraphs at all extracts to empty HTML and empty Markdown — never fabricated content', async () => {
+    const mammoth = (await import('mammoth')).default;
+    const file = await buildDocxFile([]);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const { value: html } = await mammoth.convertToHtml({ buffer }, { styleMap: DOCX_STYLE_MAP });
+    expect(html).toBe('');
+    expect(await htmlToMarkdown(html)).toBe('');
+  });
+});
+
+describe('10. TXT/Markdown extraction — preserve structure, no unnecessary transformation', () => {
+  it('a .txt file with multiple paragraphs and blank lines is preserved exactly (only line-ending normalisation + outer trim)', async () => {
+    const raw = 'First paragraph.\n\nSecond paragraph.\n\n- a plain dash, not reinterpreted as a list marker by this format\n\nThird paragraph.';
+    const file = new File([raw], 'notes.txt');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'text', text: raw } });
+  });
+
+  it('a .txt file with Windows line endings is normalised to \\n, never otherwise altered', async () => {
+    const file = new File(['Line one.\r\nLine two.\r\nLine three.'], 'crlf.txt');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'text', text: 'Line one.\nLine two.\nLine three.' } });
+  });
+
+  it('a .md file with real Markdown structure (headings, lists, code) passes through completely untouched', async () => {
+    const raw = '# Title\n\n## Subheading\n\n- item one\n- item two\n\n```js\nconst x = 1;\n```\n\nA closing paragraph.';
+    const file = new File([raw], 'doc.md');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'markdown', text: raw } });
+  });
+
+  it('.markdown (the long extension) behaves identically to .md', async () => {
+    const raw = '# Same behaviour';
+    const file = new File([raw], 'doc.markdown');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'markdown', text: raw } });
+  });
+});
+
+describe('11. Preview truncation (truncateForPreview) — large documents stay responsive', () => {
+  it('text at or under the limit is never truncated, and totalLength matches the real length', () => {
+    const short = 'A short extracted document.';
+    const result = truncateForPreview(short, 100);
+    expect(result).toEqual({ text: short, truncated: false, totalLength: short.length });
+  });
+
+  it('text over the limit is cut to exactly the limit, verbatim (never reformatted or summarised)', () => {
+    const long = 'x'.repeat(500);
+    const result = truncateForPreview(long, 100);
+    expect(result.truncated).toBe(true);
+    expect(result.text).toBe('x'.repeat(100));
+    expect(result.text.length).toBe(100);
+    expect(result.totalLength).toBe(500);
+  });
+
+  it('the truncated text is always a real, exact prefix of the original — never altered content', () => {
+    const long = Array.from({ length: 50 }, (_, i) => `Paragraph ${i}.`).join('\n\n');
+    const result = truncateForPreview(long, 40);
+    expect(long.startsWith(result.text)).toBe(true);
+  });
+
+  it('the default limit is a sane, positive number used when no explicit limit is passed', () => {
+    expect(PREVIEW_TRUNCATION_LIMIT_CHARS).toBeGreaterThan(0);
+    const long = 'y'.repeat(PREVIEW_TRUNCATION_LIMIT_CHARS + 1);
+    expect(truncateForPreview(long).truncated).toBe(true);
+    const short = 'y'.repeat(PREVIEW_TRUNCATION_LIMIT_CHARS);
+    expect(truncateForPreview(short).truncated).toBe(false);
+  });
+
+  it('truncation is a display concern only — it never touches what buildImportPreview/confirmImportedContent carry as the real content', async () => {
+    const long = 'z'.repeat(PREVIEW_TRUNCATION_LIMIT_CHARS * 2);
+    const file = new File([long], 'huge.txt');
+    const result = await extractContentFromFile(file);
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    const preview = buildImportPreview(file, result.content);
+    expect(preview.content.length).toBe(long.length); // never pre-truncated by the pipeline itself
+    const saved = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'document' });
+    expect(saved.rawContent.length).toBe(long.length); // confirm always saves the FULL text
   });
 });

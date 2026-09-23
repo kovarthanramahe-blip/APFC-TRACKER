@@ -9,8 +9,11 @@ import {
   isNearEmptyContent,
   validateImportFile,
   formatFileSizeBytes,
+  buildMarkdownFromPdfPages,
+  truncateForPreview,
   SUPPORTED_IMPORT_EXTENSIONS,
   type ImportPreview,
+  type PdfPageTextItem,
 } from '../../lib/contentImport';
 import { REPOSITORY_CONTENT_TYPE_REGISTRY, type RepositoryContentType } from '../../lib/repository';
 import type { Note } from '../../lib/types';
@@ -250,6 +253,57 @@ describe('Import Centre — description metadata', () => {
     const saved = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: 'study_material' });
     useAppStore.getState().addImportedContent(saved);
     expect(useAppStore.getState().importedContent[0].metadata?.description).toBeUndefined();
+  });
+});
+
+describe('Import Centre — deterministic extraction improvements (Phase 8 Step 3): confirm/cancel still hold', () => {
+  beforeEach(fullReset);
+
+  it('a PDF with page-boundary markers only persists after an explicit Confirm — never on preview alone', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const pages: PdfPageTextItem[][] = [[{ text: 'Page one content', fontSize: 12 }], [{ text: 'Page two content', fontSize: 12 }]];
+    const extracted = buildMarkdownFromPdfPages(pages);
+    expect(extracted).toContain('[Page 1]');
+    expect(extracted).toContain('[Page 2]');
+
+    const p = buildImportPreview({ name: 'report.pdf' }, { format: 'pdf', text: extracted });
+    // Building the preview alone (what happens as soon as extraction finishes) never persists.
+    expect(useAppStore.getState().importedContent).toEqual([]);
+
+    const saved = confirmImportedContent(p, { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent).toHaveLength(1);
+    expect(useAppStore.getState().importedContent[0].rawContent).toContain('[Page 1]');
+    expect(useAppStore.getState().importedContent[0].rawContent).toContain('[Page 2]');
+  });
+
+  it("a DOCX-derived Markdown preview (headings preserved) is discarded on cancel and only persisted on confirm", () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const docxDerivedMarkdown = '# Chapter One\n\nThis is the first paragraph of body text.\n\n## Section A\n\nMore body text here.';
+    const p = buildImportPreview({ name: 'chapter.docx' }, { format: 'docx', text: docxDerivedMarkdown });
+
+    // Cancel: never call confirmImportedContent/addImportedContent — the repository stays empty.
+    expect(useAppStore.getState().importedContent).toEqual([]);
+
+    // Confirm: the exact same preview, now explicitly saved.
+    const saved = confirmImportedContent(p, { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent).toHaveLength(1);
+    expect(useAppStore.getState().importedContent[0].rawContent).toBe(docxDerivedMarkdown);
+  });
+
+  it('confirming a large, truncated-in-preview document still saves the FULL untruncated text, never the shortened preview', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const fullText = 'Paragraph. '.repeat(2000); // well over the preview truncation limit
+    const truncated = truncateForPreview(fullText);
+    expect(truncated.truncated).toBe(true);
+    expect(truncated.text.length).toBeLessThan(fullText.length);
+
+    const p = buildImportPreview({ name: 'long.txt' }, { format: 'text', text: fullText });
+    const saved = confirmImportedContent(p, { workspaceId: 'phd_research', contentType: 'document' });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent[0].rawContent.length).toBe(fullText.length);
+    expect(useAppStore.getState().importedContent[0].rawContent).toBe(fullText);
   });
 });
 

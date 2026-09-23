@@ -137,6 +137,30 @@ export function formatFileSizeBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** A generous cap on how much text the Import Centre's PREVIEW panel renders — large documents
+ * (a multi-hundred-page PDF, a long DOCX) can extract to hundreds of thousands of characters, and
+ * rendering all of it into one DOM text node is exactly the "unbounded giant text block" this
+ * limit exists to avoid. Preview-only: it never affects what gets saved (see confirmImportedContent,
+ * which always saves the full, untruncated extracted text — this limit is read by the UI layer
+ * alone, via truncateForPreview below). */
+export const PREVIEW_TRUNCATION_LIMIT_CHARS = 8000;
+
+export interface TruncatedPreview {
+  /** The (possibly shortened) text to actually render. */
+  text: string;
+  truncated: boolean;
+  /** The real, full length of the untouched text — shown in the "N of TOTAL characters" notice so
+   * truncation is always visible, never silent. */
+  totalLength: number;
+}
+
+/** Pure, deterministic truncation for display — never invents or summarises anything; it is
+ * exactly the first `limit` characters of the real extracted text, verbatim. */
+export function truncateForPreview(text: string, limit: number = PREVIEW_TRUNCATION_LIMIT_CHARS): TruncatedPreview {
+  if (text.length <= limit) return { text, truncated: false, totalLength: text.length };
+  return { text: text.slice(0, limit), truncated: true, totalLength: text.length };
+}
+
 /** Extension-only classification — deliberately not MIME-sniffed: a locally-picked file's
  * `File.type` is unreliable (often empty for .md, inconsistent across OSes for .docx/.pdf), so the
  * extension is the one signal actually worth trusting here, same as this app's existing JSON
@@ -292,11 +316,18 @@ function median(nums: number[]): number {
  * PDF carries no semantic structure to recover exactly, so this never claims perfect fidelity: a
  * run whose font size is notably larger than that page's typical (median) size becomes a heading;
  * a run already starting with a bullet-like character or a "1. "/"1) " ordinal becomes a list item;
- * everything else is a plain paragraph. Each page is separated by a blank line.
+ * everything else is a plain paragraph. Each page that contributes real text is preceded by a
+ * `[Page N]` marker (N is the page's real 1-based position, exactly as pdfjs-dist enumerated it —
+ * never renumbered or guessed) so page boundaries/numbers survive into the extracted text, per this
+ * module's page-boundary-preservation requirement. A page with no extractable text (blank or
+ * image-only) contributes no marker and no content — never a fabricated "[Page N]" for a page with
+ * nothing real to show under it, and never a change to the existing "an all-blank document produces
+ * an empty string" behaviour.
  */
 export function buildMarkdownFromPdfPages(pages: PdfPageTextItem[][]): string {
-  const blocks: string[] = [];
-  for (const page of pages) {
+  const pageBlocks: string[] = [];
+  pages.forEach((page, pageIndex) => {
+    const blocks: string[] = [];
     const sizes = page.map((item) => item.fontSize).filter((s) => s > 0);
     const bodySize = sizes.length > 0 ? median(sizes) : 0;
     for (const item of page) {
@@ -312,21 +343,47 @@ export function buildMarkdownFromPdfPages(pages: PdfPageTextItem[][]): string {
         blocks.push(text);
       }
     }
-  }
-  return blocks
+    if (blocks.length > 0) {
+      pageBlocks.push([`[Page ${pageIndex + 1}]`, ...blocks].join('\n\n'));
+    }
+  });
+  return pageBlocks
     .join('\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-/** DOCX -> HTML (mammoth) -> Markdown (turndown). The intermediate HTML never leaves this
- * function and is never rendered — only the resulting plain Markdown string is returned. */
-async function extractMarkdownFromDocx(file: File): Promise<string> {
-  const [{ default: mammoth }, { default: TurndownService }] = await Promise.all([import('mammoth'), import('turndown')]);
-  const arrayBuffer = await file.arrayBuffer();
-  const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
+/** mammoth already maps Word's built-in Heading 1-6 styles to h1-h6 by default (matched by raw
+ * style id, e.g. `p.Heading1 => h1:fresh` — see mammoth's own default style map), so that
+ * structure is preserved with no configuration needed. Title/Subtitle are NOT in mammoth's default
+ * map, even though they're just as common a real document's own heading structure (e.g. a cover
+ * page), so this small, additive styleMap (mammoth merges it with the default map, never replaces
+ * it) covers those two extra built-in Word styles — nothing invented, just recognising more of the
+ * document's own real structure. Exported so a test can verify it directly against mammoth's own
+ * (Node-compatible) buffer-input API — see this module's own test file for why DOCX extraction is
+ * tested at this boundary rather than through extractMarkdownFromDocx/extractContentFromFile
+ * end-to-end (mammoth's package.json splits Node vs. browser builds via the legacy `browser` field,
+ * which this app's Vite-bundled browser build correctly resolves but this repo's Node-based Vitest
+ * runner structurally cannot — a real environment limitation, not a defect in this code; the Import
+ * Centre's browser smoke test is the actual end-to-end coverage for the real File → mammoth path). */
+export const DOCX_STYLE_MAP = ["p[style-name='Title'] => h1:fresh", 'p.Title => h1:fresh', "p[style-name='Subtitle'] => h2:fresh", 'p.Subtitle => h2:fresh'];
+
+/** HTML -> Markdown (turndown) — split out from extractMarkdownFromDocx as its own function so
+ * it's directly testable on a raw HTML string, with no mammoth or File involved at all. The
+ * intermediate HTML a caller passes in is never rendered anywhere — only the resulting plain
+ * Markdown string is ever returned or stored. */
+export async function htmlToMarkdown(html: string): Promise<string> {
+  const { default: TurndownService } = await import('turndown');
   const turndownService = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
   return normalizeText(turndownService.turndown(html));
+}
+
+/** DOCX -> HTML (mammoth) -> Markdown (htmlToMarkdown). */
+async function extractMarkdownFromDocx(file: File): Promise<string> {
+  const { default: mammoth } = await import('mammoth');
+  const arrayBuffer = await file.arrayBuffer();
+  const { value: html } = await mammoth.convertToHtml({ arrayBuffer }, { styleMap: DOCX_STYLE_MAP });
+  return htmlToMarkdown(html);
 }
 
 /** PDF -> per-page text runs (pdfjs-dist) -> best-effort Markdown (buildMarkdownFromPdfPages). */

@@ -12,6 +12,7 @@ import {
   confirmImportedContent,
   isNearEmptyContent,
   formatFileSizeBytes,
+  truncateForPreview,
   SUPPORTED_IMPORT_EXTENSIONS,
   IMPORT_FORMAT_LABELS,
   type ImportPreview,
@@ -352,9 +353,22 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
 
               <div>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Content preview</p>
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-3 text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
-                  {preview.content}
-                </div>
+                {(() => {
+                  const truncated = truncateForPreview(preview.content);
+                  return (
+                    <>
+                      <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-3 text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
+                        {truncated.text}
+                      </div>
+                      {truncated.truncated && (
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          Showing the first {truncated.text.length.toLocaleString()} of {truncated.totalLength.toLocaleString()} characters — the full text will
+                          still be saved when you confirm.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {saveError && (
