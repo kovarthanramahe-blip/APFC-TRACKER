@@ -160,12 +160,22 @@ function buildEditedMetadata(tagsInput: string, categoryInput: string, descripti
   return metadata;
 }
 
+/** Every registered content type EXCEPT 'note' — this modal only ever edits an existing
+ * ImportedContent item (a Note entry never reaches it; see handleEditRequest's own
+ * navigate('/notes') branch in both pages/Repository.tsx and pages/RepositoryDetail.tsx), and
+ * ImportToRepositoryModal.tsx's own SAVE logic shows 'note' is not really an ImportedContent
+ * content type in practice — choosing it there routes to the separate Notes store (upsertNote),
+ * never to an ImportedContent record. Offering it here would let a real, already-persisted
+ * ImportedContent item be retyped to a value nothing in this app ever actually saves as
+ * ImportedContent, so it is excluded rather than offered as a dead-end choice. */
+const EDITABLE_CONTENT_TYPES = REPOSITORY_CONTENT_TYPE_REGISTRY.filter((meta) => meta.type !== 'note');
+
 /**
- * Metadata-only edit for a non-Note repository entry — title, tags, category. Never touches
- * rawContent, sourceFilename, originalFormat, or import origin: those simply aren't fields this
- * form has any input for, so onSave's payload can never carry them. Saves through the EXISTING
- * updateImportedContent store action (the same one pages/PhdResearch.tsx's own metadata editor
- * calls) — no second persistence path.
+ * Metadata edit for a non-Note repository entry — title, content type, description, tags,
+ * category. Never touches rawContent, sourceFilename, originalFormat, or import origin: those
+ * simply aren't fields this form has any input for, so onSave's payload can never carry them.
+ * Saves through the EXISTING updateImportedContent store action (the same one
+ * pages/PhdResearch.tsx's own metadata editor calls) — no second persistence path.
  */
 export function EditMetadataModal({
   entry,
@@ -176,14 +186,18 @@ export function EditMetadataModal({
   entry: RepositoryEntry;
   existingCategories: string[];
   onCancel: () => void;
-  onSave: (title: string, metadata: ImportedContentMetadata | undefined) => void;
+  onSave: (title: string, contentType: RepositoryContentType, metadata: ImportedContentMetadata | undefined) => void;
 }) {
   const [titleInput, setTitleInput] = useState(entry.title);
+  const [contentTypeInput, setContentTypeInput] = useState<RepositoryContentType>(entry.contentType);
   const [tagsInput, setTagsInput] = useState(entry.tags.join(', '));
   const [categoryInput, setCategoryInput] = useState(entry.category ?? '');
   const [descriptionInput, setDescriptionInput] = useState(entry.description ?? '');
-  const showTags = repositoryContentTypeSupports(entry.contentType, 'taggable');
-  const showCategory = repositoryContentTypeSupports(entry.contentType, 'categorisable');
+  // Derived from the CURRENTLY SELECTED content type, not entry.contentType, so switching the
+  // dropdown live-updates which fields are shown — matching capabilitiesForContentType exactly
+  // (lib/repository.ts), the same registry every other capability check in this app reads from.
+  const showTags = repositoryContentTypeSupports(contentTypeInput, 'taggable');
+  const showCategory = repositoryContentTypeSupports(contentTypeInput, 'categorisable');
   // Description is a freeform metadata field like tags/category, so it shares their same
   // capability gate — 'note' has no metadata bag at all (see lib/repository.ts's own header on
   // why 'note' is never taggable/categorisable), so it's never description-able either.
@@ -211,6 +225,23 @@ export function EditMetadataModal({
               placeholder="Title"
               className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
+          </div>
+          <div>
+            <label htmlFor="edit-content-type" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Content type
+            </label>
+            <select
+              id="edit-content-type"
+              value={contentTypeInput}
+              onChange={(e) => setContentTypeInput(e.target.value as RepositoryContentType)}
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            >
+              {EDITABLE_CONTENT_TYPES.map((meta) => (
+                <option key={meta.type} value={meta.type}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
           </div>
           {showDescription && (
             <div>
@@ -266,7 +297,10 @@ export function EditMetadataModal({
           <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={() => onSave(titleInput.trim() || entry.title, buildEditedMetadata(tagsInput, categoryInput, descriptionInput))} disabled={!titleInput.trim()}>
+          <Button
+            onClick={() => onSave(titleInput.trim() || entry.title, contentTypeInput, buildEditedMetadata(tagsInput, categoryInput, descriptionInput))}
+            disabled={!titleInput.trim()}
+          >
             Save Changes
           </Button>
         </div>
@@ -387,9 +421,9 @@ export default function Repository() {
     setEditingEntry(entry);
   }
 
-  function handleEditSave(title: string, metadata: ImportedContentMetadata | undefined) {
+  function handleEditSave(title: string, contentType: RepositoryContentType, metadata: ImportedContentMetadata | undefined) {
     if (!editingEntry) return;
-    updateImportedContent(editingEntry.entityId, { title, metadata });
+    updateImportedContent(editingEntry.entityId, { title, contentType, metadata });
     setEditingEntry(null);
   }
 

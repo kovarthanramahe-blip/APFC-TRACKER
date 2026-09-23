@@ -12,6 +12,7 @@ import {
   repositoryEntryFromImportedContent,
   repositoryEntryFromNote,
   type RepositoryEntry,
+  type RepositoryContentType,
 } from '../lib/repository';
 import { getRelatedContent, RELATIONSHIP_TYPE_LABELS, type ContentRelationship, type RelationshipEntityType } from '../lib/contentRelationships';
 import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
@@ -159,9 +160,9 @@ export default function RepositoryDetail() {
     setShowEditModal(true);
   }
 
-  function handleEditSave(title: string, metadata: ImportedContentMetadata | undefined) {
+  function handleEditSave(title: string, contentType: RepositoryContentType, metadata: ImportedContentMetadata | undefined) {
     if (!entry) return;
-    updateImportedContent(entry.entityId, { title, metadata });
+    updateImportedContent(entry.entityId, { title, contentType, metadata });
     setShowEditModal(false);
   }
 
@@ -195,6 +196,8 @@ export default function RepositoryDetail() {
   const target = navigationTargetFor(entry);
   const date = new Date(entry.createdAt);
   const dateLabel = Number.isNaN(date.getTime()) ? null : date.toLocaleDateString('en-IN');
+  const updatedDate = new Date(entry.updatedAt);
+  const updatedDateLabel = Number.isNaN(updatedDate.getTime()) ? null : updatedDate.toLocaleDateString('en-IN');
   const rawContent = importedItem ? importedItem.rawContent : (noteItem?.content ?? '');
   const originLabel = { import: 'Imported', manual: 'Manually added', created: 'Created' }[entry.origin];
 
@@ -244,6 +247,9 @@ export default function RepositoryDetail() {
           </p>
           <p>
             <span className="font-medium text-slate-500 dark:text-slate-400">{importedItem ? 'Imported' : 'Created'}:</span> {dateLabel ?? '—'}
+          </p>
+          <p>
+            <span className="font-medium text-slate-500 dark:text-slate-400">Last updated:</span> {updatedDateLabel ?? '—'}
           </p>
           {importedItem?.provenance.sourceFilename && (
             <p>

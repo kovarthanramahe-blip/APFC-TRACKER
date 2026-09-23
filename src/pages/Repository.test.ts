@@ -4,7 +4,14 @@ import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID, ACTIVE_WORKSPACES, WORKSPACES } from '../lib/workspace';
 import { NAV_ITEMS } from '../components/layout/nav';
 import { confirmImportedContent, type ImportPreview } from '../lib/contentImport';
-import { queryRepository, listRepositoryEntries, computeRepositoryStatistics, repositoryEntryFromImportedContent, repositoryEntryFromNote } from '../lib/repository';
+import {
+  queryRepository,
+  listRepositoryEntries,
+  computeRepositoryStatistics,
+  repositoryEntryFromImportedContent,
+  repositoryEntryFromNote,
+} from '../lib/repository';
+import { exportAllData, importAllData } from '../lib/store';
 import { navigationTargetFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry } from './Repository';
 import { getIncomingRelationships, getOutgoingRelationships } from '../lib/contentRelationships';
@@ -501,5 +508,184 @@ describe('Repository Item Management — existing import flow regression', () =>
     const state = useAppStore.getState();
     const results = queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research' });
     expect(results.map((r) => r.entityId)).toEqual([doc.id]);
+  });
+});
+
+// Personal Repository Content Management — Edit now also supports content type, and this stage
+// adds explicit coverage for updatedAt, search/filter reflecting an edit immediately, and
+// persistence surviving an export/import round-trip (the same mechanism a page refresh/reload
+// relies on, since the store is rehydrated from exactly this JSON — see lib/store.ts's own
+// persist/migrate machinery, unchanged by this stage). Nothing here introduces a second
+// persistence path: every call below is the same updateImportedContent/exportAllData/
+// importAllData the app already had.
+
+describe('Repository Item Management — edit content type', () => {
+  beforeEach(fullReset);
+
+  it('updateImportedContent can change contentType, leaving every other field untouched', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc', content: 'Exact body.' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    useAppStore.getState().updateImportedContent(doc.id, { contentType: 'document' });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.contentType).toBe('document');
+    expect(stored.title).toBe('Doc');
+    expect(stored.rawContent).toBe('Exact body.');
+    expect(stored.id).toBe(doc.id);
+  });
+
+  it('a content-type edit is immediately reflected by queryRepository\'s content-type filter — the item moves out of its old type and into the new one', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    useAppStore.getState().updateImportedContent(doc.id, { contentType: 'bibliography' });
+
+    let state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', contentType: 'research_document' })).toEqual([]);
+    state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', contentType: 'bibliography' }).map((r) => r.entityId)).toEqual([doc.id]);
+  });
+});
+
+describe('Repository Item Management — updatedAt on edit', () => {
+  beforeEach(fullReset);
+
+  it('the projected RepositoryEntry.updatedAt changes after an edit, and is strictly newer than the original', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const before = repositoryEntryFromImportedContent(useAppStore.getState().importedContent[0]).updatedAt;
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Renamed' });
+
+    const after = repositoryEntryFromImportedContent(useAppStore.getState().importedContent[0]).updatedAt;
+    expect(after).not.toBe(before);
+    expect(new Date(after).getTime()).toBeGreaterThan(new Date(before).getTime());
+  });
+
+  it('sorting by "updated" brings the just-edited item to the front, ahead of a never-edited but more-recently-created item', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const older = confirmImportedContent(preview({ title: 'Older, will be edited' }), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      importedAt: '2020-01-01T00:00:00.000Z',
+    });
+    const newer = confirmImportedContent(preview({ title: 'Newer, never edited' }), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      importedAt: '2020-06-01T00:00:00.000Z',
+    });
+    useAppStore.getState().addImportedContent(older);
+    useAppStore.getState().addImportedContent(newer);
+
+    useAppStore.getState().updateImportedContent(older.id, { title: 'Older, just edited now' });
+
+    const state = useAppStore.getState();
+    const results = queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', sort: 'updated' });
+    expect(results.map((r) => r.entityId)).toEqual([older.id, newer.id]);
+  });
+});
+
+describe('Repository Item Management — search/filter reflects an edit immediately', () => {
+  beforeEach(fullReset);
+
+  it('a renamed title is found by search; the old title no longer matches', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Original Title' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Completely Renamed' });
+
+    let state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', search: 'Original Title' })).toEqual([]);
+    state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', search: 'Completely Renamed' }).map((r) => r.entityId)).toEqual([doc.id]);
+  });
+
+  it('a newly-added tag makes the item match the tag filter; removing it makes the item stop matching', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    let state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', tags: ['new-tag'] })).toEqual([]);
+
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: { tags: ['new-tag'] } });
+    state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', tags: ['new-tag'] }).map((r) => r.entityId)).toEqual([doc.id]);
+
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: undefined });
+    state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', tags: ['new-tag'] })).toEqual([]);
+  });
+
+  it('an edited category is immediately reflected by collectImportedContentCategories/category filter', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document', metadata: { category: 'Old Category' } });
+    useAppStore.getState().addImportedContent(doc);
+
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: { category: 'New Category' } });
+
+    let state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', category: 'Old Category' })).toEqual([]);
+    state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', category: 'New Category' }).map((r) => r.entityId)).toEqual([doc.id]);
+  });
+});
+
+describe('Repository Item Management — edits persist through export/import (the same mechanism a page reload rehydrates from)', () => {
+  beforeEach(fullReset);
+
+  it('an edited title/metadata/contentType round-trips exactly through exportAllData -> importAllData', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Original' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Edited Before Reload', contentType: 'bibliography', metadata: { tags: ['x'], category: 'Y', description: 'Z' } });
+
+    const beforeReload = useAppStore.getState().importedContent[0];
+    const json = exportAllData();
+
+    // Simulate a fresh page load: reset the store, then rehydrate exactly like the persisted
+    // storage/cloud-sync path already does (see lib/store.ts's own importAllData).
+    fullReset();
+    expect(useAppStore.getState().importedContent).toEqual([]);
+
+    importAllData(json);
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+
+    const afterReload = useAppStore.getState().importedContent.find((c) => c.id === doc.id);
+    expect(afterReload).toBeDefined();
+    expect(afterReload!.title).toBe('Edited Before Reload');
+    expect(afterReload!.contentType).toBe('bibliography');
+    expect(afterReload!.metadata).toEqual({ tags: ['x'], category: 'Y', description: 'Z' });
+    expect(afterReload!.updatedAt).toBe(beforeReload.updatedAt);
+
+    const state = useAppStore.getState();
+    expect(queryRepository(state.importedContent, state.notes, { workspaceId: 'phd_research', search: 'Edited Before Reload' }).map((r) => r.entityId)).toEqual([doc.id]);
+  });
+
+  it('workspace isolation survives the same round-trip: an edit made in one workspace never appears in another after reload', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const phdDoc = confirmImportedContent(preview({ title: 'PhD Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(phdDoc);
+    useAppStore.getState().updateImportedContent(phdDoc.id, { title: 'PhD Doc Edited' });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const apfcDoc = confirmImportedContent(preview({ title: 'APFC Doc' }), { workspaceId: 'apfc', contentType: 'document' });
+    useAppStore.getState().addImportedContent(apfcDoc);
+
+    const json = exportAllData();
+    fullReset();
+    importAllData(json);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().importedContent.map((c) => c.title)).toEqual(['PhD Doc Edited']);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().importedContent.map((c) => c.title)).toEqual(['APFC Doc']);
   });
 });

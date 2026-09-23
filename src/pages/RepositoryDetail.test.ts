@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useAppStore } from '../lib/store';
+import { useAppStore, exportAllData, importAllData } from '../lib/store';
 import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import { confirmImportedContent, getImportedContentById, type ImportPreview } from '../lib/contentImport';
@@ -297,5 +297,87 @@ describe('Repository Detail — back navigation', () => {
     // navigating back to plain "/repository" always reflects the current workspace correctly —
     // this is a structural guarantee, not something the back link itself needs to parametrise.
     expect(repositoryDetailPathFor('note', 'n1').startsWith('/repository/')).toBe(true);
+  });
+});
+
+// Personal Repository Content Management — "open item" is exactly resolveEntity above (already
+// exhaustively covered); this stage adds explicit coverage for: updatedAt display, editing
+// content type from the detail page, and the same edit surviving an export/import round-trip
+// (the mechanism a page reload rehydrates the store from).
+
+describe('Repository Detail — open item shows title, description, content type, workspace, tags, provenance, and updatedAt', () => {
+  beforeEach(fullReset);
+
+  it('every field the detail view reads is present on the resolved entry/item', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'A Document', content: 'Full body text.' }), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceNote: 'Official source, 2026',
+      metadata: { tags: ['a', 'b'], category: 'Cat', description: 'A short summary.' },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    const resolved = resolveEntity('imported_content', doc.id)!;
+    expect(resolved.entry.title).toBe('A Document');
+    expect(resolved.entry.contentType).toBe('research_document');
+    expect(getRepositoryContentTypeMeta(resolved.entry.contentType).label).toBe('Research Document');
+    expect(resolved.entry.workspaceId).toBe('phd_research');
+    expect(resolved.entry.tags).toEqual(['a', 'b']);
+    expect(resolved.entry.category).toBe('Cat');
+    expect(resolved.entry.description).toBe('A short summary.');
+    expect(resolved.item && 'provenance' in resolved.item ? resolved.item.provenance.sourceNote : undefined).toBe('Official source, 2026');
+    expect(resolved.entry.updatedAt).toBeDefined();
+    expect(() => new Date(resolved.entry.updatedAt).toISOString()).not.toThrow();
+    expect(resolved.item && 'rawContent' in resolved.item ? resolved.item.rawContent : undefined).toBe('Full body text.');
+  });
+
+  it('a never-edited item still has a defined updatedAt, falling back to when it was imported', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const resolved = resolveEntity('imported_content', doc.id)!;
+    expect(resolved.entry.updatedAt).toBe(doc.provenance.importedAt);
+  });
+});
+
+describe('Repository Detail — edit content type', () => {
+  beforeEach(fullReset);
+
+  it('the exact updateImportedContent call the detail page\'s Edit save makes can change contentType, and updatedAt advances', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const before = resolveEntity('imported_content', doc.id)!.entry.updatedAt;
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Doc', contentType: 'document', metadata: undefined });
+
+    const resolved = resolveEntity('imported_content', doc.id)!;
+    expect(resolved.entry.contentType).toBe('document');
+    expect(resolved.entry.updatedAt).not.toBe(before);
+    expect(new Date(resolved.entry.updatedAt).getTime()).toBeGreaterThan(new Date(before).getTime());
+  });
+});
+
+describe('Repository Detail — edits survive an export/import round-trip (page reload)', () => {
+  beforeEach(fullReset);
+
+  it('a title/content-type/metadata edit made from the detail page is still present after export -> reset -> import', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Original' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Edited', contentType: 'bibliography', metadata: { category: 'Sources' } });
+
+    const json = exportAllData();
+    fullReset();
+    importAllData(json);
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+
+    const resolved = resolveEntity('imported_content', doc.id);
+    expect(resolved).toBeDefined();
+    expect(resolved!.entry.title).toBe('Edited');
+    expect(resolved!.entry.contentType).toBe('bibliography');
+    expect(resolved!.entry.category).toBe('Sources');
   });
 });
