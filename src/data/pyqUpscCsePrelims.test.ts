@@ -5,10 +5,15 @@ import {
   UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100_SUMMARY,
   UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_STRUCTURE_ISSUES,
   UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_ATTACH_RESULT,
+  UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100_SUMMARY,
+  UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A_STRUCTURE_ISSUES,
+  UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A_ATTACH_RESULT,
 } from './pyqUpscCsePrelims';
 import { UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50 } from './upscCsePrelimsPyqBatch2026Q1Q50Raw';
 import { UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100 } from './upscCsePrelimsPyqBatch2026Q51Q100Raw';
 import { UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A } from './upscCsePrelimsAnswerKey2026SetARaw';
+import { UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100 } from './upscCsePrelimsPyqBatch2025Q1Q100Raw';
+import { UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A } from './upscCsePrelimsAnswerKey2025SetARaw';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from './upscCsePrelimsSyllabus';
 import { getMicrosyllabusItemById } from '../lib/upscCseSyllabus';
 import { buildUpscCsePrelimsBatchRecords, mergeUpscCsePrelimsPyqRecords } from '../lib/upscCsePrelimsPyqBatchImport';
@@ -18,43 +23,51 @@ import { SYLLABUS } from './syllabus';
 import { PYQ_BANK } from './pyq';
 import { UPSC_CSE_PYQ_BANK } from './pyqUpscCse';
 
-// UPSC CSE Prelims 2026 Q1-100 integration — the combined GS Paper I dataset built from TWO
-// separately-prepared batches (Q1-50, Q51-100; see data/pyqUpscCsePrelims.ts's own header for how
-// they are chained into one UPSC_CSE_PRELIMS_PYQ_BANK). See
+// UPSC CSE Prelims integration — the combined GS Paper I dataset built from THREE separately-
+// prepared batches: 2026 Q1-50, 2026 Q51-100, and 2025 Q1-100 (see data/pyqUpscCsePrelims.ts's own
+// header for how they are chained into one UPSC_CSE_PRELIMS_PYQ_BANK — the 2025 batch is appended on
+// top of the already-answer-keyed 2026 bank, never replacing or editing it). See
 // src/lib/upscCsePrelimsPyqBatchImport.ts for the pure conversion/merge/summary logic
 // (exhaustively unit-tested there, including its own null-subject/null-hint handling). These tests
-// assert on the ACTUAL persisted destination, matching this task's own explicit checklist.
+// assert on the ACTUAL persisted destination, matching this task's own explicit checklist. Tests
+// below are grouped as "2026 — ..." (scoped to the 2026 subset, unaffected by the 2025 addition),
+// "2025 — ..." (scoped to the 2025 subset), and "combined — ..." (the whole bank, both years).
 
-const ALL_RAW_QUESTIONS = [...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50.questions, ...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100.questions];
+const ALL_2026_RAW_QUESTIONS = [...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50.questions, ...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100.questions];
+const ALL_2025_RAW_QUESTIONS = UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100.questions;
+const BANK_2026 = () => UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.year === 2026);
+const BANK_2025 = () => UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.year === 2025);
 
 describe('UPSC CSE Prelims 2026 — exactly 100 questions, Q1-Q100', () => {
-  it('the combined bank holds exactly 100 records', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK).toHaveLength(100);
+  it('the 2026 subset holds exactly 100 records', () => {
+    expect(BANK_2026()).toHaveLength(100);
   });
 
-  it('question numbers are exactly 1..100, each appearing once', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.questionNumber !== undefined)).toBe(true);
-    const numbers = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => r.questionNumber!).sort((a, b) => a - b);
+  it('question numbers are exactly 1..100, each appearing once within 2026', () => {
+    expect(BANK_2026().every((r) => r.questionNumber !== undefined)).toBe(true);
+    const numbers = BANK_2026()
+      .map((r) => r.questionNumber!)
+      .sort((a, b) => a - b);
     expect(numbers).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
   });
 
   it('both source batches contributed exactly 50 records each', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.questionNumber! >= 1 && r.questionNumber! <= 50)).toHaveLength(50);
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.questionNumber! >= 51 && r.questionNumber! <= 100)).toHaveLength(50);
+    expect(BANK_2026().filter((r) => r.questionNumber! >= 1 && r.questionNumber! <= 50)).toHaveLength(50);
+    expect(BANK_2026().filter((r) => r.questionNumber! >= 51 && r.questionNumber! <= 100)).toHaveLength(50);
   });
 });
 
 describe('UPSC CSE Prelims 2026 — year and paper', () => {
-  it('every record is year 2026, paper "GS Paper I"', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.year === 2026)).toBe(true);
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.paper === 'GS Paper I')).toBe(true);
+  it('every 2026 record is year 2026, paper "GS Paper I"', () => {
+    expect(BANK_2026().every((r) => r.year === 2026)).toBe(true);
+    expect(BANK_2026().every((r) => r.paper === 'GS Paper I')).toBe(true);
   });
 });
 
 describe('UPSC CSE Prelims 2026 — exact question/option preservation across both batches', () => {
   it('every record\'s question text and options are byte-identical to whichever supplied batch it came from', () => {
-    for (const source of ALL_RAW_QUESTIONS) {
-      const record = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.questionNumber === source.questionNumber);
+    for (const source of ALL_2026_RAW_QUESTIONS) {
+      const record = BANK_2026().find((r) => r.questionNumber === source.questionNumber);
       expect(record, `record for Q${source.questionNumber}`).toBeDefined();
       expect(record!.question).toBe(source.question);
       expect(record!.options).toEqual(source.options);
@@ -63,19 +76,19 @@ describe('UPSC CSE Prelims 2026 — exact question/option preservation across bo
   });
 
   it('Q51-100 records preserve their own batch\'s provenance (different filename from Q1-50)', () => {
-    const q51 = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.questionNumber === 51)!;
+    const q51 = BANK_2026().find((r) => r.questionNumber === 51)!;
     expect(q51.provenance.sourceFilename).toBe(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100.source.filename);
     expect(q51.provenance.sourceFilename).toBe('Pasted markdown(6).md');
   });
 
   it('Q1-50 records preserve their own batch\'s provenance', () => {
-    const q1 = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.questionNumber === 1)!;
+    const q1 = BANK_2026().find((r) => r.questionNumber === 1)!;
     expect(q1.provenance.sourceFilename).toBe(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50.source.filename);
     expect(q1.provenance.sourceFilename).toBe('Pasted markdown(5).md');
   });
 
-  it('every record preserves answerKeyProvided: false, matching both supplied batches', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.provenance.answerKeyProvided === false)).toBe(true);
+  it('every 2026 record preserves answerKeyProvided: false, matching both supplied batches', () => {
+    expect(BANK_2026().every((r) => r.provenance.answerKeyProvided === false)).toBe(true);
   });
 });
 
@@ -139,36 +152,35 @@ describe('UPSC CSE Prelims 2026 — Set A answer key: Q1-Q100 attachment', () =>
     expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A_ATTACH_RESULT.skipped).toEqual([]);
   });
 
-  it('every record in the bank now carries a correctOptionId', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.correctOptionId !== undefined)).toBe(true);
+  it('every 2026 record now carries a correctOptionId', () => {
+    expect(BANK_2026().every((r) => r.correctOptionId !== undefined)).toBe(true);
   });
 
-  it('every record\'s correctOptionId matches the supplied answer key exactly, by question number', () => {
+  it('every 2026 record\'s correctOptionId matches the supplied answer key exactly, by question number', () => {
     const byNumber = new Map(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => [e.questionNumber, e.correctOptionId]));
-    for (const record of UPSC_CSE_PRELIMS_PYQ_BANK) {
+    for (const record of BANK_2026()) {
       expect(record.correctOptionId).toBe(byNumber.get(record.questionNumber!));
     }
   });
 
-  it('every record\'s correctOptionId matches an existing option id for that exact question', () => {
-    for (const record of UPSC_CSE_PRELIMS_PYQ_BANK) {
+  it('every 2026 record\'s correctOptionId matches an existing option id for that exact question', () => {
+    for (const record of BANK_2026()) {
       expect(record.options.some((o) => o.id === record.correctOptionId)).toBe(true);
     }
   });
 
-  it('every record\'s answerKeySet is "A", preserving the Set-A designation', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.answerKeySet === 'A')).toBe(true);
+  it('every 2026 record\'s answerKeySet is "A", preserving the Set-A designation', () => {
+    expect(BANK_2026().every((r) => r.answerKeySet === 'A')).toBe(true);
   });
 
-  it('does not touch mappingStatus/microsyllabusId — still 20 mapped, 80 needs_review after attaching answers', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'mapped')).toHaveLength(20);
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'needs_review')).toHaveLength(80);
+  it('does not touch mappingStatus/microsyllabusId — still 20 mapped, 80 needs_review within 2026 after attaching answers', () => {
+    expect(BANK_2026().filter((r) => r.mappingStatus === 'mapped')).toHaveLength(20);
+    expect(BANK_2026().filter((r) => r.mappingStatus === 'needs_review')).toHaveLength(80);
   });
 
   it('does not touch question text, options, provenance, year, or paper', () => {
-    const allRaw = [...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50.questions, ...UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100.questions];
-    for (const source of allRaw) {
-      const record = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.questionNumber === source.questionNumber)!;
+    for (const source of ALL_2026_RAW_QUESTIONS) {
+      const record = BANK_2026().find((r) => r.questionNumber === source.questionNumber)!;
       expect(record.question).toBe(source.question);
       expect(record.options).toEqual(source.options);
       expect(record.year).toBe(2026);
@@ -181,7 +193,7 @@ describe('UPSC CSE Prelims 2026 — Set A answer key: Q1-Q100 attachment', () =>
       ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A,
       answerKey: UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => (e.questionNumber === 1 ? { ...e, correctOptionId: 'z' } : e)),
     };
-    const preAnswerBank = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => ({ ...r, correctOptionId: undefined, answerKeySet: undefined }));
+    const preAnswerBank = BANK_2026().map((r) => ({ ...r, correctOptionId: undefined, answerKeySet: undefined }));
     const result = attachUpscCsePrelimsAnswerKey(preAnswerBank, badAnswerKey);
     expect(result.attached).toBe(99);
     expect(result.skipped).toEqual([{ questionNumber: 1, reason: expect.stringContaining('"z"') }]);
@@ -190,7 +202,7 @@ describe('UPSC CSE Prelims 2026 — Set A answer key: Q1-Q100 attachment', () =>
   });
 
   it('an answer key for a question number outside the bank is reported, never silently dropped', () => {
-    const preAnswerBank = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => ({ ...r, correctOptionId: undefined, answerKeySet: undefined }));
+    const preAnswerBank = BANK_2026().map((r) => ({ ...r, correctOptionId: undefined, answerKeySet: undefined }));
     const extraEntryKey = { ...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A, answerKey: [...UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey, { questionNumber: 101, correctOptionId: 'a' }] };
     const result = attachUpscCsePrelimsAnswerKey(preAnswerBank, extraEntryKey);
     expect(result.skipped.some((s) => s.questionNumber === 101)).toBe(true);
@@ -198,8 +210,8 @@ describe('UPSC CSE Prelims 2026 — Set A answer key: Q1-Q100 attachment', () =>
 });
 
 describe('UPSC CSE Prelims 2026 — valid microsyllabus mappings', () => {
-  it('every mapped record\'s microsyllabusId resolves to a real node in the actual syllabus tree (never invented)', () => {
-    const mapped = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'mapped');
+  it('every mapped 2026 record\'s microsyllabusId resolves to a real node in the actual syllabus tree (never invented)', () => {
+    const mapped = BANK_2026().filter((r) => r.mappingStatus === 'mapped');
     expect(mapped.length).toBeGreaterThan(0);
     for (const record of mapped) {
       expect(record.microsyllabusId).toBeDefined();
@@ -208,8 +220,8 @@ describe('UPSC CSE Prelims 2026 — valid microsyllabus mappings', () => {
     }
   });
 
-  it('every needs_review record has NO microsyllabusId — never silently assigned to another topic', () => {
-    const needsReview = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'needs_review');
+  it('every needs_review 2026 record has NO microsyllabusId — never silently assigned to another topic', () => {
+    const needsReview = BANK_2026().filter((r) => r.mappingStatus === 'needs_review');
     expect(needsReview.every((r) => r.microsyllabusId === undefined)).toBe(true);
   });
 
@@ -221,39 +233,170 @@ describe('UPSC CSE Prelims 2026 — valid microsyllabus mappings', () => {
   it('Q51-100: every question was supplied with no subject/microsyllabusHint at all, so all 50 are needs_review (never guessed from question content)', () => {
     expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100_SUMMARY.mapped).toBe(0);
     expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100_SUMMARY.needsReview).toBe(50);
-    const q51to100 = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.questionNumber! >= 51 && r.questionNumber! <= 100);
+    const q51to100 = BANK_2026().filter((r) => r.questionNumber! >= 51 && r.questionNumber! <= 100);
     expect(q51to100.every((r) => r.mappingStatus === 'needs_review')).toBe(true);
     expect(q51to100.every((r) => r.subject === undefined && r.topic === undefined)).toBe(true);
   });
 
-  it('combined bank: 20 mapped + 80 needs_review = 100', () => {
-    const mapped = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'mapped').length;
-    const needsReview = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.mappingStatus === 'needs_review').length;
+  it('2026 subset: 20 mapped + 80 needs_review = 100', () => {
+    const mapped = BANK_2026().filter((r) => r.mappingStatus === 'mapped').length;
+    const needsReview = BANK_2026().filter((r) => r.mappingStatus === 'needs_review').length;
     expect(mapped).toBe(20);
     expect(needsReview).toBe(80);
     expect(mapped + needsReview).toBe(100);
   });
 });
 
-describe('UPSC CSE Prelims 2026 — no duplicate IDs / no duplicate question numbers', () => {
-  it('every record id is unique across the combined 100', () => {
+describe('UPSC CSE Prelims 2025 — exactly 100 questions, Q1-Q100, Set A', () => {
+  it('the 2025 subset holds exactly 100 records', () => {
+    expect(BANK_2025()).toHaveLength(100);
+  });
+
+  it('question numbers are exactly 1..100, each appearing once within 2025', () => {
+    expect(BANK_2025().every((r) => r.questionNumber !== undefined)).toBe(true);
+    const numbers = BANK_2025()
+      .map((r) => r.questionNumber!)
+      .sort((a, b) => a - b);
+    expect(numbers).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+  });
+
+  it('every 2025 record is year 2025, paper "GS Paper I"', () => {
+    expect(BANK_2025().every((r) => r.year === 2025)).toBe(true);
+    expect(BANK_2025().every((r) => r.paper === 'GS Paper I')).toBe(true);
+  });
+
+  it('every 2025 record\'s question text and options are byte-identical to the supplied batch', () => {
+    for (const source of ALL_2025_RAW_QUESTIONS) {
+      const record = BANK_2025().find((r) => r.questionNumber === source.questionNumber);
+      expect(record, `record for Q${source.questionNumber}`).toBeDefined();
+      expect(record!.question).toBe(source.question);
+      expect(record!.options).toEqual(source.options);
+    }
+  });
+
+  it('every 2025 record preserves provenance: user-provided text, no sourceFilename (pasted directly, not uploaded), answerKeyProvided false at batch level, provisional', () => {
+    expect(BANK_2025().every((r) => r.provenance.sourceKind === 'user_provided_text')).toBe(true);
+    expect(BANK_2025().every((r) => r.provenance.sourceFilename === undefined)).toBe(true);
+    expect(BANK_2025().every((r) => r.provenance.answerKeyProvided === false)).toBe(true);
+    expect(BANK_2025().every((r) => r.verificationStatus === 'provisional')).toBe(true);
+  });
+
+  it('the 2025 batch itself carried no answer key (the Set A key below is a separate, later attachment)', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100_SUMMARY.answerKeyStatus).toBe('no_answer_key_supplied');
+  });
+
+  it('no 2025 record has a subject/topic/microsyllabus mapping — none was supplied, so every one is needs_review, never guessed', () => {
+    expect(BANK_2025().every((r) => r.subject === undefined && r.topic === undefined)).toBe(true);
+    expect(BANK_2025().every((r) => r.mappingStatus === 'needs_review')).toBe(true);
+    expect(BANK_2025().every((r) => r.microsyllabusId === undefined)).toBe(true);
+    expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100_SUMMARY.mapped).toBe(0);
+    expect(UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100_SUMMARY.needsReview).toBe(100);
+  });
+});
+
+describe('UPSC CSE Prelims 2025 — Set A answer key: structural validation', () => {
+  it('the persisted structure-issues export is empty — exactly 100 entries, Q1-Q100, only A/B/C/D, no missing/duplicate numbers', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A_STRUCTURE_ISSUES).toEqual([]);
+  });
+
+  it('the raw answer-key file itself has exactly 100 entries covering Q1-Q100 with no duplicates', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.answerKey).toHaveLength(100);
+    const numbers = UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.answerKey.map((e) => e.questionNumber).sort((a, b) => a - b);
+    expect(numbers).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+  });
+
+  it('every entry\'s correctOptionId is one of a/b/c/d', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.answerKey.every((e) => /^[a-dA-D]$/.test(e.correctOptionId))).toBe(true);
+  });
+
+  it('validateAnswerKeyStructure independently confirms zero issues against the Q1-Q100 range', () => {
+    const issues = validateAnswerKeyStructure(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A, { min: 1, max: 100 });
+    expect(issues).toEqual([]);
+  });
+
+  it('the key\'s set is "A" and it is scoped to year 2025, paper "GS Paper I" (distinct from the 2026 key)', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.set).toBe('A');
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.year).toBe(2025);
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.paper).toBe('GS Paper I');
+  });
+});
+
+describe('UPSC CSE Prelims 2025 — Set A answer key: Q1-Q100 attachment', () => {
+  it('all 100 entries attached, zero skipped', () => {
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A_ATTACH_RESULT.attached).toBe(100);
+    expect(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A_ATTACH_RESULT.skipped).toEqual([]);
+  });
+
+  it('every 2025 record now carries a correctOptionId', () => {
+    expect(BANK_2025().every((r) => r.correctOptionId !== undefined)).toBe(true);
+  });
+
+  it('every 2025 record\'s correctOptionId matches the supplied answer key exactly, by question number', () => {
+    const byNumber = new Map(UPSC_CSE_PRELIMS_ANSWER_KEY_2025_SET_A.answerKey.map((e) => [e.questionNumber, e.correctOptionId]));
+    for (const record of BANK_2025()) {
+      expect(record.correctOptionId).toBe(byNumber.get(record.questionNumber!));
+    }
+  });
+
+  it('every 2025 record\'s correctOptionId matches an existing option id for that exact question', () => {
+    for (const record of BANK_2025()) {
+      expect(record.options.some((o) => o.id === record.correctOptionId)).toBe(true);
+    }
+  });
+
+  it('every 2025 record\'s answerKeySet is "A"', () => {
+    expect(BANK_2025().every((r) => r.answerKeySet === 'A')).toBe(true);
+  });
+
+  it('the 2025 attach never touched the already-attached 2026 answers', () => {
+    expect(BANK_2026().every((r) => r.answerKeySet === 'A')).toBe(true);
+    const byNumber2026 = new Map(UPSC_CSE_PRELIMS_ANSWER_KEY_2026_SET_A.answerKey.map((e) => [e.questionNumber, e.correctOptionId]));
+    for (const record of BANK_2026()) {
+      expect(record.correctOptionId).toBe(byNumber2026.get(record.questionNumber!));
+    }
+  });
+});
+
+describe('UPSC CSE Prelims combined bank — both exam sittings coexist without collision', () => {
+  it('the combined bank holds exactly 200 records: 100 from 2026 + 100 from 2025', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK).toHaveLength(200);
+    expect(BANK_2026()).toHaveLength(100);
+    expect(BANK_2025()).toHaveLength(100);
+  });
+
+  it('every record id is unique across the combined 200 (year is baked into each id, so Q1-2025 and Q1-2026 never collide)', () => {
     const ids = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => r.id);
+    expect(new Set(ids).size).toBe(200);
+  });
+
+  it('2025 and 2026 ids never collide with each other', () => {
+    const ids2026 = new Set(BANK_2026().map((r) => r.id));
+    const ids2025 = BANK_2025().map((r) => r.id);
+    expect(ids2025.every((id) => !ids2026.has(id))).toBe(true);
+  });
+});
+
+describe('UPSC CSE Prelims 2026 — no duplicate IDs / no duplicate question numbers within 2026', () => {
+  it('every 2026 record id is unique across the 2026 subset', () => {
+    const ids = BANK_2026().map((r) => r.id);
     expect(new Set(ids).size).toBe(100);
   });
 
-  it('every question number is unique across the combined 100', () => {
-    const numbers = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => r.questionNumber);
+  it('every 2026 question number is unique across the 2026 subset', () => {
+    const numbers = BANK_2026().map((r) => r.questionNumber);
     expect(new Set(numbers).size).toBe(100);
   });
 
   it('Q1-50 and Q51-100 ids never collide with each other', () => {
-    const q1to50Ids = new Set(UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.questionNumber! <= 50).map((r) => r.id));
-    const q51to100Ids = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.questionNumber! >= 51).map((r) => r.id);
+    const q1to50Ids = new Set(BANK_2026().filter((r) => r.questionNumber! <= 50).map((r) => r.id));
+    const q51to100Ids = BANK_2026()
+      .filter((r) => r.questionNumber! >= 51)
+      .map((r) => r.id);
     expect(q51to100Ids.every((id) => !q1to50Ids.has(id))).toBe(true);
   });
 });
 
-describe('UPSC CSE Prelims 2026 — compatible with the existing interactive MCQ architecture', () => {
+describe('UPSC CSE Prelims — compatible with the existing interactive MCQ architecture', () => {
   it('every record\'s options are structurally identical to PYQOption[] — the exact shape the shared practice/mock-test UI (lib/types.ts\'s PracticeQuestion) already expects', () => {
     for (const record of UPSC_CSE_PRELIMS_PYQ_BANK) {
       const options: PYQOption[] = record.options; // fails to typecheck if the shapes ever drift apart
@@ -282,7 +425,7 @@ describe('UPSC CSE Prelims 2026 — compatible with the existing interactive MCQ
   // ever assigns here; that remains the one gap left between UpscCsePrelimsBatchPyq and PYQ itself.
 });
 
-describe('UPSC CSE Prelims 2026 — UPSC workspace isolation', () => {
+describe('UPSC CSE Prelims — UPSC workspace isolation', () => {
   it('no record carries a workspaceId field — belongs to upsc_cse by construction, same as every other UPSC CSE data file', () => {
     expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => !('workspaceId' in r))).toBe(true);
   });
@@ -292,7 +435,7 @@ describe('UPSC CSE Prelims 2026 — UPSC workspace isolation', () => {
   });
 });
 
-describe('UPSC CSE Prelims 2026 — APFC protection', () => {
+describe('UPSC CSE Prelims — APFC protection', () => {
   it('data/pyq.ts\'s PYQ_BANK is unchanged: 458 questions', () => {
     expect(PYQ_BANK.length).toBe(458);
   });
@@ -303,28 +446,46 @@ describe('UPSC CSE Prelims 2026 — APFC protection', () => {
   });
 });
 
-describe('UPSC CSE Prelims 2026 — re-import does not duplicate either batch', () => {
-  it('re-running Q1-50 through build + merge against the already-populated (100-record) bank adds nothing', () => {
+describe('UPSC CSE Prelims — re-import does not duplicate any batch', () => {
+  it('re-running 2026 Q1-50 through build + merge against the already-populated (200-record) bank adds nothing', () => {
     const reconversion = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50, UPSC_CSE_PRELIMS_SYLLABUS);
     const reimport = mergeUpscCsePrelimsPyqRecords(UPSC_CSE_PRELIMS_PYQ_BANK, reconversion.records);
-    expect(reimport.merged).toHaveLength(100); // unchanged
+    expect(reimport.merged).toHaveLength(200); // unchanged
     expect(reimport.addedCount).toBe(0);
     expect(reimport.duplicateCount).toBe(50);
   });
 
-  it('re-running Q51-100 through build + merge against the already-populated (100-record) bank adds nothing', () => {
+  it('re-running 2026 Q51-100 through build + merge against the already-populated (200-record) bank adds nothing', () => {
     const reconversion = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100, UPSC_CSE_PRELIMS_SYLLABUS);
     const reimport = mergeUpscCsePrelimsPyqRecords(UPSC_CSE_PRELIMS_PYQ_BANK, reconversion.records);
-    expect(reimport.merged).toHaveLength(100); // unchanged
+    expect(reimport.merged).toHaveLength(200); // unchanged
     expect(reimport.addedCount).toBe(0);
     expect(reimport.duplicateCount).toBe(50);
   });
 
-  it('re-running BOTH batches together against an empty bank reproduces the exact same 100-record set', () => {
+  it('re-running the 2025 Q1-100 batch through build + merge against the already-populated (200-record) bank adds nothing', () => {
+    const reconversion = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100, UPSC_CSE_PRELIMS_SYLLABUS);
+    const reimport = mergeUpscCsePrelimsPyqRecords(UPSC_CSE_PRELIMS_PYQ_BANK, reconversion.records);
+    expect(reimport.merged).toHaveLength(200); // unchanged
+    expect(reimport.addedCount).toBe(0);
+    expect(reimport.duplicateCount).toBe(100);
+  });
+
+  it('re-running the two 2026 batches together against an empty bank reproduces the exact same 2026 100-record set', () => {
     const q1to50 = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50, UPSC_CSE_PRELIMS_SYLLABUS);
     const firstMerge = mergeUpscCsePrelimsPyqRecords([], q1to50.records);
     const q51to100 = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100, UPSC_CSE_PRELIMS_SYLLABUS);
     const secondMerge = mergeUpscCsePrelimsPyqRecords(firstMerge.merged, q51to100.records);
-    expect(secondMerge.merged.map((r) => r.id).sort()).toEqual(UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => r.id).sort());
+    expect(secondMerge.merged.map((r) => r.id).sort()).toEqual(BANK_2026().map((r) => r.id).sort());
+  });
+
+  it('re-running all three batches together against an empty bank reproduces the exact same combined 200-record set', () => {
+    const q1to50 = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q1_Q50, UPSC_CSE_PRELIMS_SYLLABUS);
+    const firstMerge = mergeUpscCsePrelimsPyqRecords([], q1to50.records);
+    const q51to100 = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100, UPSC_CSE_PRELIMS_SYLLABUS);
+    const secondMerge = mergeUpscCsePrelimsPyqRecords(firstMerge.merged, q51to100.records);
+    const batch2025 = buildUpscCsePrelimsBatchRecords(UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100, UPSC_CSE_PRELIMS_SYLLABUS);
+    const thirdMerge = mergeUpscCsePrelimsPyqRecords(secondMerge.merged, batch2025.records);
+    expect(thirdMerge.merged.map((r) => r.id).sort()).toEqual(UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => r.id).sort());
   });
 });

@@ -74,14 +74,31 @@ describe('UPSC CSE PYQ Test page — navigation', () => {
 });
 
 describe('UPSC CSE PYQ Test page — the 2026 dataset itself is unchanged by this stage', () => {
+  const bank2026 = () => UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.year === 2026);
+
   it('exactly 100 questions, correctOptionId present on every one (Set A already attached)', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK).toHaveLength(100);
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK.every((r) => r.correctOptionId !== undefined)).toBe(true);
+    expect(bank2026()).toHaveLength(100);
+    expect(bank2026().every((r) => r.correctOptionId !== undefined)).toBe(true);
   });
 
   it('every question number 1-100 appears exactly once', () => {
-    const numbers = UPSC_CSE_PRELIMS_PYQ_BANK.map((r) => r.questionNumber).sort((a, b) => a! - b!);
+    const numbers = bank2026()
+      .map((r) => r.questionNumber)
+      .sort((a, b) => a! - b!);
     expect(numbers).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+  });
+});
+
+describe('UPSC CSE PYQ Test page — the 2025 batch is integrated alongside 2026, both usable by this page', () => {
+  const bank2025 = () => UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.year === 2025);
+
+  it('exactly 100 questions, correctOptionId present on every one (Set A already attached)', () => {
+    expect(bank2025()).toHaveLength(100);
+    expect(bank2025().every((r) => r.correctOptionId !== undefined)).toBe(true);
+  });
+
+  it('the combined bank (2026 + 2025) holds exactly 200 questions', () => {
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK).toHaveLength(200);
   });
 });
 
