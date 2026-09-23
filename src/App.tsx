@@ -14,6 +14,8 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
 const UpscCseDashboard = lazy(() => import('./pages/UpscCseDashboard'));
 const UpscCseSyllabus = lazy(() => import('./pages/UpscCseSyllabus'));
+const UpscCseStudyPlan = lazy(() => import('./pages/UpscCseStudyPlan'));
+const UpscCseAnalytics = lazy(() => import('./pages/UpscCseAnalytics'));
 const QuestionBank = lazy(() => import('./pages/QuestionBank'));
 const PYQTest = lazy(() => import('./pages/PYQTest'));
 const UpscCsePyqTest = lazy(() => import('./pages/UpscCsePyqTest'));
@@ -24,6 +26,8 @@ const Notes = lazy(() => import('./pages/Notes'));
 const Repository = lazy(() => import('./pages/Repository'));
 const RepositoryDetail = lazy(() => import('./pages/RepositoryDetail'));
 const PhdDashboard = lazy(() => import('./pages/PhdDashboard'));
+const PhdPlan = lazy(() => import('./pages/PhdPlan'));
+const PhdAnalytics = lazy(() => import('./pages/PhdAnalytics'));
 const PhdResearch = lazy(() => import('./pages/PhdResearch'));
 const WorkingBibliography = lazy(() => import('./pages/WorkingBibliography'));
 const Pomodoro = lazy(() => import('./pages/Pomodoro'));
@@ -54,6 +58,8 @@ export default function App() {
           <Route path="/syllabus" element={<Syllabus />} />
           <Route path="/upsc-dashboard" element={<UpscCseDashboard />} />
           <Route path="/upsc-syllabus" element={<UpscCseSyllabus />} />
+          <Route path="/upsc-study-plan" element={<UpscCseStudyPlan />} />
+          <Route path="/upsc-analytics" element={<UpscCseAnalytics />} />
           <Route path="/pyq" element={<QuestionBank />} />
           <Route path="/pyq-test" element={<PYQTest />} />
           <Route path="/upsc-pyq-test" element={<UpscCsePyqTest />} />
@@ -64,6 +70,8 @@ export default function App() {
           <Route path="/repository" element={<Repository />} />
           <Route path="/repository/:entityType/:id" element={<RepositoryDetail />} />
           <Route path="/phd-dashboard" element={<PhdDashboard />} />
+          <Route path="/phd-plan" element={<PhdPlan />} />
+          <Route path="/phd-analytics" element={<PhdAnalytics />} />
           <Route path="/phd-research" element={<PhdResearch />} />
           <Route path="/phd-research/bibliography" element={<WorkingBibliography />} />
           <Route path="/pomodoro" element={<Pomodoro />} />

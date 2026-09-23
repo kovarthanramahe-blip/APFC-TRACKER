@@ -16,6 +16,7 @@ import {
   Compass,
   FileText,
   BookMarked,
+  Target,
   type LucideIcon,
 } from 'lucide-react';
 import type { WorkspaceKind } from '../../lib/workspace';
@@ -66,6 +67,8 @@ const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
     { to: '/upsc-dashboard', label: 'UPSC CSE Dashboard', icon: Compass, end: true },
     { to: '/upsc-syllabus', label: 'UPSC CSE Syllabus', icon: ListTree },
     { to: '/upsc-pyq-test', label: 'UPSC CSE PYQs', icon: ClipboardCheck },
+    { to: '/upsc-study-plan', label: 'Study Plan', icon: CalendarRange },
+    { to: '/upsc-analytics', label: 'Analytics', icon: BarChart3 },
     { to: '/notes', label: 'Notes', icon: NotebookPen },
     { to: '/repository', label: 'Repository', icon: Library },
     { to: '/pomodoro', label: 'Pomodoro', icon: Timer },
@@ -77,6 +80,8 @@ const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
     // '/phd-research/bibliography' since that path starts with it.
     { to: '/phd-research', label: 'Research Documents', icon: FileText, end: true },
     { to: '/phd-research/bibliography', label: 'Working Bibliography', icon: BookMarked },
+    { to: '/phd-plan', label: 'Research Plan', icon: Target },
+    { to: '/phd-analytics', label: 'Analytics', icon: BarChart3 },
     { to: '/repository', label: 'Repository', icon: Library },
     { to: '/notes', label: 'Notes', icon: NotebookPen },
     { to: '/pomodoro', label: 'Pomodoro', icon: Timer },

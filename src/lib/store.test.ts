@@ -231,6 +231,7 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'studyPlanGeneratedAt',
         'theme',
         'upscCsePrelimsPyqAttempts',
+        'upscCseStudyPlanConfig',
         'upscCseStudyTasks',
         'upscCseSyllabusCoverage',
       ].sort(),
@@ -1478,5 +1479,226 @@ describe('Related Content Summary — count correctness across the relationship 
     currentCounts('bib1', 'imported_content');
     expect(useAppStore.getState().contentRelationships).toHaveLength(1);
     expect(useAppStore.getState().importedContent).toHaveLength(2);
+  });
+});
+
+// Workspace-aware Study Plan + Analytics stage — upscCseStudyPlanConfig (the one genuinely new
+// store field this stage adds) plus the EXTENDED upscCseStudyTasks/phdMicroTargets write paths
+// (bulk add, update) that back the new UPSC CSE Study Plan and PhD Research Plan pages. No new
+// PhD-specific collection was added — phdMicroTargets/phdTopicAreas are reused exactly as they
+// were built for the PhD Research Dashboard stage.
+describe('Workspace-aware Study Plan + Analytics — upscCseStudyPlanConfig, extended study task/micro-target write paths', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      upscCseStudyTasks: [],
+      upscCseStudyPlanConfig: null,
+      phdTopicAreas: [],
+      phdMicroTargets: [],
+    });
+  }
+  beforeEach(fullReset);
+
+  describe('upscCseStudyPlanConfig — set/clear', () => {
+    it('setUpscCseStudyPlanConfig stores the config as-is', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      const config = { startDate: '2026-09-22', targetDate: '2026-12-22', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [], planType: 'balanced' as const, createdAt: 'x', updatedAt: 'x' };
+      useAppStore.getState().setUpscCseStudyPlanConfig(config);
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toEqual(config);
+    });
+
+    it('clearUpscCseStudyPlanConfig resets it back to null', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().setUpscCseStudyPlanConfig({ startDate: 'a', targetDate: 'b', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [], planType: 'balanced', createdAt: 'x', updatedAt: 'x' });
+      useAppStore.getState().clearUpscCseStudyPlanConfig();
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+    });
+
+    it('a fresh, never-configured workspace starts with null — never a fabricated plan', () => {
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+    });
+  });
+
+  describe('addUpscCseStudyTasks (bulk) and updateUpscCseStudyTask', () => {
+    it('addUpscCseStudyTasks prepends every generated task in one call', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addUpscCseStudyTasks([
+        { id: 'gen-1', date: '2026-09-22', title: 'Ancient India', status: 'pending', createdAt: 'x', microsyllabusId: 'ms1' },
+        { id: 'gen-2', date: '2026-09-23', title: 'Modern India', status: 'pending', createdAt: 'x', microsyllabusId: 'ms2' },
+      ]);
+      expect(useAppStore.getState().upscCseStudyTasks.map((t) => t.id)).toEqual(['gen-1', 'gen-2']);
+    });
+
+    it('addUpscCseStudyTasks never disturbs tasks the Dashboard quick-add already created (same shared array)', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addUpscCseStudyTask({ id: 'quick-1', date: '2026-09-22', title: 'Quick task', status: 'pending', createdAt: 'x' });
+      useAppStore.getState().addUpscCseStudyTasks([{ id: 'gen-1', date: '2026-09-22', title: 'Generated', status: 'pending', createdAt: 'x' }]);
+      const ids = useAppStore.getState().upscCseStudyTasks.map((t) => t.id);
+      expect(ids).toContain('quick-1');
+      expect(ids).toContain('gen-1');
+    });
+
+    it('updateUpscCseStudyTask edits the matching task in place', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addUpscCseStudyTask({ id: 't1', date: '2026-09-22', title: 'Original', status: 'pending', createdAt: 'x' });
+      useAppStore.getState().updateUpscCseStudyTask('t1', { title: 'Revised', priority: 'high', notes: 'focus here' });
+      const task = useAppStore.getState().upscCseStudyTasks.find((t) => t.id === 't1')!;
+      expect(task.title).toBe('Revised');
+      expect(task.priority).toBe('high');
+      expect(task.notes).toBe('focus here');
+    });
+  });
+
+  describe('PhD micro-targets — notes/linkedContentId fields persist through the store', () => {
+    it('addPhdMicroTarget stores notes and linkedContentId when supplied', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addPhdMicroTarget({ title: 'Read source X', contextId: 'area-1', notes: 'bring a highlighter', linkedContentId: 'ic-1' }, 'mt-1', '2026-09-22T00:00:00.000Z');
+      const target = useAppStore.getState().phdMicroTargets.find((t) => t.id === 'mt-1')!;
+      expect(target.notes).toBe('bring a highlighter');
+      expect(target.linkedContentId).toBe('ic-1');
+      expect(target.contextId).toBe('area-1');
+    });
+
+    it('updatePhdMicroTarget can edit notes/linkedContentId after creation', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addPhdMicroTarget({ title: 'Read source X' }, 'mt-1', 'x');
+      useAppStore.getState().updatePhdMicroTarget('mt-1', { notes: 'revised note', linkedContentId: 'ic-2' });
+      const target = useAppStore.getState().phdMicroTargets.find((t) => t.id === 'mt-1')!;
+      expect(target.notes).toBe('revised note');
+      expect(target.linkedContentId).toBe('ic-2');
+    });
+  });
+
+  describe('workspace isolation (mandatory)', () => {
+    it('upscCseStudyPlanConfig set in upsc_cse is invisible from apfc/phd_research, and restored on switch-back', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().setUpscCseStudyPlanConfig({ startDate: 'a', targetDate: 'b', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [], planType: 'balanced', createdAt: 'x', updatedAt: 'x' });
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().upscCseStudyPlanConfig).not.toBeNull();
+      expect(useAppStore.getState().upscCseStudyPlanConfig?.startDate).toBe('a');
+    });
+
+    it('upscCseStudyTasks created in upsc_cse never leak into phd_research or apfc', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addUpscCseStudyTask({ id: 't1', date: '2026-09-22', title: 'UPSC task', status: 'pending', createdAt: 'x' });
+
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().upscCseStudyTasks).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().upscCseStudyTasks).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().upscCseStudyTasks.map((t) => t.id)).toEqual(['t1']);
+    });
+
+    it('phdMicroTargets/phdTopicAreas created in phd_research never leak into upsc_cse or apfc', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addPhdTopicArea({ id: 'area-1', title: 'Colonial Land Policy', createdAt: 'x', updatedAt: 'x' });
+      useAppStore.getState().addPhdMicroTarget({ title: 'Read source', contextId: 'area-1' }, 'mt-1', 'x');
+
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().phdTopicAreas).toEqual([]);
+      expect(useAppStore.getState().phdMicroTargets).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().phdTopicAreas).toEqual([]);
+      expect(useAppStore.getState().phdMicroTargets).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().phdTopicAreas.map((a) => a.id)).toEqual(['area-1']);
+      expect(useAppStore.getState().phdMicroTargets.map((t) => t.id)).toEqual(['mt-1']);
+    });
+  });
+
+  describe('persistence — export/import round-trip', () => {
+    it('exportAllData includes upscCseStudyPlanConfig and importAllData restores it', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      const config = { startDate: 'a', targetDate: 'b', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [2, 4], planType: 'balanced' as const, createdAt: 'x', updatedAt: 'x' };
+      useAppStore.getState().setUpscCseStudyPlanConfig(config);
+      const exported = exportAllData();
+
+      fullReset(); // simulate a fresh device with nothing loaded yet
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+
+      importAllData(exported);
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toEqual(config);
+    });
+
+    it('importAllData defaults upscCseStudyPlanConfig to null when the field is missing (older export)', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().setUpscCseStudyPlanConfig({ startDate: 'a', targetDate: 'b', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [], planType: 'balanced', createdAt: 'x', updatedAt: 'x' });
+      const legacyExport = JSON.stringify({ completedTopics: {}, notes: [], attempts: [], pyqAttempts: [] });
+      importAllData(legacyExport);
+      expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+    });
+  });
+
+  describe('migration backfill — upscCseStudyPlanConfig: null for pre-version-11 data', () => {
+    it('backfills upscCseStudyPlanConfig: null at the top level for an old snapshot', () => {
+      const migrated = migrateAppStorage({ upscCseStudyTasks: [] }, 10) as any;
+      expect(migrated.upscCseStudyPlanConfig).toBeNull();
+    });
+
+    it('backfills upscCseStudyPlanConfig: null INSIDE every archived inactiveWorkspaceOwnedData snapshot too', () => {
+      const migrated = migrateAppStorage({ inactiveWorkspaceOwnedData: { upsc_cse: { upscCseStudyTasks: [] } } }, 10) as any;
+      expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.upscCseStudyPlanConfig).toBeNull();
+    });
+
+    it('never overwrites an already-present upscCseStudyPlanConfig during migration', () => {
+      const existing = { startDate: 'a', targetDate: 'b', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [], planType: 'balanced', createdAt: 'x', updatedAt: 'x' };
+      const migrated = migrateAppStorage({ upscCseStudyPlanConfig: existing }, 10) as any;
+      expect(migrated.upscCseStudyPlanConfig).toEqual(existing);
+    });
+
+    it('the full migration is idempotent for upscCseStudyPlanConfig', () => {
+      const once = migrateAppStorage({}, 10);
+      const twice = migrateAppStorage(once, 10);
+      expect(twice).toEqual(once);
+    });
+  });
+
+  describe('regression: existing upscCseStudyTasks/phdMicroTargets functionality is unaffected', () => {
+    it('setUpscCseStudyTaskStatus and deleteUpscCseStudyTask still work exactly as before', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addUpscCseStudyTask({ id: 't1', date: '2026-09-22', title: 'A', status: 'pending', createdAt: 'x' });
+      useAppStore.getState().setUpscCseStudyTaskStatus('t1', 'completed');
+      expect(useAppStore.getState().upscCseStudyTasks[0].status).toBe('completed');
+      useAppStore.getState().deleteUpscCseStudyTask('t1');
+      expect(useAppStore.getState().upscCseStudyTasks).toEqual([]);
+    });
+
+    it('setPhdMicroTargetStatus and deletePhdMicroTarget still work exactly as before', () => {
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      useAppStore.getState().addPhdMicroTarget({ title: 'A' }, 'mt-1', 'x');
+      useAppStore.getState().setPhdMicroTargetStatus('mt-1', 'completed');
+      expect(useAppStore.getState().phdMicroTargets[0].status).toBe('completed');
+      useAppStore.getState().deletePhdMicroTarget('mt-1');
+      expect(useAppStore.getState().phdMicroTargets).toEqual([]);
+    });
+  });
+
+  it('resetAllData clears upscCseStudyPlanConfig/upscCseStudyTasks/phdMicroTargets/phdTopicAreas back to empty', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().setUpscCseStudyPlanConfig({ startDate: 'a', targetDate: 'b', daysPerWeek: 5, minutesPerDay: 60, preferredDays: [], planType: 'balanced', createdAt: 'x', updatedAt: 'x' });
+    useAppStore.getState().addUpscCseStudyTask({ id: 't1', date: '2026-09-22', title: 'A', status: 'pending', createdAt: 'x' });
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addPhdMicroTarget({ title: 'A' }, 'mt-1', 'x');
+
+    useAppStore.getState().resetAllData();
+
+    expect(useAppStore.getState().upscCseStudyPlanConfig).toBeNull();
+    expect(useAppStore.getState().upscCseStudyTasks).toEqual([]);
+    expect(useAppStore.getState().phdMicroTargets).toEqual([]);
+    expect(useAppStore.getState().phdTopicAreas).toEqual([]);
   });
 });

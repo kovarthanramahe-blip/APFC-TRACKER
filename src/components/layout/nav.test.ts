@@ -40,6 +40,10 @@ describe('getNavItemsForWorkspace — UPSC CSE', () => {
     expect(paths).toEqual(expect.arrayContaining(['/upsc-syllabus', '/upsc-pyq-test']));
   });
 
+  it('includes its own dedicated Study Plan and Analytics, distinct from APFC\'s routes', () => {
+    expect(paths).toEqual(expect.arrayContaining(['/upsc-study-plan', '/upsc-analytics']));
+  });
+
   it('includes genuinely shared, workspace-aware functionality (Notes, Repository, Pomodoro, Settings)', () => {
     expect(paths).toEqual(expect.arrayContaining(['/notes', '/repository', '/pomodoro', '/settings']));
   });
@@ -76,6 +80,12 @@ describe('getNavItemsForWorkspace — PhD Research', () => {
   it('exposes Research Documents and Working Bibliography at their real existing routes', () => {
     expect(paths).toContain('/phd-research');
     expect(paths).toContain('/phd-research/bibliography');
+  });
+
+  it('includes its own dedicated Research Plan and Analytics, distinct from APFC\'s and UPSC\'s routes', () => {
+    expect(paths).toEqual(expect.arrayContaining(['/phd-plan', '/phd-analytics']));
+    expect(paths).not.toContain('/upsc-study-plan');
+    expect(paths).not.toContain('/upsc-analytics');
   });
 
   it('exposes the shared Repository/Notes (Topic Areas and micro-targets live on /phd-dashboard itself, not a separate route)', () => {
@@ -127,6 +137,16 @@ describe('resolveActiveNavItem — active-route highlighting', () => {
 
   it('UPSC: /upsc-pyq-test resolves to UPSC CSE PYQs', () => {
     expect(resolveActiveNavItem(upscItems, '/upsc-pyq-test')?.label).toBe('UPSC CSE PYQs');
+  });
+
+  it('UPSC: /upsc-study-plan and /upsc-analytics resolve to their own items', () => {
+    expect(resolveActiveNavItem(upscItems, '/upsc-study-plan')?.label).toBe('Study Plan');
+    expect(resolveActiveNavItem(upscItems, '/upsc-analytics')?.label).toBe('Analytics');
+  });
+
+  it('PhD: /phd-plan and /phd-analytics resolve to their own items', () => {
+    expect(resolveActiveNavItem(phdItems, '/phd-plan')?.label).toBe('Research Plan');
+    expect(resolveActiveNavItem(phdItems, '/phd-analytics')?.label).toBe('Analytics');
   });
 
   it('APFC: exact "/" resolves to Dashboard, but a deeper path never falsely matches it', () => {

@@ -35,6 +35,12 @@ export interface MicroTarget {
   createdAt: string;
   /** Set only when status is 'completed'; cleared when reverted. Never fabricated. */
   completedAt?: string;
+  /** Freeform user notes — distinct from `description` (a short summary of the target itself);
+   * notes are for anything else the user wants to record against it. Optional. */
+  notes?: string;
+  /** Optional link to a piece of real research material (lib/contentImport.ts's
+   * ImportedContent.id) — e.g. "this target is about reading THIS source". Never auto-filled. */
+  linkedContentId?: string;
 }
 
 export function isValidMicroTargetTitle(title: string): boolean {
@@ -48,6 +54,8 @@ export interface CreateMicroTargetInput {
   targetDate?: string;
   estimatedMinutes?: number;
   priority?: MicroTargetPriority;
+  notes?: string;
+  linkedContentId?: string;
 }
 
 export function createMicroTarget(input: CreateMicroTargetInput, id: string, createdAt: string): MicroTarget {
@@ -61,10 +69,14 @@ export function createMicroTarget(input: CreateMicroTargetInput, id: string, cre
     status: 'pending',
     priority: input.priority ?? 'medium',
     createdAt,
+    notes: input.notes?.trim() || undefined,
+    linkedContentId: input.linkedContentId,
   };
 }
 
-export type UpdateMicroTargetFields = Partial<Pick<MicroTarget, 'title' | 'description' | 'contextId' | 'targetDate' | 'estimatedMinutes' | 'priority'>>;
+export type UpdateMicroTargetFields = Partial<
+  Pick<MicroTarget, 'title' | 'description' | 'contextId' | 'targetDate' | 'estimatedMinutes' | 'priority' | 'notes' | 'linkedContentId'>
+>;
 
 /** Returns a NEW array with the matching target's editable fields updated — never mutates
  * `targets`. An id that doesn't exist is a no-op. Title, if supplied, is trimmed and never allowed
@@ -79,6 +91,7 @@ export function updateMicroTarget(targets: readonly MicroTarget[], id: string, u
       ...updates,
       title: nextTitle,
       description: updates.description !== undefined ? updates.description.trim() || undefined : t.description,
+      notes: updates.notes !== undefined ? updates.notes.trim() || undefined : t.notes,
     };
   });
 }

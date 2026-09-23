@@ -27,7 +27,15 @@ import {
 import type { RepositoryImportPlan } from './repositoryImport';
 import type { UpscCseCoverageState, UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
-import { setUpscCseStudyTaskStatus as applyUpscCseStudyTaskStatus, deleteUpscCseStudyTask as applyDeleteUpscCseStudyTask, type UpscCseStudyTask, type UpscCseStudyTaskStatus } from './upscCseStudyTask';
+import {
+  setUpscCseStudyTaskStatus as applyUpscCseStudyTaskStatus,
+  deleteUpscCseStudyTask as applyDeleteUpscCseStudyTask,
+  updateUpscCseStudyTask as applyUpdateUpscCseStudyTask,
+  type UpscCseStudyTask,
+  type UpscCseStudyTaskStatus,
+  type UpdateUpscCseStudyTaskFields,
+} from './upscCseStudyTask';
+import type { UpscCseStudyPlanConfig } from './upscCseStudyPlanConfig';
 import { migrateGranularCoverageBackfill } from './upscCseGranularCoverage';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import {
@@ -79,8 +87,20 @@ interface AppState {
   // addUpscCseStudyTask, matching addUpscCsePrelimsPyqAttempt's own convention above.
   upscCseStudyTasks: UpscCseStudyTask[];
   addUpscCseStudyTask: (task: UpscCseStudyTask) => void;
+  // Bulk-adds an already-built array of tasks in ONE set() call — used by the UPSC CSE Study
+  // Plan's generator (lib/upscCseStudyPlanGenerator.ts), which can produce dozens of tasks at
+  // once; looping addUpscCseStudyTask would work but cost one store update per task.
+  addUpscCseStudyTasks: (tasks: UpscCseStudyTask[]) => void;
+  updateUpscCseStudyTask: (id: string, updates: UpdateUpscCseStudyTaskFields) => void;
   setUpscCseStudyTaskStatus: (id: string, status: UpscCseStudyTaskStatus) => void;
   deleteUpscCseStudyTask: (id: string) => void;
+
+  // UPSC CSE Study Plan configuration (lib/upscCseStudyPlanConfig.ts) — a single object, null until
+  // the user actually sets one up (never a fabricated default plan). Workspace-owned exactly like
+  // every other UPSC CSE field above.
+  upscCseStudyPlanConfig: UpscCseStudyPlanConfig | null;
+  setUpscCseStudyPlanConfig: (config: UpscCseStudyPlanConfig) => void;
+  clearUpscCseStudyPlanConfig: () => void;
 
   // PhD Research — the research start date (a real, fixed fact: 21 December 2023 — see
   // lib/phdResearch.ts's computeResearchDuration, which derives elapsed duration from it; never a
@@ -281,6 +301,7 @@ interface WorkspaceOwnedData {
   upscCseSyllabusCoverage: UpscCseSyllabusCoverage;
   upscCsePrelimsPyqAttempts: UpscCsePrelimsPyqAttempt[];
   upscCseStudyTasks: UpscCseStudyTask[];
+  upscCseStudyPlanConfig: UpscCseStudyPlanConfig | null;
   phdResearchStartDate: string;
   phdTopicAreas: PhdTopicArea[];
   phdMicroTargets: MicroTarget[];
@@ -306,6 +327,7 @@ function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
     upscCseSyllabusCoverage: {},
     upscCsePrelimsPyqAttempts: [],
     upscCseStudyTasks: [],
+    upscCseStudyPlanConfig: null,
     phdResearchStartDate: PHD_RESEARCH_START_DATE_DEFAULT,
     phdTopicAreas: [],
     phdMicroTargets: [],
@@ -429,7 +451,16 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 //    lib/upscCseGranularCoverage.ts's effectiveMicrosyllabusCoverageState starts reading from
 //    leaves. Reaches both the active top-level field and every archived snapshot inside
 //    inactiveWorkspaceOwnedData, same as every other workspace-owned backfill above.
-export const APP_STORE_PERSIST_VERSION = 10;
+//
+// Version 11 (Workspace-aware Study Plan + Analytics) adds `upscCseStudyPlanConfig`
+// (UpscCseStudyPlanConfig | null — see lib/upscCseStudyPlanConfig.ts) the exact same way as every
+// brand-new field above: nothing pre-existing to migrate, defaulted to `null` (no fabricated plan)
+// at both the top-level active field and inside every inactiveWorkspaceOwnedData snapshot. The UPSC
+// CSE Study Plan's actual tasks and the PhD Research Plan's micro-targets/Topic Areas reuse the
+// EXISTING `upscCseStudyTasks`/`phdMicroTargets`/`phdTopicAreas` fields from versions 9-10 above
+// (extended with new optional fields — see those modules' own headers) rather than adding any new
+// collections, so no further migration is needed for either.
+export const APP_STORE_PERSIST_VERSION = 11;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -479,6 +510,7 @@ function withWorkspaceOwnedDefaults(value: unknown): unknown {
     upscCseSyllabusCoverage: migrateGranularCoverageBackfill(coverage, UPSC_CSE_GRANULAR_NODES),
     upscCsePrelimsPyqAttempts: Array.isArray(snapshot.upscCsePrelimsPyqAttempts) ? snapshot.upscCsePrelimsPyqAttempts : [],
     upscCseStudyTasks: Array.isArray(snapshot.upscCseStudyTasks) ? snapshot.upscCseStudyTasks : [],
+    upscCseStudyPlanConfig: isPlainObject(snapshot.upscCseStudyPlanConfig) ? snapshot.upscCseStudyPlanConfig : null,
     phdResearchStartDate: typeof snapshot.phdResearchStartDate === 'string' ? snapshot.phdResearchStartDate : PHD_RESEARCH_START_DATE_DEFAULT,
     phdTopicAreas: Array.isArray(snapshot.phdTopicAreas) ? snapshot.phdTopicAreas : [],
     phdMicroTargets: Array.isArray(snapshot.phdMicroTargets) ? snapshot.phdMicroTargets : [],
@@ -524,6 +556,7 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     ),
     upscCsePrelimsPyqAttempts: Array.isArray(state.upscCsePrelimsPyqAttempts) ? state.upscCsePrelimsPyqAttempts : [],
     upscCseStudyTasks: Array.isArray(state.upscCseStudyTasks) ? state.upscCseStudyTasks : [],
+    upscCseStudyPlanConfig: isPlainObject(state.upscCseStudyPlanConfig) ? state.upscCseStudyPlanConfig : null,
     phdResearchStartDate: typeof state.phdResearchStartDate === 'string' ? state.phdResearchStartDate : PHD_RESEARCH_START_DATE_DEFAULT,
     phdTopicAreas: Array.isArray(state.phdTopicAreas) ? state.phdTopicAreas : [],
     phdMicroTargets: Array.isArray(state.phdMicroTargets) ? state.phdMicroTargets : [],
@@ -568,9 +601,15 @@ export const useAppStore = create<AppState>()(
 
       upscCseStudyTasks: [],
       addUpscCseStudyTask: (task) => set((state) => ({ upscCseStudyTasks: [task, ...state.upscCseStudyTasks] })),
+      addUpscCseStudyTasks: (tasks) => set((state) => ({ upscCseStudyTasks: [...tasks, ...state.upscCseStudyTasks] })),
+      updateUpscCseStudyTask: (id, updates) => set((state) => ({ upscCseStudyTasks: applyUpdateUpscCseStudyTask(state.upscCseStudyTasks, id, updates) })),
       setUpscCseStudyTaskStatus: (id, status) =>
         set((state) => ({ upscCseStudyTasks: applyUpscCseStudyTaskStatus(state.upscCseStudyTasks, id, status, new Date().toISOString()) })),
       deleteUpscCseStudyTask: (id) => set((state) => ({ upscCseStudyTasks: applyDeleteUpscCseStudyTask(state.upscCseStudyTasks, id) })),
+
+      upscCseStudyPlanConfig: null,
+      setUpscCseStudyPlanConfig: (config) => set({ upscCseStudyPlanConfig: config }),
+      clearUpscCseStudyPlanConfig: () => set({ upscCseStudyPlanConfig: null }),
 
       phdResearchStartDate: PHD_RESEARCH_START_DATE_DEFAULT,
       setPhdResearchStartDate: (date) => set({ phdResearchStartDate: date }),
@@ -822,6 +861,7 @@ export const useAppStore = create<AppState>()(
             upscCseSyllabusCoverage: state.upscCseSyllabusCoverage,
             upscCsePrelimsPyqAttempts: state.upscCsePrelimsPyqAttempts,
             upscCseStudyTasks: state.upscCseStudyTasks,
+            upscCseStudyPlanConfig: state.upscCseStudyPlanConfig,
             phdResearchStartDate: state.phdResearchStartDate,
             phdTopicAreas: state.phdTopicAreas,
             phdMicroTargets: state.phdMicroTargets,
@@ -854,6 +894,7 @@ export const useAppStore = create<AppState>()(
           upscCseSyllabusCoverage: {},
           upscCsePrelimsPyqAttempts: [],
           upscCseStudyTasks: [],
+          upscCseStudyPlanConfig: null,
           phdResearchStartDate: PHD_RESEARCH_START_DATE_DEFAULT,
           phdTopicAreas: [],
           phdMicroTargets: [],
@@ -891,6 +932,7 @@ export function exportAllData() {
     upscCseSyllabusCoverage: state.upscCseSyllabusCoverage,
     upscCsePrelimsPyqAttempts: state.upscCsePrelimsPyqAttempts,
     upscCseStudyTasks: state.upscCseStudyTasks,
+    upscCseStudyPlanConfig: state.upscCseStudyPlanConfig,
     phdResearchStartDate: state.phdResearchStartDate,
     phdTopicAreas: state.phdTopicAreas,
     phdMicroTargets: state.phdMicroTargets,
@@ -928,6 +970,7 @@ export function importAllData(json: string) {
     upscCseSyllabusCoverage: data.upscCseSyllabusCoverage ?? {},
     upscCsePrelimsPyqAttempts: data.upscCsePrelimsPyqAttempts ?? [],
     upscCseStudyTasks: data.upscCseStudyTasks ?? [],
+    upscCseStudyPlanConfig: data.upscCseStudyPlanConfig ?? null,
     phdResearchStartDate: data.phdResearchStartDate ?? PHD_RESEARCH_START_DATE_DEFAULT,
     phdTopicAreas: data.phdTopicAreas ?? [],
     phdMicroTargets: data.phdMicroTargets ?? [],

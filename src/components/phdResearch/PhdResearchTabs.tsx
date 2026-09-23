@@ -1,16 +1,19 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, FileText, BookMarked } from 'lucide-react';
+import { LayoutDashboard, FileText, BookMarked, Target, BarChart3 } from 'lucide-react';
 import { cx } from '../../lib/utils';
 
-// PhD Research has three views sharing the same workspace: the research-start/duration + Topic
+// PhD Research has five views sharing the same workspace: the research-start/duration + Topic
 // Areas + micro-targets dashboard (pages/PhdDashboard.tsx), research documents
-// (pages/PhdResearch.tsx), and the Working Bibliography (pages/WorkingBibliography.tsx). All three
-// are reachable from a single "PhD Research" nav entry, so this small tab row — rendered by all
-// three pages — is how a user moves between them without extra top-level nav items.
+// (pages/PhdResearch.tsx), the Working Bibliography (pages/WorkingBibliography.tsx), the Research
+// Plan (pages/PhdPlan.tsx), and Analytics (pages/PhdAnalytics.tsx). All five are ALSO reachable as
+// their own sidebar entries (see components/layout/nav.ts's phd_research list) — this tab row is
+// additional, in-page cross-navigation between them, rendered by all five pages.
 const TABS = [
   { to: '/phd-dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/phd-research', label: 'Research Documents', icon: FileText },
   { to: '/phd-research/bibliography', label: 'Working Bibliography', icon: BookMarked },
+  { to: '/phd-plan', label: 'Research Plan', icon: Target },
+  { to: '/phd-analytics', label: 'Analytics', icon: BarChart3 },
 ] as const;
 
 export function PhdResearchTabs() {

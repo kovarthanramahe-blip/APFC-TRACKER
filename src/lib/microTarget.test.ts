@@ -42,6 +42,17 @@ describe('createMicroTarget', () => {
     const target = createMicroTarget({ title: 'Urgent thing', priority: 'high' }, 't2', '2026-09-22T00:00:00.000Z');
     expect(target.priority).toBe('high');
   });
+
+  it('trims notes and carries linkedContentId when supplied', () => {
+    const target = createMicroTarget({ title: 'Read source', notes: '  bring a highlighter  ', linkedContentId: 'ic-1' }, 't3', '2026-09-22T00:00:00.000Z');
+    expect(target.notes).toBe('bring a highlighter');
+    expect(target.linkedContentId).toBe('ic-1');
+  });
+
+  it('trims notes down to undefined when blank', () => {
+    const target = createMicroTarget({ title: 'X', notes: '   ' }, 't4', '2026-09-22T00:00:00.000Z');
+    expect(target.notes).toBeUndefined();
+  });
 });
 
 describe('updateMicroTarget', () => {
@@ -63,6 +74,18 @@ describe('updateMicroTarget', () => {
     const result = updateMicroTarget(targets, 'missing', { title: 'X' });
     expect(result).toEqual(targets);
     expect(targets[0].title).toBe('Original');
+  });
+
+  it('updates notes and linkedContentId, trimming notes', () => {
+    const [updated] = updateMicroTarget([base], 't1', { notes: '  revised note  ', linkedContentId: 'ic-2' });
+    expect(updated.notes).toBe('revised note');
+    expect(updated.linkedContentId).toBe('ic-2');
+  });
+
+  it('trims notes down to undefined when updated to blank', () => {
+    const withNotes: MicroTarget = { ...base, notes: 'old note' };
+    const [updated] = updateMicroTarget([withNotes], 't1', { notes: '   ' });
+    expect(updated.notes).toBeUndefined();
   });
 });
 

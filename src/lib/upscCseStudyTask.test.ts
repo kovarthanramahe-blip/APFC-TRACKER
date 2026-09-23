@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   isValidStudyTaskTitle,
   createUpscCseStudyTask,
+  updateUpscCseStudyTask,
   setUpscCseStudyTaskStatus,
   deleteUpscCseStudyTask,
   tasksForDate,
+  overdueStudyTasks,
+  upcomingStudyTasks,
   countStudyTasksByStatus,
   recentlyCompletedStudyTasks,
   type UpscCseStudyTask,
@@ -37,6 +40,63 @@ describe('createUpscCseStudyTask', () => {
   it('omits targetMinutes when not supplied', () => {
     const task = createUpscCseStudyTask({ title: 'Practice PYQs', date: '2026-09-22' }, 'task-2', '2026-09-22T08:00:00.000Z');
     expect(task.targetMinutes).toBeUndefined();
+  });
+
+  it('carries syllabus linkage, priority, subject, notes and linkedActionHref when supplied', () => {
+    const task = createUpscCseStudyTask(
+      {
+        title: 'Revise Polity',
+        date: '2026-09-22',
+        priority: 'high',
+        subject: 'Polity',
+        microsyllabusId: 'ms-1',
+        granularNodeId: 'gn-1',
+        notes: '  focus on amendments  ',
+        linkedActionHref: '/upsc-syllabus?granularId=gn-1',
+      },
+      'task-3',
+      '2026-09-22T08:00:00.000Z',
+    );
+    expect(task.priority).toBe('high');
+    expect(task.subject).toBe('Polity');
+    expect(task.microsyllabusId).toBe('ms-1');
+    expect(task.granularNodeId).toBe('gn-1');
+    expect(task.notes).toBe('focus on amendments');
+    expect(task.linkedActionHref).toBe('/upsc-syllabus?granularId=gn-1');
+  });
+
+  it('trims notes down to undefined when blank', () => {
+    const task = createUpscCseStudyTask({ title: 'X', date: '2026-09-22', notes: '   ' }, 'task-4', '2026-09-22T08:00:00.000Z');
+    expect(task.notes).toBeUndefined();
+  });
+});
+
+describe('updateUpscCseStudyTask', () => {
+  const base: UpscCseStudyTask = { id: 't1', date: '2026-09-22', title: 'Original', status: 'pending', createdAt: '2026-09-22T00:00:00.000Z' };
+
+  it('updates editable fields, trimming the title', () => {
+    const [updated] = updateUpscCseStudyTask([base], 't1', { title: '  New Title  ', priority: 'high', targetMinutes: 60 });
+    expect(updated.title).toBe('New Title');
+    expect(updated.priority).toBe('high');
+    expect(updated.targetMinutes).toBe(60);
+  });
+
+  it('ignores a blank title update, keeping the existing title', () => {
+    const [updated] = updateUpscCseStudyTask([base], 't1', { title: '   ' });
+    expect(updated.title).toBe('Original');
+  });
+
+  it('trims notes down to undefined when set blank', () => {
+    const withNotes: UpscCseStudyTask = { ...base, notes: 'old note' };
+    const [updated] = updateUpscCseStudyTask([withNotes], 't1', { notes: '   ' });
+    expect(updated.notes).toBeUndefined();
+  });
+
+  it('is a no-op for an unknown id and never mutates the input array', () => {
+    const tasks = [base];
+    const result = updateUpscCseStudyTask(tasks, 'missing', { title: 'X' });
+    expect(result).toEqual(tasks);
+    expect(tasks[0].title).toBe('Original');
   });
 });
 
@@ -88,14 +148,41 @@ describe('tasksForDate', () => {
   });
 });
 
+describe('overdueStudyTasks / upcomingStudyTasks', () => {
+  const tasks: UpscCseStudyTask[] = [
+    { id: 'past', date: '2026-09-01', title: 'Overdue', status: 'pending', createdAt: 'a' },
+    { id: 'future', date: '2026-10-01', title: 'Upcoming', status: 'pending', createdAt: 'a' },
+    { id: 'today', date: '2026-09-22', title: 'Today', status: 'in_progress', createdAt: 'a' },
+    { id: 'done-past', date: '2026-09-01', title: 'Done but old', status: 'completed', createdAt: 'a', completedAt: 'x' },
+  ];
+  const today = '2026-09-22';
+
+  it('overdueStudyTasks includes only active tasks whose date has passed', () => {
+    expect(overdueStudyTasks(tasks, today).map((t) => t.id)).toEqual(['past']);
+  });
+
+  it('a completed task is never overdue even if its date is in the past', () => {
+    expect(overdueStudyTasks(tasks, today).some((t) => t.id === 'done-past')).toBe(false);
+  });
+
+  it('upcomingStudyTasks includes active tasks due today or later, soonest first', () => {
+    expect(upcomingStudyTasks(tasks, today).map((t) => t.id)).toEqual(['today', 'future']);
+  });
+
+  it('upcomingStudyTasks respects a limit', () => {
+    expect(upcomingStudyTasks(tasks, today, 1)).toHaveLength(1);
+  });
+});
+
 describe('countStudyTasksByStatus', () => {
-  it('counts pending and completed separately', () => {
+  it('counts pending, in_progress and completed separately', () => {
     const tasks: UpscCseStudyTask[] = [
       { id: 't1', date: '2026-09-22', title: 'A', status: 'pending', createdAt: '2026-09-22T00:00:00.000Z' },
       { id: 't2', date: '2026-09-22', title: 'B', status: 'completed', createdAt: '2026-09-22T00:00:00.000Z', completedAt: '2026-09-22T09:00:00.000Z' },
       { id: 't3', date: '2026-09-22', title: 'C', status: 'completed', createdAt: '2026-09-22T00:00:00.000Z', completedAt: '2026-09-22T09:30:00.000Z' },
+      { id: 't4', date: '2026-09-22', title: 'D', status: 'in_progress', createdAt: '2026-09-22T00:00:00.000Z' },
     ];
-    expect(countStudyTasksByStatus(tasks)).toEqual({ pending: 1, completed: 2 });
+    expect(countStudyTasksByStatus(tasks)).toEqual({ pending: 1, in_progress: 1, completed: 2 });
   });
 });
 

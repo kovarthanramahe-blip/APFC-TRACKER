@@ -53,6 +53,9 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     ((data.upscCsePrelimsPyqAttempts as unknown[]) ?? []).length,
     // UPSC CSE Study Dashboard — user-authored study tasks are real user data too.
     ((data.upscCseStudyTasks as unknown[]) ?? []).length,
+    // UPSC CSE Study Plan — a configured plan (unlike phdResearchStartDate, this has NO default;
+    // it stays null until the user actually sets one up) is real user data too.
+    data.upscCseStudyPlanConfig ? 1 : 0,
     // PhD Research Dashboard — user-created Topic Areas and micro-targets are real user data too.
     // phdResearchStartDate is deliberately NOT counted here: it always carries a real default value
     // (21 Dec 2023) even on a brand-new install, so including it would make this function always

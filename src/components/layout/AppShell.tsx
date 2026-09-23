@@ -100,7 +100,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const navItems = getNavItemsForWorkspace(activeWorkspaceId);
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2.5 px-5 py-6">
+      <div className="flex shrink-0 items-center gap-2.5 px-5 py-6">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-900 text-gold-300 shadow-lg shadow-brand-900/30">
           <GraduationCap className="h-5 w-5" strokeWidth={2.2} />
         </div>
@@ -110,11 +110,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
-      <div className="px-5 pb-4">
+      <div className="px-5 pb-4 shrink-0">
         <WorkspaceSwitch />
       </div>
 
-      <nav className="flex-1 space-y-1 px-3">
+      {/* `min-h-0` is required alongside `flex-1` here — without it, a flex child can never
+          shrink below its content's natural height, so `overflow-y-auto` would never actually
+          engage no matter how many nav items overflow the available space. The header/switcher
+          above and the exam-day footer below stay outside this scroll container (shrink-0), so
+          only the navigation list itself scrolls. */}
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 scrollbar-thin">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -138,7 +143,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Multi-Workspace OS, Stage 3A — same reasoning as CountdownChip: no fabricated exam date
           for a workspace that doesn't have one. */}
-      {activeWorkspaceId === 'apfc' && <div className="px-5 py-4 text-[11px] text-slate-400 dark:text-slate-600">Exam Day: 20 Dec 2026</div>}
+      {activeWorkspaceId === 'apfc' && <div className="shrink-0 px-5 py-4 text-[11px] text-slate-400 dark:text-slate-600">Exam Day: 20 Dec 2026</div>}
     </div>
   );
 }
