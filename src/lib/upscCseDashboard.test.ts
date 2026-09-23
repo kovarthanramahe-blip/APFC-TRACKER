@@ -54,6 +54,7 @@ function baseInput(overrides: Partial<ComputeUpscCseDashboardSnapshotInput> = {}
     coverage: {},
     prelimsTree: UPSC_CSE_PRELIMS_SYLLABUS,
     mainsTree: UPSC_CSE_MAINS_SYLLABUS,
+    granularNodes: [],
     pyqBank: [],
     attempts: [],
     bookmarkedPyqIds: [],

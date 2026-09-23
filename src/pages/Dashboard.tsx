@@ -36,6 +36,8 @@ import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { QUOTES, getQuoteIndexForDate } from '../data/quotes';
 import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
+import { examTargetsForWorkspace } from '../lib/examTarget';
+import { ExamTargetCard } from '../components/ui/ExamTargetCard';
 
 export default function Dashboard() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -261,6 +263,14 @@ export default function Dashboard() {
             </div>
           </div>
         </Card>
+      </motion.div>
+
+      {/* Official UPSC exam-calendar targets (lib/examTarget.ts) — a separate, real-calendar-date
+          countdown alongside the personal `examDate` target above; neither replaces the other. */}
+      <motion.div {...fadeUp} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {examTargetsForWorkspace('apfc').map((target) => (
+          <ExamTargetCard key={target.id} target={target} />
+        ))}
       </motion.div>
 
       {/* Exam Readiness (Stage 2) */}

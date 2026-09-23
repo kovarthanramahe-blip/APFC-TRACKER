@@ -53,6 +53,12 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     ((data.upscCsePrelimsPyqAttempts as unknown[]) ?? []).length,
     // UPSC CSE Study Dashboard — user-authored study tasks are real user data too.
     ((data.upscCseStudyTasks as unknown[]) ?? []).length,
+    // PhD Research Dashboard — user-created Topic Areas and micro-targets are real user data too.
+    // phdResearchStartDate is deliberately NOT counted here: it always carries a real default value
+    // (21 Dec 2023) even on a brand-new install, so including it would make this function always
+    // report "meaningful data" and defeat its own purpose.
+    ((data.phdTopicAreas as unknown[]) ?? []).length,
+    ((data.phdMicroTargets as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }

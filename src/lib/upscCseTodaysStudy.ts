@@ -11,9 +11,10 @@
 // computeUpscCsePrelimsPerformance for weak-area detection. No parallel syllabus, practice,
 // revision, or analytics logic is created here — this module only SELECTS from what those already
 // compute and packages each selection as a navigable item.
-import { getCoverageState } from './upscCseSyllabusCoverage';
 import type { UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import type { UpscCseSyllabusTree } from './upscCseSyllabus';
+import { effectiveMicrosyllabusCoverageState } from './upscCseGranularCoverage';
+import type { UpscCseGranularNode } from './upscCseGranularSyllabus';
 import type { UpscCsePrelimsBatchPyq } from './upscCsePrelimsPyqBatchImport';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
 import { computeRevisionStatusMap, revisionStatusOf, computeEligibleRevisionIds, UNMAPPED_MICROSYLLABUS } from './upscCsePrelimsPyqFilters';
@@ -35,6 +36,14 @@ export interface GenerateTodaysStudyInput {
   coverage: UpscCseSyllabusCoverage;
   prelimsTree: UpscCseSyllabusTree;
   mainsTree: UpscCseSyllabusTree;
+  /** The UPSC CSE Granular Syllabus (lib/upscCseGranularSyllabus.ts / data/upscCseGranularTopics.ts)
+   * — an item that has granular children is checked for not_started/learning via its ROLLED-UP
+   * effective state (see lib/upscCseGranularCoverage.ts's effectiveMicrosyllabusCoverageState)
+   * rather than its own possibly-stale direct coverage entry, since the coverage UI moves the
+   * actual picker down to the leaf micro-topics for such an item. An item with no granular children
+   * behaves exactly as before (unaffected by this list). Pass `[]` for a tree with no granular data
+   * at all — degrades to the original, pre-granular behavior exactly. */
+  granularNodes: readonly UpscCseGranularNode[];
   pyqBank: readonly UpscCsePrelimsBatchPyq[];
   attempts: readonly UpscCsePrelimsPyqAttempt[];
   bookmarkedPyqIds: readonly string[];
@@ -72,11 +81,11 @@ export function generateTodaysStudyItems(input: GenerateTodaysStudyInput): UpscC
     ...[...input.mainsTree.microsyllabus].sort((a, b) => a.order - b.order),
   ];
   const toStudy = allMicrosyllabus.filter((m) => {
-    const state = getCoverageState(input.coverage, m.id);
+    const state = effectiveMicrosyllabusCoverageState(m.id, input.coverage, input.granularNodes);
     return state === 'not_started' || state === 'learning';
   });
   for (const m of toStudy.slice(0, maxSyllabusItems)) {
-    const state = getCoverageState(input.coverage, m.id);
+    const state = effectiveMicrosyllabusCoverageState(m.id, input.coverage, input.granularNodes);
     items.push({
       id: `syllabus-${m.id}`,
       kind: 'syllabus',

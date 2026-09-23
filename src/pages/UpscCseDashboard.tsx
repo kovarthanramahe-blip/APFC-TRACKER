@@ -8,9 +8,12 @@ import { Card, Button, Badge, PageHeader, ProgressBar, WorkspaceComingSoon } fro
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
+import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { computeUpscCseDashboardSnapshot } from '../lib/upscCseDashboard';
 import { generateTodaysStudyItems, type UpscCseTodaysStudyItemKind } from '../lib/upscCseTodaysStudy';
 import { createUpscCseStudyTask, isValidStudyTaskTitle, tasksForDate, countStudyTasksByStatus } from '../lib/upscCseStudyTask';
+import { examTargetsForWorkspace } from '../lib/examTarget';
+import { ExamTargetCard } from '../components/ui/ExamTargetCard';
 
 // UPSC CSE Study Dashboard — connects the syllabus (lib/upscCseSyllabusCoverage.ts), PYQ practice
 // (data/pyqUpscCsePrelims.ts, lib/upscCsePrelimsPyqPerformance.ts), revision queue
@@ -78,6 +81,7 @@ export default function UpscCseDashboard() {
         coverage,
         prelimsTree: UPSC_CSE_PRELIMS_SYLLABUS,
         mainsTree: UPSC_CSE_MAINS_SYLLABUS,
+        granularNodes: UPSC_CSE_GRANULAR_NODES,
         pyqBank: UPSC_CSE_PRELIMS_PYQ_BANK,
         attempts,
         bookmarkedPyqIds,
@@ -94,6 +98,7 @@ export default function UpscCseDashboard() {
         coverage,
         prelimsTree: UPSC_CSE_PRELIMS_SYLLABUS,
         mainsTree: UPSC_CSE_MAINS_SYLLABUS,
+        granularNodes: UPSC_CSE_GRANULAR_NODES,
         pyqBank: UPSC_CSE_PRELIMS_PYQ_BANK,
         attempts,
         bookmarkedPyqIds,
@@ -134,6 +139,12 @@ export default function UpscCseDashboard() {
         title="Study Dashboard"
         description="Your syllabus coverage, PYQ practice, revision, and today's study — all in one place."
       />
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mb-3">
+        {examTargetsForWorkspace('upsc_cse').map((target) => (
+          <ExamTargetCard key={target.id} target={target} />
+        ))}
+      </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <CoverageStatTile label="Overall Coverage" summary={snapshot.overallCoverage} />

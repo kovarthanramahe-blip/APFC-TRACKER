@@ -1,12 +1,14 @@
 import { NavLink } from 'react-router-dom';
-import { FileText, BookMarked } from 'lucide-react';
+import { LayoutDashboard, FileText, BookMarked } from 'lucide-react';
 import { cx } from '../../lib/utils';
 
-// PhD Research has two repositories sharing the same workspace: research documents
-// (pages/PhdResearch.tsx) and the Working Bibliography (pages/WorkingBibliography.tsx). Both are
-// reachable from a single "PhD Research" nav entry, so this small tab row — rendered by both pages
-// — is how a user moves between them without a second top-level nav item.
+// PhD Research has three views sharing the same workspace: the research-start/duration + Topic
+// Areas + micro-targets dashboard (pages/PhdDashboard.tsx), research documents
+// (pages/PhdResearch.tsx), and the Working Bibliography (pages/WorkingBibliography.tsx). All three
+// are reachable from a single "PhD Research" nav entry, so this small tab row — rendered by all
+// three pages — is how a user moves between them without extra top-level nav items.
 const TABS = [
+  { to: '/phd-dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/phd-research', label: 'Research Documents', icon: FileText },
   { to: '/phd-research/bibliography', label: 'Working Bibliography', icon: BookMarked },
 ] as const;

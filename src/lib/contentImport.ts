@@ -316,6 +316,12 @@ export interface ImportedContentMetadata {
   /** A single user-assigned organisation category (e.g. "Literature Review", "Fieldwork") —
    * freeform text, not a fixed enum. */
   category?: string;
+  /** Optional link to a PhD Research Topic Area (lib/phdTopicArea.ts's PhdTopicArea.id) — reuses
+   * this EXISTING metadata mechanism rather than a new relationship type, satisfying "Research ->
+   * Topic Area -> Research Document/Notes/Bibliography" navigation directly: a Topic Area's linked
+   * material is simply every ImportedContent item whose metadata.topicAreaId matches it. Never
+   * auto-filled — set only when a user explicitly assigns a document to a Topic Area. */
+  topicAreaId?: string;
   [key: string]: unknown;
 }
 

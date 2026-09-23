@@ -28,6 +28,26 @@ import type { RepositoryImportPlan } from './repositoryImport';
 import type { UpscCseCoverageState, UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
 import { setUpscCseStudyTaskStatus as applyUpscCseStudyTaskStatus, deleteUpscCseStudyTask as applyDeleteUpscCseStudyTask, type UpscCseStudyTask, type UpscCseStudyTaskStatus } from './upscCseStudyTask';
+import { migrateGranularCoverageBackfill } from './upscCseGranularCoverage';
+import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
+import {
+  updatePhdTopicArea as applyUpdatePhdTopicArea,
+  deletePhdTopicArea as applyDeletePhdTopicArea,
+  type PhdTopicArea,
+  type UpdateTopicAreaFields,
+} from './phdTopicArea';
+import {
+  createMicroTarget as applyCreateMicroTarget,
+  updateMicroTarget as applyUpdateMicroTarget,
+  setMicroTargetStatus as applySetMicroTargetStatus,
+  deleteMicroTarget as applyDeleteMicroTarget,
+  type MicroTarget,
+  type MicroTargetStatus,
+  type CreateMicroTargetInput,
+  type UpdateMicroTargetFields,
+} from './microTarget';
+
+const PHD_RESEARCH_START_DATE_DEFAULT = '2023-12-21';
 
 interface AppState {
   // Syllabus progress: topicId -> completed
@@ -61,6 +81,34 @@ interface AppState {
   addUpscCseStudyTask: (task: UpscCseStudyTask) => void;
   setUpscCseStudyTaskStatus: (id: string, status: UpscCseStudyTaskStatus) => void;
   deleteUpscCseStudyTask: (id: string) => void;
+
+  // PhD Research — the research start date (a real, fixed fact: 21 December 2023 — see
+  // lib/phdResearch.ts's computeResearchDuration, which derives elapsed duration from it; never a
+  // fabricated progress percentage). Workspace-owned exactly like every other PhD/UPSC field here,
+  // with a real default so a fresh PhD Research workspace shows a correct duration immediately
+  // rather than an empty state — see setPhdResearchStartDate for the rare case of correcting it.
+  phdResearchStartDate: string;
+  setPhdResearchStartDate: (date: string) => void;
+
+  // PhD Research Topic Areas (lib/phdTopicArea.ts) — user-created, editable, searchable,
+  // workspace-owned exactly like upscCseStudyTasks above. A document/note/bibliography record links
+  // to one via its OWN metadata.topicAreaId (lib/contentImport.ts's ImportedContentMetadata) —
+  // reusing the existing repository architecture rather than a new relationship type.
+  phdTopicAreas: PhdTopicArea[];
+  addPhdTopicArea: (area: PhdTopicArea) => void;
+  updatePhdTopicArea: (id: string, updates: UpdateTopicAreaFields) => void;
+  deletePhdTopicArea: (id: string) => void;
+
+  // PhD Research micro-targets — lib/microTarget.ts's GENERIC, reusable MicroTarget model (see its
+  // own header for why this is deliberately not merged with UPSC CSE's upscCseStudyTasks or APFC's
+  // studyPlan engine). Workspace-owned exactly like phdTopicAreas above; the page constructs each
+  // full target object (id/createdAt) before calling addPhdMicroTarget, matching
+  // addUpscCseStudyTask's own convention.
+  phdMicroTargets: MicroTarget[];
+  addPhdMicroTarget: (input: CreateMicroTargetInput, id: string, createdAt: string) => void;
+  updatePhdMicroTarget: (id: string, updates: UpdateMicroTargetFields) => void;
+  setPhdMicroTargetStatus: (id: string, status: MicroTargetStatus) => void;
+  deletePhdMicroTarget: (id: string) => void;
 
   // Notes
   notes: Note[];
@@ -233,6 +281,9 @@ interface WorkspaceOwnedData {
   upscCseSyllabusCoverage: UpscCseSyllabusCoverage;
   upscCsePrelimsPyqAttempts: UpscCsePrelimsPyqAttempt[];
   upscCseStudyTasks: UpscCseStudyTask[];
+  phdResearchStartDate: string;
+  phdTopicAreas: PhdTopicArea[];
+  phdMicroTargets: MicroTarget[];
   notes: Note[];
   attempts: MockTestAttempt[];
   pyqAttempts: PYQAttempt[];
@@ -255,6 +306,9 @@ function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
     upscCseSyllabusCoverage: {},
     upscCsePrelimsPyqAttempts: [],
     upscCseStudyTasks: [],
+    phdResearchStartDate: PHD_RESEARCH_START_DATE_DEFAULT,
+    phdTopicAreas: [],
+    phdMicroTargets: [],
     notes: [],
     attempts: [],
     pyqAttempts: [],
@@ -355,7 +409,27 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // lib/upscCseStudyTask.ts) the exact same way: another brand-new, workspace-owned field with
 // nothing pre-existing to migrate, defaulted to `[]` at both the top-level active field and inside
 // every inactiveWorkspaceOwnedData snapshot.
-export const APP_STORE_PERSIST_VERSION = 9;
+//
+// Version 10 (UPSC CSE Granular Syllabus + Exam Targets + PhD Research Dashboard) does two things:
+//  - Adds three more brand-new, workspace-owned fields the exact same way as every version above:
+//    `phdResearchStartDate` (string, defaulted to PHD_RESEARCH_START_DATE_DEFAULT rather than an
+//    empty value — a fresh PhD Research workspace should show a correct duration immediately, not
+//    an empty state, since 21 Dec 2023 is a real fixed fact this stage was given, not user input to
+//    default blank), `phdTopicAreas` (PhdTopicArea[], defaulted to `[]`), and `phdMicroTargets`
+//    (MicroTarget[], defaulted to `[]`).
+//  - Runs migrateGranularCoverageBackfill (lib/upscCseGranularCoverage.ts) over
+//    `upscCseSyllabusCoverage` — NOT a new field, no shape change to that Record<string,
+//    UpscCseCoverageState> at all, but a one-time content backfill: for a microsyllabus item that
+//    now has granular Topic/Subtopic/Micro-topic children (see data/upscCseGranularTopics.ts) and
+//    already carried a direct coverage entry from before granularization existed, its state is
+//    copied onto its new granular leaf ids (unless a leaf already has its own entry) — so a user's
+//    prior "Constitution: strong" is preserved as real signal on the new finer-grained nodes,
+//    exactly this task's own "preserve existing microsyllabus coverage during migration"
+//    requirement, rather than the item silently reading back as fresh "not started" once
+//    lib/upscCseGranularCoverage.ts's effectiveMicrosyllabusCoverageState starts reading from
+//    leaves. Reaches both the active top-level field and every archived snapshot inside
+//    inactiveWorkspaceOwnedData, same as every other workspace-owned backfill above.
+export const APP_STORE_PERSIST_VERSION = 10;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -388,20 +462,26 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Backfills `importedContent: []`, `contentRelationships: []` (with every entry's entity types
- * stamped — see stampRelationshipEntityTypes), `upscCseSyllabusCoverage: {}`,
- * `upscCsePrelimsPyqAttempts: []`, and `upscCseStudyTasks: []` onto a workspace-owned data snapshot
- * that predates one or more of these — used for both the active top-level state and every archived
- * snapshot inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
+ * stamped — see stampRelationshipEntityTypes), `upscCseSyllabusCoverage: {}` (plus, for whatever
+ * coverage entries already exist, the granular roll-up backfill — see migrateGranularCoverageBackfill),
+ * `upscCsePrelimsPyqAttempts: []`, `upscCseStudyTasks: []`, `phdResearchStartDate`,
+ * `phdTopicAreas: []`, and `phdMicroTargets: []` onto a workspace-owned data snapshot that predates
+ * one or more of these — used for both the active top-level state and every archived snapshot
+ * inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
 function withWorkspaceOwnedDefaults(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
   const snapshot = value;
+  const coverage = (isPlainObject(snapshot.upscCseSyllabusCoverage) ? snapshot.upscCseSyllabusCoverage : {}) as UpscCseSyllabusCoverage;
   return {
     ...snapshot,
     importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [],
     contentRelationships: stampRelationshipEntityTypes(Array.isArray(snapshot.contentRelationships) ? snapshot.contentRelationships : []),
-    upscCseSyllabusCoverage: isPlainObject(snapshot.upscCseSyllabusCoverage) ? snapshot.upscCseSyllabusCoverage : {},
+    upscCseSyllabusCoverage: migrateGranularCoverageBackfill(coverage, UPSC_CSE_GRANULAR_NODES),
     upscCsePrelimsPyqAttempts: Array.isArray(snapshot.upscCsePrelimsPyqAttempts) ? snapshot.upscCsePrelimsPyqAttempts : [],
     upscCseStudyTasks: Array.isArray(snapshot.upscCseStudyTasks) ? snapshot.upscCseStudyTasks : [],
+    phdResearchStartDate: typeof snapshot.phdResearchStartDate === 'string' ? snapshot.phdResearchStartDate : PHD_RESEARCH_START_DATE_DEFAULT,
+    phdTopicAreas: Array.isArray(snapshot.phdTopicAreas) ? snapshot.phdTopicAreas : [],
+    phdMicroTargets: Array.isArray(snapshot.phdMicroTargets) ? snapshot.phdMicroTargets : [],
   };
 }
 
@@ -438,9 +518,15 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
     importedContent: Array.isArray(state.importedContent) ? state.importedContent : [],
     contentRelationships: stampRelationshipEntityTypes(Array.isArray(state.contentRelationships) ? state.contentRelationships : []),
-    upscCseSyllabusCoverage: isPlainObject(state.upscCseSyllabusCoverage) ? state.upscCseSyllabusCoverage : {},
+    upscCseSyllabusCoverage: migrateGranularCoverageBackfill(
+      (isPlainObject(state.upscCseSyllabusCoverage) ? state.upscCseSyllabusCoverage : {}) as UpscCseSyllabusCoverage,
+      UPSC_CSE_GRANULAR_NODES,
+    ),
     upscCsePrelimsPyqAttempts: Array.isArray(state.upscCsePrelimsPyqAttempts) ? state.upscCsePrelimsPyqAttempts : [],
     upscCseStudyTasks: Array.isArray(state.upscCseStudyTasks) ? state.upscCseStudyTasks : [],
+    phdResearchStartDate: typeof state.phdResearchStartDate === 'string' ? state.phdResearchStartDate : PHD_RESEARCH_START_DATE_DEFAULT,
+    phdTopicAreas: Array.isArray(state.phdTopicAreas) ? state.phdTopicAreas : [],
+    phdMicroTargets: Array.isArray(state.phdMicroTargets) ? state.phdMicroTargets : [],
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: withWorkspaceOwnedDefaultsInArchive(state.inactiveWorkspaceOwnedData),
   };
@@ -485,6 +571,23 @@ export const useAppStore = create<AppState>()(
       setUpscCseStudyTaskStatus: (id, status) =>
         set((state) => ({ upscCseStudyTasks: applyUpscCseStudyTaskStatus(state.upscCseStudyTasks, id, status, new Date().toISOString()) })),
       deleteUpscCseStudyTask: (id) => set((state) => ({ upscCseStudyTasks: applyDeleteUpscCseStudyTask(state.upscCseStudyTasks, id) })),
+
+      phdResearchStartDate: PHD_RESEARCH_START_DATE_DEFAULT,
+      setPhdResearchStartDate: (date) => set({ phdResearchStartDate: date }),
+
+      phdTopicAreas: [],
+      addPhdTopicArea: (area) => set((state) => ({ phdTopicAreas: [area, ...state.phdTopicAreas] })),
+      updatePhdTopicArea: (id, updates) =>
+        set((state) => ({ phdTopicAreas: applyUpdatePhdTopicArea(state.phdTopicAreas, id, updates, new Date().toISOString()) })),
+      deletePhdTopicArea: (id) => set((state) => ({ phdTopicAreas: applyDeletePhdTopicArea(state.phdTopicAreas, id) })),
+
+      phdMicroTargets: [],
+      addPhdMicroTarget: (input, id, createdAt) =>
+        set((state) => ({ phdMicroTargets: [applyCreateMicroTarget(input, id, createdAt), ...state.phdMicroTargets] })),
+      updatePhdMicroTarget: (id, updates) => set((state) => ({ phdMicroTargets: applyUpdateMicroTarget(state.phdMicroTargets, id, updates) })),
+      setPhdMicroTargetStatus: (id, status) =>
+        set((state) => ({ phdMicroTargets: applySetMicroTargetStatus(state.phdMicroTargets, id, status, new Date().toISOString()) })),
+      deletePhdMicroTarget: (id) => set((state) => ({ phdMicroTargets: applyDeleteMicroTarget(state.phdMicroTargets, id) })),
 
       notes: [],
       upsertNote: (note) =>
@@ -719,6 +822,9 @@ export const useAppStore = create<AppState>()(
             upscCseSyllabusCoverage: state.upscCseSyllabusCoverage,
             upscCsePrelimsPyqAttempts: state.upscCsePrelimsPyqAttempts,
             upscCseStudyTasks: state.upscCseStudyTasks,
+            phdResearchStartDate: state.phdResearchStartDate,
+            phdTopicAreas: state.phdTopicAreas,
+            phdMicroTargets: state.phdMicroTargets,
             notes: state.notes,
             attempts: state.attempts,
             pyqAttempts: state.pyqAttempts,
@@ -748,6 +854,9 @@ export const useAppStore = create<AppState>()(
           upscCseSyllabusCoverage: {},
           upscCsePrelimsPyqAttempts: [],
           upscCseStudyTasks: [],
+          phdResearchStartDate: PHD_RESEARCH_START_DATE_DEFAULT,
+          phdTopicAreas: [],
+          phdMicroTargets: [],
           notes: [],
           attempts: [],
           pyqAttempts: [],
@@ -782,6 +891,9 @@ export function exportAllData() {
     upscCseSyllabusCoverage: state.upscCseSyllabusCoverage,
     upscCsePrelimsPyqAttempts: state.upscCsePrelimsPyqAttempts,
     upscCseStudyTasks: state.upscCseStudyTasks,
+    phdResearchStartDate: state.phdResearchStartDate,
+    phdTopicAreas: state.phdTopicAreas,
+    phdMicroTargets: state.phdMicroTargets,
     notes: state.notes,
     attempts: state.attempts,
     pyqAttempts: state.pyqAttempts,
@@ -816,6 +928,9 @@ export function importAllData(json: string) {
     upscCseSyllabusCoverage: data.upscCseSyllabusCoverage ?? {},
     upscCsePrelimsPyqAttempts: data.upscCsePrelimsPyqAttempts ?? [],
     upscCseStudyTasks: data.upscCseStudyTasks ?? [],
+    phdResearchStartDate: data.phdResearchStartDate ?? PHD_RESEARCH_START_DATE_DEFAULT,
+    phdTopicAreas: data.phdTopicAreas ?? [],
+    phdMicroTargets: data.phdMicroTargets ?? [],
     notes: data.notes ?? [],
     attempts: data.attempts ?? [],
     pyqAttempts: data.pyqAttempts ?? [],

@@ -23,6 +23,7 @@ const MockTestResult = lazy(() => import('./pages/MockTestResult'));
 const Notes = lazy(() => import('./pages/Notes'));
 const Repository = lazy(() => import('./pages/Repository'));
 const RepositoryDetail = lazy(() => import('./pages/RepositoryDetail'));
+const PhdDashboard = lazy(() => import('./pages/PhdDashboard'));
 const PhdResearch = lazy(() => import('./pages/PhdResearch'));
 const WorkingBibliography = lazy(() => import('./pages/WorkingBibliography'));
 const Pomodoro = lazy(() => import('./pages/Pomodoro'));
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/notes" element={<Notes />} />
           <Route path="/repository" element={<Repository />} />
           <Route path="/repository/:entityType/:id" element={<RepositoryDetail />} />
+          <Route path="/phd-dashboard" element={<PhdDashboard />} />
           <Route path="/phd-research" element={<PhdResearch />} />
           <Route path="/phd-research/bibliography" element={<WorkingBibliography />} />
           <Route path="/pomodoro" element={<Pomodoro />} />

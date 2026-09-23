@@ -14,6 +14,8 @@ import { computeUpscCsePrelimsPerformance, type UpscCsePrelimsPerformanceSnapsho
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from './upscCsePrelimsPyqFilters';
 import { getDueItems, type RevisionQueue } from './revisionQueue';
 import { recentlyCompletedStudyTasks, type UpscCseStudyTask } from './upscCseStudyTask';
+import { expandToLeafCoverageIds } from './upscCseGranularSyllabus';
+import type { UpscCseGranularNode } from './upscCseGranularSyllabus';
 
 export interface UpscCseDashboardSnapshot {
   overallCoverage: UpscCseCoverageSummary;
@@ -36,6 +38,11 @@ export interface ComputeUpscCseDashboardSnapshotInput {
   coverage: UpscCseSyllabusCoverage;
   prelimsTree: UpscCseSyllabusTree;
   mainsTree: UpscCseSyllabusTree;
+  /** See lib/upscCseTodaysStudy.ts's own doc-comment on the equivalent field — used here to roll
+   * overall/Prelims/Mains coverage summaries up through granular leaf nodes where they exist, via
+   * lib/upscCseGranularSyllabus.ts's expandToLeafCoverageIds feeding the EXISTING (unchanged)
+   * computeCoverageSummary. Pass `[]` to degrade exactly to the original, pre-granular behavior. */
+  granularNodes: readonly UpscCseGranularNode[];
   pyqBank: readonly UpscCsePrelimsBatchPyq[];
   attempts: readonly UpscCsePrelimsPyqAttempt[];
   bookmarkedPyqIds: readonly string[];
@@ -50,8 +57,8 @@ export interface ComputeUpscCseDashboardSnapshotInput {
 export function computeUpscCseDashboardSnapshot(input: ComputeUpscCseDashboardSnapshotInput): UpscCseDashboardSnapshot {
   const recentLimit = input.recentLimit ?? 5;
 
-  const prelimsIds = input.prelimsTree.microsyllabus.map((m) => m.id);
-  const mainsIds = input.mainsTree.microsyllabus.map((m) => m.id);
+  const prelimsIds = expandToLeafCoverageIds(input.prelimsTree.microsyllabus.map((m) => m.id), input.granularNodes);
+  const mainsIds = expandToLeafCoverageIds(input.mainsTree.microsyllabus.map((m) => m.id), input.granularNodes);
 
   const prelimsCoverage = computeCoverageSummary(prelimsIds, input.coverage);
   const mainsCoverage = computeCoverageSummary(mainsIds, input.coverage);

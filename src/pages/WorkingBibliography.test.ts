@@ -105,8 +105,9 @@ describe('bibliography content type', () => {
 
   it('a "Working Bibliography" nav-reachable route exists under /phd-research', () => {
     // Reached via the PhD Research tab switcher rather than a second top-level nav item — the
-    // top-level "PhD Research" entry is what's registered in NAV_ITEMS.
-    const phdItem = NAV_ITEMS.find((n) => n.to === '/phd-research');
+    // top-level "PhD Research" entry (now pointing at /phd-dashboard, the dashboard tab) is what's
+    // registered in NAV_ITEMS.
+    const phdItem = NAV_ITEMS.find((n) => n.to === '/phd-dashboard');
     expect(phdItem).toBeDefined();
   });
 });
