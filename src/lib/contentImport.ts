@@ -96,14 +96,14 @@ export function isDescriptiveContentType(type: ImportedContentType): boolean {
 // duplicating this logic)
 // ============================================================================================
 
-export const SUPPORTED_IMPORT_EXTENSIONS = ['.md', '.markdown', '.docx', '.pdf', '.txt'] as const;
+export const SUPPORTED_IMPORT_EXTENSIONS = ['.md', '.markdown', '.docx', '.pdf', '.txt', '.csv', '.json'] as const;
 
 /** A conservative initial cap — large files are slow to parse in a mobile WebView and a single
  * huge imported item risks blowing the app's localStorage persistence quota (see lib/store.ts's
  * zustand `persist`, which is shared across every piece of app data, not just notes). */
 export const MAX_IMPORT_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
-export type ImportFileFormat = 'markdown' | 'docx' | 'pdf' | 'text' | 'doc' | 'unsupported';
+export type ImportFileFormat = 'markdown' | 'docx' | 'pdf' | 'text' | 'csv' | 'json' | 'doc' | 'unsupported';
 
 /** Human-readable labels for ImportFileFormat, shared by every import-preview UI (Notes, PhD
  * Research documents, Working Bibliography, …) so the wording stays consistent in one place. */
@@ -112,17 +112,29 @@ export const IMPORT_FORMAT_LABELS: Record<ImportFileFormat, string> = {
   docx: 'Word Document (.docx)',
   pdf: 'PDF',
   text: 'Plain Text (.txt)',
+  csv: 'CSV (.csv)',
+  json: 'JSON (.json)',
   doc: 'Legacy Word Document (.doc)',
   unsupported: 'Unsupported',
 };
 
 const LEGACY_DOC_MESSAGE = "Legacy .doc files aren't supported yet. Please save the document as .docx or PDF and upload it again.";
 const NEAR_EMPTY_PDF_MESSAGE = 'This PDF may be scanned/image-based and does not contain extractable text.';
-const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported file type. Please upload a .md, .markdown, .docx, .pdf, or .txt file.';
+const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported file type. Please upload a .md, .markdown, .docx, .pdf, .txt, .csv, or .json file.';
 const UNREADABLE_FILE_MESSAGE = "Could not read this file — please check it isn't corrupted and try again.";
+const INVALID_JSON_MESSAGE = "This file doesn't contain valid JSON — please check it isn't corrupted and try again.";
 
 function oversizedMessage(maxBytes: number): string {
   return `This file is larger than the ${Math.round(maxBytes / (1024 * 1024))} MB import limit.`;
+}
+
+/** Human-readable file size (B/KB/MB) for the Import Centre preview — display only, never
+ * persisted (see ImportedContentProvenance's own header: this module preserves only the source
+ * metadata fields the existing architecture already models). */
+export function formatFileSizeBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Extension-only classification — deliberately not MIME-sniffed: a locally-picked file's
@@ -136,6 +148,8 @@ export function getImportFileFormat(filename: string): ImportFileFormat {
   if (lower.endsWith('.docx')) return 'docx';
   if (lower.endsWith('.pdf')) return 'pdf';
   if (lower.endsWith('.txt')) return 'text';
+  if (lower.endsWith('.csv')) return 'csv';
+  if (lower.endsWith('.json')) return 'json';
   if (lower.endsWith('.doc')) return 'doc';
   return 'unsupported';
 }
@@ -181,6 +195,85 @@ export function deriveContentTitle(filename: string, content: string, fallbackTi
   if (headingMatch) return headingMatch[1].trim();
   const base = filename.replace(/\.[^./\\]+$/, '').trim();
   return base || fallbackTitle;
+}
+
+/**
+ * A small, dependency-free CSV parser (RFC 4180-ish): handles quoted fields (including embedded
+ * commas, newlines, and escaped `""` quotes) and both `\n`/`\r\n` line endings. Deliberately not a
+ * full spec implementation or an added parsing library — just enough to read the kind of CSV a
+ * spreadsheet export actually produces, matching this module's "minimal additions, no large
+ * parsing framework" discipline (see buildMarkdownFromPdfPages's own equally hand-rolled heuristic
+ * below). A trailing blank line never produces a spurious empty trailing row.
+ */
+export function parseCsvRows(text: string): string[][] {
+  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (s[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += c;
+      i++;
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (c === ',') {
+      row.push(field);
+      field = '';
+      i++;
+      continue;
+    }
+    if (c === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      i++;
+      continue;
+    }
+    field += c;
+    i++;
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Renders parsed CSV rows as a Markdown table — a faithful reformatting of the exact same cell
+ * values (never invented, never summarised), which is what makes this a legitimate "structured
+ * preview" rather than fabricated content. The first row is treated as the header. Ragged rows
+ * (fewer/more cells than the header) are padded/handled per-row rather than dropped or guessed at;
+ * a literal `|` inside a cell is escaped so it can never be mistaken for a column boundary. Returns
+ * an empty string for an empty file (zero rows).
+ */
+export function csvRowsToMarkdownTable(rows: readonly string[][]): string {
+  if (rows.length === 0) return '';
+  const escapeCell = (cell: string | undefined) => (cell ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
+  const [header, ...body] = rows;
+  const columnCount = header.length;
+  const renderRow = (row: readonly string[]) => `| ${Array.from({ length: columnCount }, (_, i) => escapeCell(row[i])).join(' | ')} |`;
+  const lines = [renderRow(header), `| ${Array.from({ length: columnCount }, () => '---').join(' | ')} |`, ...body.map(renderRow)];
+  return lines.join('\n');
 }
 
 export interface PdfPageTextItem {
@@ -258,8 +351,9 @@ async function extractMarkdownFromPdf(file: File): Promise<string> {
 
 export interface ExtractedFileContent {
   format: ImportFileFormat;
-  /** Markdown for markdown/docx/pdf; raw normalised text for .txt (never reinterpreted as
-   * Markdown syntax it wasn't written in). */
+  /** Markdown for markdown/docx/pdf; raw normalised text for .txt; a Markdown table for .csv
+   * (see csvRowsToMarkdownTable); pretty-printed JSON text for .json (see JSON.stringify(parsed,
+   * null, 2) below) — never reinterpreted beyond that reformatting. */
   text: string;
 }
 
@@ -284,6 +378,19 @@ export async function extractContentFromFile(file: File, maxBytes: number = MAX_
       text = normalizeText(await file.text());
     } else if (validation.format === 'docx') {
       text = await extractMarkdownFromDocx(file);
+    } else if (validation.format === 'csv') {
+      text = csvRowsToMarkdownTable(parseCsvRows(await file.text()));
+      if (isNearEmptyContent(text)) {
+        return { status: 'error', message: 'This CSV file appears to be empty — please choose a different file.' };
+      }
+    } else if (validation.format === 'json') {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(await file.text());
+      } catch {
+        return { status: 'error', message: INVALID_JSON_MESSAGE };
+      }
+      text = JSON.stringify(parsed, null, 2);
     } else {
       text = await extractMarkdownFromPdf(file);
       if (isNearEmptyContent(text)) {

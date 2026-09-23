@@ -80,11 +80,12 @@ describe('2. file extension/type validation', () => {
   });
 
   // Intentionally expanded from the original md/markdown/docx/pdf set — Multi-Workspace OS's
-  // Import-First Content Repository foundation adds .txt as a new, safe supported format (plain
-  // text needs no parsing) on top of everything Notes import already supported. Every extension
-  // that already worked keeps working identically — see the rest of this file.
-  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt', () => {
-    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.docx', '.markdown', '.md', '.pdf', '.txt']);
+  // Import-First Content Repository foundation adds .txt (plain text needs no parsing), and the
+  // Import Centre stage (Phase 8 Step 2) adds .csv/.json, on top of everything Notes import
+  // already supported. Every extension that already worked keeps working identically — see the
+  // rest of this file.
+  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json', () => {
+    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.csv', '.docx', '.json', '.markdown', '.md', '.pdf', '.txt']);
   });
 
   it('validateImportFile accepts every supported extension with a normal size', () => {

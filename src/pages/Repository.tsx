@@ -417,7 +417,7 @@ export default function Repository() {
               <UploadCloud className="h-4 w-4" /> Import Repository Backup
             </Button>
             <Button onClick={() => setShowImportModal(true)}>
-              <Upload className="h-4 w-4" /> Import to Repository
+              <Upload className="h-4 w-4" /> Import Centre
             </Button>
             {activeWorkspaceId === 'upsc_cse' && (
               <Button variant="secondary" onClick={() => setShowUpscPyqImportModal(true)}>

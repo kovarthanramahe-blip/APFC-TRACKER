@@ -11,6 +11,7 @@ import {
   buildImportPreview,
   confirmImportedContent,
   isNearEmptyContent,
+  formatFileSizeBytes,
   SUPPORTED_IMPORT_EXTENSIONS,
   IMPORT_FORMAT_LABELS,
   type ImportPreview,
@@ -57,13 +58,15 @@ import { navigationTargetFor } from '../../lib/repositoryNavigation';
 
 type Stage = 'pick' | 'extracting' | 'error' | 'preview' | 'success';
 
-function buildMetadata(tagsInput: string, categoryInput: string): ImportedContentMetadata | undefined {
+function buildMetadata(tagsInput: string, categoryInput: string, descriptionInput: string): ImportedContentMetadata | undefined {
   const tags = parseTagsInput(tagsInput);
   const category = categoryInput.trim();
-  if (tags.length === 0 && !category) return undefined;
+  const description = descriptionInput.trim();
+  if (tags.length === 0 && !category && !description) return undefined;
   const metadata: ImportedContentMetadata = {};
   if (tags.length > 0) metadata.tags = tags;
   if (category) metadata.category = category;
+  if (description) metadata.description = description;
   return metadata;
 }
 
@@ -80,9 +83,16 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const [stage, setStage] = useState<Stage>('pick');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Captured immediately on file selection, before extraction even starts — so a file that fails
+  // to parse can still show its own real name/size/type in the error stage (requirement: never
+  // just a bare error, always the file's own metadata alongside a clear "preview unavailable"
+  // state — see the error-stage JSX below).
+  const [pendingFile, setPendingFile] = useState<{ name: string; sizeBytes: number } | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
   const [selectedType, setSelectedType] = useState<RepositoryContentType>('note');
   const [titleInput, setTitleInput] = useState('');
+  const [descriptionInput, setDescriptionInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [categoryInput, setCategoryInput] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -94,6 +104,7 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     if (!file) return;
     setStage('extracting');
     setErrorMessage(null);
+    setPendingFile({ name: file.name, sizeBytes: file.size });
     const result = await extractContentFromFile(file);
     if (result.status === 'error') {
       setErrorMessage(result.message);
@@ -107,8 +118,10 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     }
     const nextPreview = buildImportPreview(file, result.content);
     setPreview(nextPreview);
+    setFileSizeBytes(file.size);
     setSelectedType(nextPreview.suggestedContentType);
     setTitleInput(nextPreview.title);
+    setDescriptionInput('');
     setTagsInput('');
     setCategoryInput('');
     setSaveError(null);
@@ -133,7 +146,7 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
         upsertNote(newNote);
         setSavedEntry(repositoryEntryFromNote(newNote));
       } else {
-        const metadata = buildMetadata(tagsInput, categoryInput);
+        const metadata = buildMetadata(tagsInput, categoryInput, descriptionInput);
         const savedItem = confirmImportedContent(preview, {
           workspaceId: activeWorkspaceId,
           contentType: selectedType,
@@ -154,7 +167,9 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   function resetToPick() {
     setStage('pick');
     setErrorMessage(null);
+    setPendingFile(null);
     setPreview(null);
+    setFileSizeBytes(null);
     setSaveError(null);
     setSavedEntry(null);
   }
@@ -167,7 +182,7 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
       <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-xl rounded-t-2xl sm:inset-0 sm:top-16 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
-          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Import to Repository</h3>
+          <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Import Centre</h3>
           <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
@@ -181,7 +196,7 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
           {stage === 'pick' && (
             <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 py-12 px-6 text-center">
               <Upload className="h-8 w-8 text-slate-300 dark:text-slate-700" />
-              <p className="text-sm text-slate-500 dark:text-slate-400">Choose a file to import — Markdown, DOCX, PDF, or plain text.</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Choose a file to import — Markdown, DOCX, PDF, plain text, CSV, or JSON.</p>
               <Button onClick={() => fileInputRef.current?.click()}>
                 <Upload className="h-4 w-4" /> Choose File
               </Button>
@@ -204,6 +219,17 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
 
           {stage === 'error' && (
             <div className="space-y-3">
+              {pendingFile && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 text-xs text-slate-500 dark:text-slate-400 space-y-1">
+                  <p>
+                    <span className="font-medium text-slate-600 dark:text-slate-300">File:</span> {pendingFile.name}
+                  </p>
+                  <p>
+                    <span className="font-medium text-slate-600 dark:text-slate-300">File size:</span> {formatFileSizeBytes(pendingFile.sizeBytes)}
+                  </p>
+                  <p className="text-slate-400">Preview unavailable — this file could not be parsed.</p>
+                </div>
+              )}
               <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <p>{errorMessage}</p>
@@ -223,6 +249,11 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                 <p>
                   <span className="font-medium text-slate-600 dark:text-slate-300">Detected format:</span> {IMPORT_FORMAT_LABELS[preview.originalFormat]}
                 </p>
+                {fileSizeBytes !== null && (
+                  <p>
+                    <span className="font-medium text-slate-600 dark:text-slate-300">File size:</span> {formatFileSizeBytes(fileSizeBytes)}
+                  </p>
+                )}
                 <p>
                   <span className="font-medium text-slate-600 dark:text-slate-300">Workspace:</span> {workspaceLabel}
                 </p>
@@ -272,6 +303,22 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                   className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 />
               </div>
+
+              {repositoryContentTypeSupports(selectedType, 'taggable') && (
+                <div>
+                  <label htmlFor="import-description" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Description (optional)
+                  </label>
+                  <textarea
+                    id="import-description"
+                    value={descriptionInput}
+                    onChange={(e) => setDescriptionInput(e.target.value)}
+                    placeholder="A short summary shown on the repository card…"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  />
+                </div>
+              )}
 
               {repositoryContentTypeSupports(selectedType, 'taggable') && (
                 <div>

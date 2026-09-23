@@ -3,7 +3,7 @@ import { Upload, X, AlertTriangle, CheckCircle2, ShieldAlert, FileWarning } from
 import { useAppStore } from '../../lib/store';
 import { getWorkspaceMeta } from '../../lib/workspace';
 import { Badge, Button } from '../ui/Primitives';
-import { extractContentFromFile, buildImportPreview, confirmImportedContent, isNearEmptyContent } from '../../lib/contentImport';
+import { extractContentFromFile, buildImportPreview, confirmImportedContent, isNearEmptyContent, type ImportFileFormat } from '../../lib/contentImport';
 import { buildUpscCsePrelimsImportPreview, type UpscCsePrelimsImportPreview } from '../../lib/upscCsePyqImport';
 
 // UPSC CSE Prelims PYQ Import — the minimal Repository-area entry point for this stage's
@@ -39,7 +39,7 @@ export function UpscCsePyqImportModal({ onClose }: { onClose: () => void }) {
   const [stage, setStage] = useState<Stage>('pick');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<UpscCsePrelimsImportPreview | null>(null);
-  const [rawFile, setRawFile] = useState<{ name: string; text: string; format: 'markdown' | 'docx' | 'pdf' | 'text' | 'doc' | 'unsupported' } | null>(null);
+  const [rawFile, setRawFile] = useState<{ name: string; text: string; format: ImportFileFormat } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {

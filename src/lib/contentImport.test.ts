@@ -11,6 +11,8 @@ import {
   suggestContentType,
   isObjectiveQuestionContentType,
   isDescriptiveContentType,
+  parseCsvRows,
+  csvRowsToMarkdownTable,
   IMPORTED_CONTENT_TYPES,
   OBJECTIVE_QUESTION_CONTENT_TYPES,
   DESCRIPTIVE_CONTENT_TYPES,
@@ -19,8 +21,8 @@ import {
 } from './contentImport';
 
 describe('1. supported file types', () => {
-  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt', () => {
-    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.docx', '.markdown', '.md', '.pdf', '.txt']);
+  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json', () => {
+    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.csv', '.docx', '.json', '.markdown', '.md', '.pdf', '.txt']);
   });
 
   it.each([
@@ -29,6 +31,8 @@ describe('1. supported file types', () => {
     ['report.docx', 'docx'],
     ['report.pdf', 'pdf'],
     ['plain.txt', 'text'],
+    ['data.csv', 'csv'],
+    ['data.json', 'json'],
     ['old.doc', 'doc'],
     ['image.png', 'unsupported'],
   ] as const)('classifies %s as %s', (filename, expectedFormat) => {
@@ -59,6 +63,102 @@ describe('1. supported file types', () => {
     const file = new File(['irrelevant'], 'photo.jpg');
     const result = await extractContentFromFile(file);
     expect(result).toEqual({ status: 'error', message: expect.stringContaining('Unsupported file type') });
+  });
+});
+
+describe('1b. CSV parsing (parseCsvRows / csvRowsToMarkdownTable)', () => {
+  it('parses a simple comma-separated file into rows of cells', () => {
+    expect(parseCsvRows('a,b,c\n1,2,3')).toEqual([
+      ['a', 'b', 'c'],
+      ['1', '2', '3'],
+    ]);
+  });
+
+  it('handles quoted fields containing commas, newlines, and escaped quotes', () => {
+    const csv = 'title,note\n"Smith, John","Said ""hello""\nnext line"';
+    expect(parseCsvRows(csv)).toEqual([
+      ['title', 'note'],
+      ['Smith, John', 'Said "hello"\nnext line'],
+    ]);
+  });
+
+  it('handles \\r\\n line endings the same as \\n', () => {
+    expect(parseCsvRows('a,b\r\n1,2')).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+  });
+
+  it('never produces a spurious empty trailing row from a trailing newline', () => {
+    expect(parseCsvRows('a,b\n1,2\n')).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+  });
+
+  it('an empty string produces zero rows', () => {
+    expect(parseCsvRows('')).toEqual([]);
+  });
+
+  it('csvRowsToMarkdownTable renders a faithful Markdown table from the exact same cell values', () => {
+    const table = csvRowsToMarkdownTable([
+      ['Name', 'Score'],
+      ['Alice', '90'],
+      ['Bob', '85'],
+    ]);
+    expect(table).toBe('| Name | Score |\n| --- | --- |\n| Alice | 90 |\n| Bob | 85 |');
+  });
+
+  it('escapes a literal pipe inside a cell so it is never mistaken for a column boundary', () => {
+    const table = csvRowsToMarkdownTable([
+      ['Name', 'Note'],
+      ['Alice', 'A | B'],
+    ]);
+    expect(table).toContain('A \\| B');
+  });
+
+  it('pads a ragged (shorter) row out to the header\'s column count rather than dropping data', () => {
+    const table = csvRowsToMarkdownTable([
+      ['A', 'B', 'C'],
+      ['1'],
+    ]);
+    expect(table).toBe('| A | B | C |\n| --- | --- | --- |\n| 1 |  |  |');
+  });
+
+  it('returns an empty string for zero rows, never a fabricated table', () => {
+    expect(csvRowsToMarkdownTable([])).toBe('');
+  });
+});
+
+describe('1c. CSV/JSON file extraction end-to-end', () => {
+  it('extractContentFromFile converts a real CSV file into a Markdown table', async () => {
+    const file = new File(['Name,Score\nAlice,90\nBob,85'], 'scores.csv');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'csv', text: '| Name | Score |\n| --- | --- |\n| Alice | 90 |\n| Bob | 85 |' } });
+  });
+
+  it('extractContentFromFile rejects an empty CSV rather than fabricating a table', async () => {
+    const file = new File([''], 'empty.csv');
+    const result = await extractContentFromFile(file);
+    expect(result.status).toBe('error');
+  });
+
+  it('extractContentFromFile pretty-prints valid JSON, never reinterpreting its structure', async () => {
+    const file = new File(['{"a":1,"b":[2,3]}'], 'data.json');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'json', text: JSON.stringify({ a: 1, b: [2, 3] }, null, 2) } });
+  });
+
+  it('extractContentFromFile reports a clear error for malformed JSON instead of inventing content', async () => {
+    const file = new File(['{not valid json'], 'broken.json');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'error', message: expect.stringContaining('valid JSON') });
+  });
+
+  it('a JSON file containing only a primitive (not an object/array) is still faithfully round-tripped', async () => {
+    const file = new File(['"just a string"'], 'primitive.json');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'ok', content: { format: 'json', text: '"just a string"' } });
   });
 });
 

@@ -8,6 +8,7 @@ import {
   confirmImportedContent,
   isNearEmptyContent,
   validateImportFile,
+  formatFileSizeBytes,
   SUPPORTED_IMPORT_EXTENSIONS,
   type ImportPreview,
 } from '../../lib/contentImport';
@@ -57,14 +58,16 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
 }
 
 describe('Global Repository Import — file type support', () => {
-  it('accepts every initially-supported extension: .md, .markdown, .docx, .pdf, .txt', () => {
-    expect(SUPPORTED_IMPORT_EXTENSIONS).toEqual(['.md', '.markdown', '.docx', '.pdf', '.txt']);
+  it('accepts every supported extension: .md, .markdown, .docx, .pdf, .txt, .csv, .json', () => {
+    expect(SUPPORTED_IMPORT_EXTENSIONS).toEqual(['.md', '.markdown', '.docx', '.pdf', '.txt', '.csv', '.json']);
     for (const [name, size] of [
       ['a.md', 100],
       ['a.markdown', 100],
       ['a.docx', 100],
       ['a.pdf', 100],
       ['a.txt', 100],
+      ['a.csv', 100],
+      ['a.json', 100],
     ] as const) {
       expect(validateImportFile({ name, size }).valid).toBe(true);
     }
@@ -139,6 +142,114 @@ describe('Global Repository Import — confirmation requirement (no persistence 
     if (result.status === 'ok') buildImportPreview({ name: 'a.md' }, result.content);
     expect(useAppStore.getState().importedContent).toEqual([]);
     expect(useAppStore.getState().notes).toEqual([]);
+  });
+
+  it('cancelling after a preview is built (never calling confirm) leaves the repository completely untouched', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const result = await extractContentFromFile(new File(['Name,Score\nAlice,90'], 'scores.csv'));
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    const p = buildImportPreview({ name: 'scores.csv' }, result.content);
+    expect(p.content).toContain('Alice');
+    // Simulates clicking Cancel/closing the modal at the preview stage — the component's onClose
+    // simply unmounts, calling neither confirmImportedContent nor any store action.
+    expect(useAppStore.getState().importedContent).toEqual([]);
+    expect(useAppStore.getState().notes).toEqual([]);
+  });
+
+  it('an explicit confirm, by contrast, does persist exactly one item — proving the two paths genuinely differ', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const result = await extractContentFromFile(new File(['Name,Score\nAlice,90'], 'scores.csv'));
+    if (result.status !== 'ok') throw new Error('expected ok');
+    const p = buildImportPreview({ name: 'scores.csv' }, result.content);
+    const saved = confirmImportedContent(p, { workspaceId: 'phd_research', contentType: 'study_material' });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent).toHaveLength(1);
+  });
+});
+
+describe('Import Centre — new file formats (CSV, JSON)', () => {
+  beforeEach(fullReset);
+
+  it('a CSV file flows end-to-end through the same pipeline as every other format: extract -> preview -> explicit confirm -> save', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const result = await extractContentFromFile(new File(['Name,Score\nAlice,90\nBob,85'], 'results.csv'));
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.content.format).toBe('csv');
+    expect(result.content.text).toBe('| Name | Score |\n| --- | --- |\n| Alice | 90 |\n| Bob | 85 |');
+
+    const p = buildImportPreview({ name: 'results.csv' }, result.content);
+    expect(p.originalFormat).toBe('csv');
+
+    const saved = confirmImportedContent(p, { workspaceId: 'phd_research', contentType: 'study_material' });
+    useAppStore.getState().addImportedContent(saved);
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.rawContent).toBe(result.content.text);
+    expect(stored.provenance.originalFormat).toBe('csv');
+    expect(stored.provenance.sourceFilename).toBe('results.csv');
+  });
+
+  it('a JSON file flows end-to-end, pretty-printed but never restructured or fabricated', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const result = await extractContentFromFile(new File(['{"topic":"Fieldwork","pages":42}'], 'meta.json'));
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.content.format).toBe('json');
+    expect(result.content.text).toBe(JSON.stringify({ topic: 'Fieldwork', pages: 42 }, null, 2));
+
+    const p = buildImportPreview({ name: 'meta.json' }, result.content);
+    const saved = confirmImportedContent(p, { workspaceId: 'phd_research', contentType: 'document' });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent[0].rawContent).toBe(result.content.text);
+  });
+
+  it('malformed JSON never persists anything and reports a clear error instead of inventing content', async () => {
+    const result = await extractContentFromFile(new File(['{broken'], 'broken.json'));
+    expect(result.status).toBe('error');
+    if (result.status === 'error') expect(result.message).toMatch(/valid JSON/i);
+    expect(useAppStore.getState().importedContent).toEqual([]);
+  });
+
+  it('an empty CSV never persists anything and reports a clear error instead of an empty/fabricated table', async () => {
+    const result = await extractContentFromFile(new File([''], 'empty.csv'));
+    expect(result.status).toBe('error');
+    expect(useAppStore.getState().importedContent).toEqual([]);
+  });
+
+  it('validateImportFile accepts .csv and .json alongside every previously-supported extension', () => {
+    expect(validateImportFile({ name: 'a.csv', size: 100 }).valid).toBe(true);
+    expect(validateImportFile({ name: 'a.json', size: 100 }).valid).toBe(true);
+  });
+});
+
+describe('Import Centre — file size display', () => {
+  it('formats bytes, kilobytes, and megabytes for the preview panel', () => {
+    expect(formatFileSizeBytes(512)).toBe('512 B');
+    expect(formatFileSizeBytes(2048)).toBe('2.0 KB');
+    expect(formatFileSizeBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
+});
+
+describe('Import Centre — description metadata', () => {
+  beforeEach(fullReset);
+
+  it('an explicit description supplied at confirm time is saved onto the item\'s metadata', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const saved = confirmImportedContent(preview({ title: 'Fieldwork Notes' }), {
+      workspaceId: 'phd_research',
+      contentType: 'study_material',
+      metadata: { description: 'Scanned handout from the site visit' },
+    });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent[0].metadata?.description).toBe('Scanned handout from the site visit');
+  });
+
+  it('no description is ever fabricated — omitting it leaves metadata.description unset', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const saved = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: 'study_material' });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent[0].metadata?.description).toBeUndefined();
   });
 });
 
