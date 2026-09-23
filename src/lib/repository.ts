@@ -14,7 +14,9 @@ import {
   collectImportedContentCategories,
   collectImportedContentTags,
   getContentCategory,
+  getContentDescription,
   getContentTags,
+  getContentUpdatedAt,
   queryImportedContent,
   searchImportedContent,
   sortImportedContent,
@@ -94,6 +96,8 @@ function capabilitiesForContentType(type: RepositoryContentType): RepositoryCapa
 
 const REPOSITORY_CONTENT_TYPE_LABELS: Record<RepositoryContentType, string> = {
   note: 'Note',
+  document: 'Document',
+  study_material: 'Study Material',
   research_document: 'Research Document',
   bibliography: 'Bibliography',
   question_bank: 'Question Bank',
@@ -173,8 +177,15 @@ export interface RepositoryEntry {
   origin: 'import' | 'manual' | 'created';
   /** ISO timestamp — ImportedContent.provenance.importedAt, or Note.createdAt. */
   createdAt: string;
+  /** ISO timestamp of the last real edit — ImportedContent.updatedAt (falling back to createdAt
+   * for a pre-existing item with none yet, via getContentUpdatedAt) or Note.updatedAt, which has
+   * always been stamped on every save. */
+  updatedAt: string;
   tags: string[];
   category?: string;
+  /** A short, user-written summary — ImportedContent.metadata.description; always undefined for a
+   * Note-backed entry (Note has no description field of its own). */
+  description?: string;
 }
 
 export function repositoryEntryFromImportedContent(item: ImportedContent): RepositoryEntry {
@@ -186,8 +197,10 @@ export function repositoryEntryFromImportedContent(item: ImportedContent): Repos
     workspaceId: item.workspaceId,
     origin: item.provenance.origin ?? 'import',
     createdAt: item.provenance.importedAt,
+    updatedAt: getContentUpdatedAt(item),
     tags: getContentTags(item),
     category: getContentCategory(item),
+    description: getContentDescription(item),
   };
 }
 
@@ -200,8 +213,10 @@ export function repositoryEntryFromNote(note: Note): RepositoryEntry {
     workspaceId: effectiveNoteWorkspaceId(note),
     origin: 'created',
     createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
     tags: [],
     category: undefined,
+    description: undefined,
   };
 }
 
@@ -255,6 +270,7 @@ export function sortRepositoryEntries(entries: readonly RepositoryEntry[], order
     let primary = 0;
     if (order === 'newest') primary = b.createdAt.localeCompare(a.createdAt);
     else if (order === 'oldest') primary = a.createdAt.localeCompare(b.createdAt);
+    else if (order === 'updated') primary = b.updatedAt.localeCompare(a.updatedAt);
     else primary = a.title.toLowerCase().localeCompare(b.title.toLowerCase());
     return primary !== 0 ? primary : a.entityId.localeCompare(b.entityId);
   });

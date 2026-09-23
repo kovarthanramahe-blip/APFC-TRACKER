@@ -7,6 +7,7 @@ import {
   extractContentFromFile,
   buildImportPreview,
   confirmImportedContent,
+  createManualImportedContent,
   suggestContentType,
   isObjectiveQuestionContentType,
   isDescriptiveContentType,
@@ -121,9 +122,9 @@ describe('3. workspace scoping / isolation', () => {
 });
 
 describe('4. content-type selection', () => {
-  it('IMPORTED_CONTENT_TYPES lists exactly the 7 specified content types', () => {
+  it('IMPORTED_CONTENT_TYPES lists exactly the 9 specified content types', () => {
     expect([...IMPORTED_CONTENT_TYPES].sort()).toEqual(
-      ['note', 'question_bank', 'descriptive_questions', 'pyq', 'research_document', 'bibliography', 'other'].sort(),
+      ['note', 'document', 'study_material', 'question_bank', 'descriptive_questions', 'pyq', 'research_document', 'bibliography', 'other'].sort(),
     );
   });
 
@@ -191,11 +192,26 @@ describe('6. objective vs descriptive content-type separation', () => {
     expect(isDescriptiveContentType('question_bank')).toBe(false);
   });
 
-  it('note/research_document/bibliography/other are neither objective nor descriptive question content', () => {
-    for (const type of ['note', 'research_document', 'bibliography', 'other'] as const) {
+  it('note/document/study_material/research_document/bibliography/other are neither objective nor descriptive question content', () => {
+    for (const type of ['note', 'document', 'study_material', 'research_document', 'bibliography', 'other'] as const) {
       expect(isObjectiveQuestionContentType(type)).toBe(false);
       expect(isDescriptiveContentType(type)).toBe(false);
     }
+  });
+});
+
+describe('8. updatedAt (Personal Content Repository foundation)', () => {
+  it('confirmImportedContent stamps updatedAt equal to the same instant as provenance.importedAt', () => {
+    const preview = buildImportPreview({ name: 'a.md' }, { format: 'markdown', text: 'x' });
+    const content = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'document', importedAt: '2026-01-01T00:00:00.000Z' });
+    expect(content.updatedAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(content.updatedAt).toBe(content.provenance.importedAt);
+  });
+
+  it('createManualImportedContent stamps updatedAt equal to the same instant as provenance.importedAt', () => {
+    const content = createManualImportedContent({ workspaceId: 'phd_research', contentType: 'study_material', title: 'Revision sheet', createdAt: '2026-02-02T00:00:00.000Z' });
+    expect(content.updatedAt).toBe('2026-02-02T00:00:00.000Z');
+    expect(content.updatedAt).toBe(content.provenance.importedAt);
   });
 });
 

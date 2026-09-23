@@ -84,9 +84,11 @@ describe('Global Repository Import — file type support', () => {
 });
 
 describe('Global Repository Import — explicit content-type selection', () => {
-  it('the registry lists exactly the 7 initially-supported content types', () => {
+  it('the registry lists exactly the 9 supported content types', () => {
     const types = REPOSITORY_CONTENT_TYPE_REGISTRY.map((m) => m.type).sort();
-    expect(types).toEqual(['bibliography', 'descriptive_questions', 'note', 'other', 'pyq', 'question_bank', 'research_document'].sort());
+    expect(types).toEqual(
+      ['bibliography', 'descriptive_questions', 'document', 'note', 'other', 'pyq', 'question_bank', 'research_document', 'study_material'].sort(),
+    );
   });
 
   it('confirmImportedContent accepts any registered content type explicitly, never defaulting on its own', () => {

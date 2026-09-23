@@ -35,11 +35,32 @@ import { uuid } from './utils';
  * grow into APFC/UPSC CSE/PhD Research's different needs without another type redesign. Only
  * 'note' has a real conversion + persistence path today (see the module header); the rest exist
  * so the shape is ready, are never auto-selected, and are never populated with fabricated content.
+ *
+ * 'document' and 'study_material' (Personal Content Repository foundation) are generic, freeform
+ * content types with no narrower classification — a general document or study material that isn't
+ * specifically a note, a question bank, a PYQ, or research/bibliography material. `question_bank`
+ * and `descriptive_questions` already cover exactly what a repository vocabulary would otherwise
+ * call "objective_question_bank"/"descriptive_question_bank" (see OBJECTIVE_QUESTION_CONTENT_TYPES/
+ * DESCRIPTIVE_CONTENT_TYPES below, which already group them that way) — kept under their existing
+ * names rather than renamed, since a rename would ripple through every existing consumer (the
+ * Repository UI, import modal, relationship/statistics code, and their tests) for a cosmetic
+ * difference only, not a functional one.
  */
-export type ImportedContentType = 'note' | 'question_bank' | 'descriptive_questions' | 'pyq' | 'research_document' | 'bibliography' | 'other';
+export type ImportedContentType =
+  | 'note'
+  | 'document'
+  | 'study_material'
+  | 'question_bank'
+  | 'descriptive_questions'
+  | 'pyq'
+  | 'research_document'
+  | 'bibliography'
+  | 'other';
 
 export const IMPORTED_CONTENT_TYPES: readonly ImportedContentType[] = [
   'note',
+  'document',
+  'study_material',
   'question_bank',
   'descriptive_questions',
   'pyq',
@@ -322,6 +343,12 @@ export interface ImportedContentMetadata {
    * material is simply every ImportedContent item whose metadata.topicAreaId matches it. Never
    * auto-filled — set only when a user explicitly assigns a document to a Topic Area. */
   topicAreaId?: string;
+  /** A short, user-written summary distinct from `rawContent` (the full body) — e.g. what a
+   * repository card/table shows without opening the item. Never auto-filled, never derived from
+   * rawContent. Lives in `metadata` (rather than a new top-level ImportedContent field) so it's
+   * optional-by-construction and every existing reader that already treats a missing metadata as
+   * "no extra info" continues to work unchanged. */
+  description?: string;
   [key: string]: unknown;
 }
 
@@ -340,6 +367,13 @@ export interface ImportedContent {
    * specific conversion step would read this field, not replace how it got here. */
   rawContent: string;
   provenance: ImportedContentProvenance;
+  /** ISO timestamp of the last real change to this item (title/content/metadata) — stamped fresh
+   * on creation (equal to provenance.importedAt) and re-stamped by lib/store.ts's
+   * updateImportedContent on every edit. Optional on the TYPE (not every existing item/fixture
+   * carries one) so this addition never breaks an older record or test fixture; every reader
+   * should fall back to provenance.importedAt for an item that predates this field — see
+   * lib/importedContentRepository.ts's getContentUpdatedAt, the one place that fallback lives. */
+  updatedAt?: string;
   /** Organisation metadata (tags/category) plus any future content-type-specific fields — see
    * ImportedContentMetadata. Optional so existing items imported before this field existed
    * continue to work unchanged: every reader here treats a missing `metadata` exactly like
@@ -414,6 +448,7 @@ export function confirmImportedContent(
     importedAt?: string;
   },
 ): ImportedContent {
+  const now = options.importedAt ?? new Date().toISOString();
   return {
     id: uuid(),
     workspaceId: options.workspaceId,
@@ -423,11 +458,12 @@ export function confirmImportedContent(
     provenance: {
       sourceFilename: preview.sourceFilename,
       originalFormat: preview.originalFormat,
-      importedAt: options.importedAt ?? new Date().toISOString(),
+      importedAt: now,
       sourceNote: options.sourceNote,
       origin: 'import',
     },
     metadata: options.metadata,
+    updatedAt: now,
   };
 }
 
@@ -448,6 +484,7 @@ export function createManualImportedContent(options: {
   sourceNote?: string;
   createdAt?: string;
 }): ImportedContent {
+  const now = options.createdAt ?? new Date().toISOString();
   return {
     id: uuid(),
     workspaceId: options.workspaceId,
@@ -455,11 +492,12 @@ export function createManualImportedContent(options: {
     title: options.title,
     rawContent: options.content ?? '',
     provenance: {
-      importedAt: options.createdAt ?? new Date().toISOString(),
+      importedAt: now,
       sourceNote: options.sourceNote,
       origin: 'manual',
     },
     metadata: options.metadata,
+    updatedAt: now,
   };
 }
 

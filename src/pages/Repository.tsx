@@ -49,6 +49,7 @@ import { UpscCsePyqImportModal } from '../components/upscCse/UpscCsePyqImportMod
 
 const SORT_OPTIONS: { value: ImportedContentSortOrder; label: string }[] = [
   { value: 'newest', label: 'Newest first' },
+  { value: 'updated', label: 'Recently updated' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'title', label: 'Title (A–Z)' },
 ];
@@ -103,6 +104,7 @@ function ResultCard({
         {ORIGIN_LABELS[entry.origin]}
         {dateLabel && <> · {dateLabel}</>}
       </p>
+      {entry.description && <p className="mt-1.5 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{entry.description}</p>}
       {entry.tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {entry.tags.map((tag) => (
@@ -146,13 +148,15 @@ function ResultCard({
   );
 }
 
-function buildEditedMetadata(tagsInput: string, categoryInput: string): ImportedContentMetadata | undefined {
+function buildEditedMetadata(tagsInput: string, categoryInput: string, descriptionInput: string): ImportedContentMetadata | undefined {
   const tags = parseTagsInput(tagsInput);
   const category = categoryInput.trim();
-  if (tags.length === 0 && !category) return undefined;
+  const description = descriptionInput.trim();
+  if (tags.length === 0 && !category && !description) return undefined;
   const metadata: ImportedContentMetadata = {};
   if (tags.length > 0) metadata.tags = tags;
   if (category) metadata.category = category;
+  if (description) metadata.description = description;
   return metadata;
 }
 
@@ -177,8 +181,13 @@ export function EditMetadataModal({
   const [titleInput, setTitleInput] = useState(entry.title);
   const [tagsInput, setTagsInput] = useState(entry.tags.join(', '));
   const [categoryInput, setCategoryInput] = useState(entry.category ?? '');
+  const [descriptionInput, setDescriptionInput] = useState(entry.description ?? '');
   const showTags = repositoryContentTypeSupports(entry.contentType, 'taggable');
   const showCategory = repositoryContentTypeSupports(entry.contentType, 'categorisable');
+  // Description is a freeform metadata field like tags/category, so it shares their same
+  // capability gate — 'note' has no metadata bag at all (see lib/repository.ts's own header on
+  // why 'note' is never taggable/categorisable), so it's never description-able either.
+  const showDescription = showTags;
 
   return (
     <>
@@ -203,6 +212,21 @@ export function EditMetadataModal({
               className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
           </div>
+          {showDescription && (
+            <div>
+              <label htmlFor="edit-description" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Description
+              </label>
+              <textarea
+                id="edit-description"
+                value={descriptionInput}
+                onChange={(e) => setDescriptionInput(e.target.value)}
+                placeholder="A short summary shown on the repository card…"
+                rows={2}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              />
+            </div>
+          )}
           {showTags && (
             <div>
               <label htmlFor="edit-tags" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -242,7 +266,7 @@ export function EditMetadataModal({
           <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={() => onSave(titleInput.trim() || entry.title, buildEditedMetadata(tagsInput, categoryInput))} disabled={!titleInput.trim()}>
+          <Button onClick={() => onSave(titleInput.trim() || entry.title, buildEditedMetadata(tagsInput, categoryInput, descriptionInput))} disabled={!titleInput.trim()}>
             Save Changes
           </Button>
         </div>

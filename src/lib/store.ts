@@ -460,7 +460,17 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // EXISTING `upscCseStudyTasks`/`phdMicroTargets`/`phdTopicAreas` fields from versions 9-10 above
 // (extended with new optional fields — see those modules' own headers) rather than adding any new
 // collections, so no further migration is needed for either.
-export const APP_STORE_PERSIST_VERSION = 11;
+//
+// Version 12 (Personal Content Repository foundation) does NOT add a new top-level field — the
+// repository's content types ('document', 'study_material' — see lib/contentImport.ts's
+// ImportedContentType) are new union members, not new storage, and a persisted item's contentType
+// string needs no migration to accept them. What DOES need migrating is `updatedAt`, a new field
+// on each ImportedContent array ITEM (not the array itself): backfilled from that item's own real
+// `provenance.importedAt` — never fabricated — wherever it's missing, via
+// backfillImportedContentUpdatedAt, reached both at the top-level active `importedContent` field
+// and inside every archived inactiveWorkspaceOwnedData snapshot (same withWorkspaceOwnedDefaults
+// path every other per-item backfill above already uses).
+export const APP_STORE_PERSIST_VERSION = 12;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -492,7 +502,24 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Backfills `importedContent: []`, `contentRelationships: []` (with every entry's entity types
+/** Version 12 — backfills `updatedAt` onto an ImportedContent item that predates that field (see
+ * lib/contentImport.ts's own doc comment on it), defaulting to the item's own real, already-known
+ * `provenance.importedAt` rather than fabricating a fresh "now" — the same "preserve real known
+ * data" discipline as Version 10's granular-coverage backfill. Never overwrites an already-present
+ * `updatedAt`. */
+function backfillImportedContentUpdatedAt(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((item) => {
+    if (!isPlainObject(item)) return item;
+    if (typeof item.updatedAt === 'string') return item;
+    const provenance = isPlainObject(item.provenance) ? item.provenance : {};
+    const importedAt = typeof provenance.importedAt === 'string' ? provenance.importedAt : new Date().toISOString();
+    return { ...item, updatedAt: importedAt };
+  });
+}
+
+/** Backfills `importedContent: []` (each item also getting Version 12's `updatedAt` backfill — see
+ * backfillImportedContentUpdatedAt), `contentRelationships: []` (with every entry's entity types
  * stamped — see stampRelationshipEntityTypes), `upscCseSyllabusCoverage: {}` (plus, for whatever
  * coverage entries already exist, the granular roll-up backfill — see migrateGranularCoverageBackfill),
  * `upscCsePrelimsPyqAttempts: []`, `upscCseStudyTasks: []`, `phdResearchStartDate`,
@@ -505,7 +532,7 @@ function withWorkspaceOwnedDefaults(value: unknown): unknown {
   const coverage = (isPlainObject(snapshot.upscCseSyllabusCoverage) ? snapshot.upscCseSyllabusCoverage : {}) as UpscCseSyllabusCoverage;
   return {
     ...snapshot,
-    importedContent: Array.isArray(snapshot.importedContent) ? snapshot.importedContent : [],
+    importedContent: backfillImportedContentUpdatedAt(Array.isArray(snapshot.importedContent) ? snapshot.importedContent : []),
     contentRelationships: stampRelationshipEntityTypes(Array.isArray(snapshot.contentRelationships) ? snapshot.contentRelationships : []),
     upscCseSyllabusCoverage: migrateGranularCoverageBackfill(coverage, UPSC_CSE_GRANULAR_NODES),
     upscCsePrelimsPyqAttempts: Array.isArray(snapshot.upscCsePrelimsPyqAttempts) ? snapshot.upscCsePrelimsPyqAttempts : [],
@@ -548,7 +575,7 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     sessions: stampWorkspaceIdOnArray(state.sessions),
     personalStudyPlanTasks: stampWorkspaceIdOnArray(state.personalStudyPlanTasks),
     studyPlan: stampWorkspaceIdOnObject(state.studyPlan),
-    importedContent: Array.isArray(state.importedContent) ? state.importedContent : [],
+    importedContent: backfillImportedContentUpdatedAt(Array.isArray(state.importedContent) ? state.importedContent : []),
     contentRelationships: stampRelationshipEntityTypes(Array.isArray(state.contentRelationships) ? state.contentRelationships : []),
     upscCseSyllabusCoverage: migrateGranularCoverageBackfill(
       (isPlainObject(state.upscCseSyllabusCoverage) ? state.upscCseSyllabusCoverage : {}) as UpscCseSyllabusCoverage,
@@ -799,7 +826,9 @@ export const useAppStore = create<AppState>()(
             // stripped from `updates` even if a caller bypasses the type system and includes
             // them — workspace isolation must hold regardless of what a caller passes in.
             const { id: _ignoredId, workspaceId: _ignoredWorkspaceId, ...safeUpdates } = updates as Partial<ImportedContent>;
-            return { ...c, ...safeUpdates };
+            // `updatedAt` is always freshly stamped here, never trusted from `updates` — same
+            // "the store owns this timestamp, not the caller" discipline as id/workspaceId above.
+            return { ...c, ...safeUpdates, updatedAt: new Date().toISOString() };
           }),
         })),
       deleteImportedContent: (id) =>
@@ -988,7 +1017,7 @@ export function importAllData(json: string) {
     studyPlanGeneratedAt: data.studyPlanGeneratedAt ?? null,
     personalStudyPlanTasks: data.personalStudyPlanTasks ?? [],
     revisionQueue: data.revisionQueue ?? createRevisionQueue(),
-    importedContent: data.importedContent ?? [],
+    importedContent: backfillImportedContentUpdatedAt(data.importedContent ?? []) as ImportedContent[],
     contentRelationships: data.contentRelationships ?? [],
     activeWorkspaceId: (data.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: data.inactiveWorkspaceOwnedData ?? {},

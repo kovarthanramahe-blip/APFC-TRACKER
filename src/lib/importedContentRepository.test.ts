@@ -11,6 +11,8 @@ import {
   collectImportedContentCategories,
   getContentTags,
   getContentCategory,
+  getContentDescription,
+  getContentUpdatedAt,
   parseTagsInput,
 } from './importedContentRepository';
 
@@ -23,6 +25,7 @@ function item(overrides: Partial<ImportedContent> = {}): ImportedContent {
     rawContent: overrides.rawContent ?? '',
     provenance: overrides.provenance ?? { sourceFilename: 'file.md', originalFormat: 'markdown', importedAt: '2026-01-01T00:00:00.000Z' },
     metadata: overrides.metadata,
+    updatedAt: overrides.updatedAt,
   };
 }
 
@@ -37,6 +40,27 @@ describe('getContentTags / getContentCategory — missing metadata handling', ()
 
   it('returns an empty tag list for an item with metadata but no tags field', () => {
     expect(getContentTags(item({ metadata: { category: 'Notes' } }))).toEqual([]);
+  });
+
+  it('getContentDescription returns undefined for an item with no metadata/description', () => {
+    expect(getContentDescription(item({ metadata: undefined }))).toBeUndefined();
+    expect(getContentDescription(item({ metadata: { category: 'Notes' } }))).toBeUndefined();
+  });
+
+  it('getContentDescription returns the set description', () => {
+    expect(getContentDescription(item({ metadata: { description: 'A short summary' } }))).toBe('A short summary');
+  });
+});
+
+describe('getContentUpdatedAt — fallback for items that predate the field', () => {
+  it('returns updatedAt when present', () => {
+    const withUpdatedAt = item({ updatedAt: '2026-02-01T00:00:00.000Z', provenance: { importedAt: '2026-01-01T00:00:00.000Z' } });
+    expect(getContentUpdatedAt(withUpdatedAt)).toBe('2026-02-01T00:00:00.000Z');
+  });
+
+  it('falls back to provenance.importedAt when updatedAt is missing', () => {
+    const legacyItem = item({ updatedAt: undefined, provenance: { importedAt: '2026-01-01T00:00:00.000Z' } });
+    expect(getContentUpdatedAt(legacyItem)).toBe('2026-01-01T00:00:00.000Z');
   });
 });
 
@@ -75,6 +99,15 @@ describe('searchImportedContent', () => {
 
   it('no match returns an empty array', () => {
     expect(searchImportedContent(items, 'nonexistent-xyz')).toEqual([]);
+  });
+
+  it('matches by description', () => {
+    const withDescription = [...items, item({ id: 'd', title: 'Untitled scan', rawContent: '', metadata: { description: 'Scanned lecture handout' } })];
+    expect(searchImportedContent(withDescription, 'lecture handout').map((i) => i.id)).toEqual(['d']);
+  });
+
+  it('an item with no description never matches a description-only search term', () => {
+    expect(searchImportedContent(items, 'lecture handout')).toEqual([]);
   });
 });
 
@@ -168,6 +201,23 @@ describe('sortImportedContent — deterministic', () => {
     const original = [...items];
     sortImportedContent(items, 'title');
     expect(items).toEqual(original);
+  });
+
+  it('sorts by updatedAt (most recently touched first) when requested', () => {
+    const items = [
+      item({ id: 'a', updatedAt: '2026-01-01T00:00:00.000Z', provenance: { importedAt: '2026-01-01T00:00:00.000Z' } }),
+      item({ id: 'b', updatedAt: '2026-01-05T00:00:00.000Z', provenance: { importedAt: '2026-01-01T00:00:00.000Z' } }),
+      item({ id: 'c', updatedAt: '2026-01-03T00:00:00.000Z', provenance: { importedAt: '2026-01-01T00:00:00.000Z' } }),
+    ];
+    expect(sortImportedContent(items, 'updated').map((i) => i.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('an item with no updatedAt sorts by its provenance.importedAt fallback under the "updated" order', () => {
+    const items = [
+      item({ id: 'old-edit', updatedAt: undefined, provenance: { importedAt: '2026-01-01T00:00:00.000Z' } }),
+      item({ id: 'recent-import-no-edit', updatedAt: undefined, provenance: { importedAt: '2026-01-05T00:00:00.000Z' } }),
+    ];
+    expect(sortImportedContent(items, 'updated').map((i) => i.id)).toEqual(['recent-import-no-edit', 'old-edit']);
   });
 });
 

@@ -22,10 +22,22 @@ export function getContentCategory(item: ImportedContent): string | undefined {
   return item.metadata?.category;
 }
 
+/** `item.metadata?.description`, or undefined for items with no description set. */
+export function getContentDescription(item: ImportedContent): string | undefined {
+  return item.metadata?.description;
+}
+
+/** `item.updatedAt`, falling back to `provenance.importedAt` for an item that predates the
+ * `updatedAt` field (see contentImport.ts's own doc comment on it) — the one place that fallback
+ * lives, so "last touched" always has a real answer without every caller re-deriving it. */
+export function getContentUpdatedAt(item: ImportedContent): string {
+  return item.updatedAt ?? item.provenance.importedAt;
+}
+
 /**
- * Case-insensitive substring search over title, extracted content, and source filename — the
- * three fields a user is most likely to remember something by. An empty/whitespace-only query
- * matches everything (mirrors how "no search typed" should behave in the UI).
+ * Case-insensitive substring search over title, extracted content, source filename, and
+ * description — the fields a user is most likely to remember something by. An empty/whitespace-only
+ * query matches everything (mirrors how "no search typed" should behave in the UI).
  */
 export function searchImportedContent(items: readonly ImportedContent[], query: string): ImportedContent[] {
   const q = query.trim().toLowerCase();
@@ -34,7 +46,8 @@ export function searchImportedContent(items: readonly ImportedContent[], query: 
     (item) =>
       item.title.toLowerCase().includes(q) ||
       item.rawContent.toLowerCase().includes(q) ||
-      (item.provenance.sourceFilename ?? '').toLowerCase().includes(q),
+      (item.provenance.sourceFilename ?? '').toLowerCase().includes(q) ||
+      (getContentDescription(item) ?? '').toLowerCase().includes(q),
   );
 }
 
@@ -68,7 +81,10 @@ export function filterImportedContentUncategorized(items: readonly ImportedConte
   return items.filter((item) => !getContentCategory(item)?.trim());
 }
 
-export type ImportedContentSortOrder = 'newest' | 'oldest' | 'title';
+/** 'updated' sorts by getContentUpdatedAt (falls back to createdAt for an item with no real edit
+ * yet — see its own doc comment), most-recently-touched first; the other three orders are
+ * unchanged from before this field existed. */
+export type ImportedContentSortOrder = 'newest' | 'oldest' | 'title' | 'updated';
 
 /**
  * Deterministic sort — ties (e.g. two items imported in the same millisecond, or identical
@@ -81,6 +97,7 @@ export function sortImportedContent(items: readonly ImportedContent[], order: Im
     let primary = 0;
     if (order === 'newest') primary = b.provenance.importedAt.localeCompare(a.provenance.importedAt);
     else if (order === 'oldest') primary = a.provenance.importedAt.localeCompare(b.provenance.importedAt);
+    else if (order === 'updated') primary = getContentUpdatedAt(b).localeCompare(getContentUpdatedAt(a));
     else primary = a.title.toLowerCase().localeCompare(b.title.toLowerCase());
     return primary !== 0 ? primary : a.id.localeCompare(b.id);
   });

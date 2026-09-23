@@ -34,6 +34,7 @@ function content(overrides: Partial<ImportedContent> = {}): ImportedContent {
     rawContent: overrides.rawContent ?? '',
     provenance: overrides.provenance ?? { importedAt: '2026-01-01T00:00:00.000Z', origin: 'import' },
     metadata: overrides.metadata,
+    updatedAt: overrides.updatedAt,
   };
 }
 
@@ -66,7 +67,7 @@ function relationship(overrides: Partial<ContentRelationship> = {}): ContentRela
 
 describe('repository registry — completeness', () => {
   it('registers exactly the required initial content types', () => {
-    const required = ['note', 'research_document', 'bibliography', 'question_bank', 'descriptive_questions', 'pyq', 'other'];
+    const required = ['note', 'document', 'study_material', 'research_document', 'bibliography', 'question_bank', 'descriptive_questions', 'pyq', 'other'];
     expect(REPOSITORY_CONTENT_TYPES.slice().sort()).toEqual(required.slice().sort());
   });
 
@@ -116,10 +117,22 @@ describe('repository registry — capability definitions', () => {
     expect(repositoryContentTypeSupports('note', 'linkable')).toBe(true);
   });
 
-  it('question_bank, descriptive_questions, pyq, and other are not linkable (no linking UI wired to them yet)', () => {
-    for (const type of ['question_bank', 'descriptive_questions', 'pyq', 'other'] as const) {
+  it('question_bank, descriptive_questions, pyq, other, document, and study_material are not linkable (no linking UI wired to them yet)', () => {
+    for (const type of ['question_bank', 'descriptive_questions', 'pyq', 'other', 'document', 'study_material'] as const) {
       expect(repositoryContentTypeSupports(type, 'linkable')).toBe(false);
     }
+  });
+
+  it('document and study_material are taggable and categorisable like every non-note type', () => {
+    for (const type of ['document', 'study_material'] as const) {
+      expect(repositoryContentTypeSupports(type, 'taggable')).toBe(true);
+      expect(repositoryContentTypeSupports(type, 'categorisable')).toBe(true);
+    }
+  });
+
+  it('document and study_material have real, distinct, non-empty labels', () => {
+    expect(getRepositoryContentTypeMeta('document').label).toBe('Document');
+    expect(getRepositoryContentTypeMeta('study_material').label).toBe('Study Material');
   });
 
   it('every content type is importable, searchable, editable, and deletable', () => {
@@ -155,8 +168,10 @@ describe('repository — imported-content discovery', () => {
       workspaceId: 'phd_research',
       origin: 'import',
       createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
       tags: ['fieldwork', 'chapter-1'],
       category: 'Literature Review',
+      description: undefined,
     });
   });
 
@@ -177,6 +192,19 @@ describe('repository — imported-content discovery', () => {
     expect(entry.tags).toEqual([]);
     expect(entry.category).toBeUndefined();
   });
+
+  it('projects metadata.description onto the entry', () => {
+    const item = content({ metadata: { description: 'A short summary' } });
+    expect(repositoryEntryFromImportedContent(item).description).toBe('A short summary');
+  });
+
+  it('projects updatedAt when present, falling back to provenance.importedAt when absent', () => {
+    const withUpdatedAt = content({ updatedAt: '2026-03-01T00:00:00.000Z', provenance: { importedAt: '2026-01-01T00:00:00.000Z' } });
+    expect(repositoryEntryFromImportedContent(withUpdatedAt).updatedAt).toBe('2026-03-01T00:00:00.000Z');
+
+    const legacyItem = content({ updatedAt: undefined, provenance: { importedAt: '2026-01-01T00:00:00.000Z' } });
+    expect(repositoryEntryFromImportedContent(legacyItem).updatedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
 });
 
 describe('repository — Notes discovery', () => {
@@ -190,8 +218,10 @@ describe('repository — Notes discovery', () => {
       workspaceId: 'phd_research',
       origin: 'created',
       createdAt: '2026-02-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
       tags: [],
       category: undefined,
+      description: undefined,
     });
   });
 
@@ -349,6 +379,15 @@ describe('repository — deterministic sorting', () => {
     const first = sortRepositoryEntries(entries).map((e) => e.entityId);
     const second = sortRepositoryEntries([...entries].reverse()).map((e) => e.entityId);
     expect(first).toEqual(second);
+  });
+
+  it('sorts by updatedAt (most recently touched first) when requested, mixing both collections', () => {
+    const entries = [
+      repositoryEntryFromImportedContent(content({ id: 'a', updatedAt: '2026-01-01T00:00:00.000Z' })),
+      repositoryEntryFromNote(note({ id: 'b', updatedAt: '2026-01-05T00:00:00.000Z' })),
+      repositoryEntryFromImportedContent(content({ id: 'c', updatedAt: '2026-01-03T00:00:00.000Z' })),
+    ];
+    expect(sortRepositoryEntries(entries, 'updated').map((e) => e.entityId)).toEqual(['b', 'c', 'a']);
   });
 });
 

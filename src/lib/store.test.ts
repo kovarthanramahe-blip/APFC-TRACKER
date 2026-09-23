@@ -691,6 +691,19 @@ describe('Import-First Content Repository — importedContent collection', () =>
       expect(item.workspaceId).toBe('apfc');
     });
 
+    it('updateImportedContent always stamps a fresh updatedAt, never trusting a caller-supplied value', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
+      const before = useAppStore.getState().importedContent[0].updatedAt;
+      useAppStore.getState().updateImportedContent('c1', { title: 'Renamed' });
+      const after = useAppStore.getState().importedContent[0].updatedAt;
+      expect(after).toBeDefined();
+      expect(typeof after).toBe('string');
+      expect(() => new Date(after!).toISOString()).not.toThrow();
+      // before is undefined here (contentFixture sets no updatedAt) — the important guarantee is
+      // that an update always produces a real, fresh timestamp, never leaves it unset/stale.
+      expect(after).not.toBe(before);
+    });
+
     it('updateImportedContent cannot change id or workspaceId (not part of its accepted update type)', () => {
       useAppStore.getState().addImportedContent(contentFixture({ id: 'c1' }));
       // @ts-expect-error — id/workspaceId are intentionally excluded from the update type
@@ -787,13 +800,40 @@ describe('Import-First Content Repository — importedContent collection', () =>
       const withContent = { importedContent: [contentFixture({ id: 'kept' })], activeWorkspaceId: 'apfc', inactiveWorkspaceOwnedData: {} };
       const once = migrateAppStorage(withContent, 3) as any;
       const twice = migrateAppStorage(once, 3) as any;
-      expect(twice.importedContent).toEqual([contentFixture({ id: 'kept' })]);
+      expect(twice.importedContent).toEqual(once.importedContent);
+      expect(twice.importedContent).toHaveLength(1);
+      expect(twice.importedContent[0].id).toBe('kept');
+      // Version 12's updatedAt backfill defaults to the item's own real importedAt, never a
+      // fabricated "now" — confirmed here rather than only relying on the once === twice check.
+      expect(twice.importedContent[0].updatedAt).toBe('2026-01-01T00:00:00.000Z');
     });
 
     it('a no-op migration (already current version) leaves importedContent completely untouched', () => {
       const current = { importedContent: [contentFixture({ id: 'kept' })] };
       const migrated = migrateAppStorage(current, APP_STORE_PERSIST_VERSION) as any;
       expect(migrated.importedContent).toEqual([contentFixture({ id: 'kept' })]);
+    });
+
+    it('backfills updatedAt (defaulting to the item\'s real provenance.importedAt) for a pre-Version-12 item', () => {
+      const oldBlob = { importedContent: [contentFixture({ id: 'legacy', provenance: { sourceFilename: 'x.md', originalFormat: 'markdown', importedAt: '2025-06-01T00:00:00.000Z' } })] };
+      const migrated = migrateAppStorage(oldBlob, 11) as any;
+      expect(migrated.importedContent[0].updatedAt).toBe('2025-06-01T00:00:00.000Z');
+    });
+
+    it('never overwrites an already-present updatedAt during migration', () => {
+      const withUpdatedAt = { importedContent: [{ ...contentFixture({ id: 'has-one' }), updatedAt: '2026-05-01T00:00:00.000Z' }] };
+      const migrated = migrateAppStorage(withUpdatedAt, 11) as any;
+      expect(migrated.importedContent[0].updatedAt).toBe('2026-05-01T00:00:00.000Z');
+    });
+
+    it('backfills updatedAt INSIDE every archived inactiveWorkspaceOwnedData snapshot too, not just the top-level active field', () => {
+      const oldBlob = {
+        inactiveWorkspaceOwnedData: {
+          upsc_cse: { importedContent: [contentFixture({ id: 'archived', provenance: { sourceFilename: 'y.md', originalFormat: 'markdown', importedAt: '2025-03-01T00:00:00.000Z' } })] },
+        },
+      };
+      const migrated = migrateAppStorage(oldBlob, 11) as any;
+      expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.importedContent[0].updatedAt).toBe('2025-03-01T00:00:00.000Z');
     });
   });
 
@@ -806,6 +846,15 @@ describe('Import-First Content Repository — importedContent collection', () =>
       importAllData(json);
       expect(useAppStore.getState().importedContent).toHaveLength(1);
       expect(useAppStore.getState().importedContent[0].id).toBe('c1');
+    });
+
+    it('importAllData backfills updatedAt for a legacy backup whose importedContent items predate that field', () => {
+      const legacyExport = JSON.stringify({
+        importedContent: [contentFixture({ id: 'legacy', provenance: { sourceFilename: 'z.md', originalFormat: 'markdown', importedAt: '2025-09-01T00:00:00.000Z' } })],
+      });
+      fullReset();
+      importAllData(legacyExport);
+      expect(useAppStore.getState().importedContent[0].updatedAt).toBe('2025-09-01T00:00:00.000Z');
     });
 
     it('exportAllData / importAllData round-trip importedContent archived under an inactive workspace too', () => {

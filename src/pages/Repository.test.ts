@@ -245,7 +245,9 @@ describe('Repository page — workspace isolation', () => {
 
 describe('Repository page — navigation to existing content surfaces', () => {
   it('a note entry navigates to /notes', () => {
-    expect(navigationTargetFor({ entityId: 'n1', entityType: 'note', contentType: 'note', title: 'T', workspaceId: 'phd_research', origin: 'created', createdAt: 'a', tags: [], category: undefined })).toEqual({
+    expect(
+      navigationTargetFor({ entityId: 'n1', entityType: 'note', contentType: 'note', title: 'T', workspaceId: 'phd_research', origin: 'created', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
+    ).toEqual({
       to: '/notes',
       label: 'Open in Notes',
     });
@@ -253,19 +255,19 @@ describe('Repository page — navigation to existing content surfaces', () => {
 
   it('a research_document entry navigates to /phd-research', () => {
     expect(
-      navigationTargetFor({ entityId: 'd1', entityType: 'imported_content', contentType: 'research_document', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'd1', entityType: 'imported_content', contentType: 'research_document', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
     ).toEqual({ to: '/phd-research', label: 'Open in PhD Research' });
   });
 
   it('a bibliography entry navigates to /phd-research/bibliography', () => {
     expect(
-      navigationTargetFor({ entityId: 'b1', entityType: 'imported_content', contentType: 'bibliography', title: 'T', workspaceId: 'phd_research', origin: 'manual', createdAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'b1', entityType: 'imported_content', contentType: 'bibliography', title: 'T', workspaceId: 'phd_research', origin: 'manual', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
     ).toEqual({ to: '/phd-research/bibliography', label: 'Open in Working Bibliography' });
   });
 
   it('a content type with no dedicated page yet (e.g. pyq) has no navigation target, never a fake one', () => {
     expect(
-      navigationTargetFor({ entityId: 'p1', entityType: 'imported_content', contentType: 'pyq', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'p1', entityType: 'imported_content', contentType: 'pyq', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
     ).toBeUndefined();
   });
 });

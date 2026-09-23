@@ -261,6 +261,7 @@ export default function RepositoryDetail() {
             </p>
           )}
         </div>
+        {entry.description && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{entry.description}</p>}
         {entry.tags.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1">
             {entry.tags.map((tag) => (
