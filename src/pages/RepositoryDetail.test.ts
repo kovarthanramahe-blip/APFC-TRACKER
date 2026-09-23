@@ -381,3 +381,169 @@ describe('Repository Detail — edits survive an export/import round-trip (page 
     expect(resolved!.entry.category).toBe('Sources');
   });
 });
+
+// Manual Related-Content Links — pages/RepositoryDetail.tsx's own "Add link"/remove UI, built
+// entirely on the EXISTING addContentRelationship/deleteContentRelationship store actions and
+// lib/contentRelationships.ts's createRelationship (self-link/duplicate/invalid-endpoint rules —
+// exhaustively unit-tested in contentRelationships.test.ts already). These tests exercise exactly
+// the calls the page itself makes.
+
+describe('Repository Detail — manual link: add', () => {
+  beforeEach(fullReset);
+
+  it('addContentRelationship (the exact call the "Add link" form makes) creates a relationship visible via getRelatedContent from both ends', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+
+    const result = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    expect(result.status).toBe('ok');
+
+    const state = useAppStore.getState();
+    expect(getRelatedContent(state.contentRelationships, doc.id, 'imported_content').map((r) => r.relatedId)).toEqual([bib.id]);
+    expect(getRelatedContent(state.contentRelationships, bib.id, 'imported_content').map((r) => r.relatedId)).toEqual([doc.id]);
+  });
+
+  it('a link can connect an ImportedContent item to a Note, resolvable from the Note\'s own side too', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'related_to' });
+
+    const related = getRelatedContent(useAppStore.getState().contentRelationships, 'n1', 'note');
+    expect(related).toHaveLength(1);
+    expect(related[0].relatedId).toBe(doc.id);
+    expect(RELATIONSHIP_TYPE_LABELS[related[0].relationship.type]).toBe('Related to');
+  });
+});
+
+describe('Repository Detail — manual link: remove', () => {
+  beforeEach(fullReset);
+
+  it('deleteContentRelationship (the exact call the remove "X" button makes) removes exactly that link, leaving others intact', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    const other = confirmImportedContent(preview({ title: 'Other' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+    useAppStore.getState().addImportedContent(other);
+    const r1 = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: other.id, type: 'imported_content' }, type: 'related_to' });
+    expect(r1.status).toBe('ok');
+
+    useAppStore.getState().deleteContentRelationship((r1 as Extract<typeof r1, { status: 'ok' }>).relationship.id);
+
+    const related = getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content');
+    expect(related.map((r) => r.relatedId)).toEqual([other.id]);
+  });
+});
+
+describe('Repository Detail — manual link: self-links and duplicates are rejected, never created', () => {
+  beforeEach(fullReset);
+
+  it('linking an item to itself is rejected with self_link, and nothing is added', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const result = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'related_to' });
+    expect(result).toEqual({ status: 'error', reason: 'self_link', message: expect.any(String) });
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
+  });
+
+  it('creating the exact same (source, target, type) link twice is rejected the second time as a duplicate', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+
+    const first = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    expect(first.status).toBe('ok');
+
+    const second = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    expect(second).toEqual({ status: 'error', reason: 'duplicate', message: expect.any(String) });
+    expect(useAppStore.getState().contentRelationships).toHaveLength(1);
+  });
+
+  it('the SAME pair with a DIFFERENT relationship type is not a duplicate (allowed to coexist)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    const second = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'related_to' });
+    expect(second.status).toBe('ok');
+    expect(useAppStore.getState().contentRelationships).toHaveLength(2);
+  });
+});
+
+describe('Repository Detail — manual link: workspace isolation', () => {
+  beforeEach(fullReset);
+
+  it('a link can only be created between two items that both belong to the CURRENTLY ACTIVE workspace — a cross-workspace id is rejected as invalid', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const phdDoc = confirmImportedContent(preview({ title: 'PhD Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(phdDoc);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const apfcDoc = confirmImportedContent(preview({ title: 'APFC Doc' }), { workspaceId: 'apfc', contentType: 'document' });
+    useAppStore.getState().addImportedContent(apfcDoc);
+
+    // Still in 'apfc': phdDoc.id is not a member of this workspace's own importedContent, so the
+    // pool it's validated against here never contains it — exactly like a real cross-workspace
+    // link attempt from the UI would be rejected.
+    const result = useAppStore.getState().addContentRelationship({ source: { id: apfcDoc.id, type: 'imported_content' }, target: { id: phdDoc.id, type: 'imported_content' }, type: 'related_to' });
+    expect(result).toEqual({ status: 'error', reason: 'invalid_target', message: expect.any(String) });
+  });
+
+  it('a link created in one workspace never appears via getRelatedContent for an item in another workspace, even if queried while that workspace is active', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    // The apfc workspace's own contentRelationships/importedContent never contained the phd_research
+    // link or items — switching workspaces swaps the whole array (see lib/store.ts), so this is
+    // never a member of the active state at all here.
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content')).toHaveLength(1);
+  });
+});
+
+describe('Repository Detail — manual link: persistence through export/import (page reload)', () => {
+  beforeEach(fullReset);
+
+  it('an added link survives export -> reset -> import, and a removed link stays removed', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    const other = confirmImportedContent(preview({ title: 'Other' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+    useAppStore.getState().addImportedContent(other);
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    const removed = useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: other.id, type: 'imported_content' }, type: 'related_to' });
+    useAppStore.getState().deleteContentRelationship((removed as Extract<typeof removed, { status: 'ok' }>).relationship.id);
+
+    const json = exportAllData();
+    fullReset();
+    importAllData(json);
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+
+    const related = getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content');
+    expect(related.map((r) => r.relatedId)).toEqual([bib.id]); // the removed link never comes back
+  });
+});

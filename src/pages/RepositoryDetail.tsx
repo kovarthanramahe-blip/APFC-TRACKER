@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Markdown from 'markdown-to-jsx';
-import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, Plus, X } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -11,10 +11,19 @@ import {
   getRepositoryContentTypeMeta,
   repositoryEntryFromImportedContent,
   repositoryEntryFromNote,
+  listRepositoryEntries,
+  repositoryContentTypeSupports,
   type RepositoryEntry,
   type RepositoryContentType,
 } from '../lib/repository';
-import { getRelatedContent, RELATIONSHIP_TYPE_LABELS, type ContentRelationship, type RelationshipEntityType } from '../lib/contentRelationships';
+import {
+  getRelatedContent,
+  RELATIONSHIP_TYPE_LABELS,
+  RELATIONSHIP_TYPES,
+  type ContentRelationship,
+  type RelationshipEntityType,
+  type RelationshipType,
+} from '../lib/contentRelationships';
 import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry, EditMetadataModal, DeleteConfirmModal } from './Repository';
 import type { ImportedContentMetadata } from '../lib/contentImport';
@@ -23,8 +32,10 @@ import type { ImportedContentMetadata } from '../lib/contentImport';
 // reached from pages/Repository.tsx's own "View" action on each result card. It reuses that same
 // page's Edit/Delete modals and capability checks (canEditEntry/canDeleteEntry,
 // EditMetadataModal, DeleteConfirmModal — imported from there rather than duplicated), the
-// existing lib/contentRelationships.ts relationship utilities for the Related Research section,
-// and lib/repository.ts's own entry projection — never a second storage/relationship mechanism.
+// existing lib/contentRelationships.ts relationship utilities for the Related Content section
+// (including adding/removing a link — addContentRelationship/deleteContentRelationship, the same
+// store actions every other linking flow in this app already calls), and lib/repository.ts's own
+// entry projection — never a second storage/relationship mechanism.
 //
 // The route is /repository/:entityType/:id — BOTH segments are required. Notes and ImportedContent
 // are two independently-generated id spaces that are never guaranteed distinct from one another
@@ -120,9 +131,15 @@ export default function RepositoryDetail() {
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
   const deleteNote = useAppStore((s) => s.deleteNote);
+  const addContentRelationship = useAppStore((s) => s.addContentRelationship);
+  const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showAddLink, setShowAddLink] = useState(false);
+  const [linkTarget, setLinkTarget] = useState('');
+  const [linkType, setLinkType] = useState<RelationshipType>('related_to');
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const entityType = isRelationshipEntityType(params.entityType) ? params.entityType : undefined;
   const id = params.id;
@@ -150,6 +167,31 @@ export default function RepositoryDetail() {
           })
           .filter((x): x is { relationship: ContentRelationship; entry: RepositoryEntry } => !!x)
       : [];
+
+  // Candidates for a NEW link: every other item in the same (active) workspace, excluding this
+  // entity itself (self-links are never offered, let alone allowed) and anything already linked
+  // in either direction (keeps the picker simple and avoids offering a choice createRelationship
+  // would just reject as a duplicate). listRepositoryEntries is already workspace-scoped exactly
+  // like every other Repository page's use of it (importedContent/notes only ever hold the active
+  // workspace's own data).
+  const relatedIds = new Set(relatedEntries.map(({ entry: r }) => `${r.entityType}:${r.entityId}`));
+  const linkCandidates =
+    entry && entityType && id
+      ? listRepositoryEntries(importedContent, notes).filter((candidate) => !(candidate.entityType === entityType && candidate.entityId === id) && !relatedIds.has(`${candidate.entityType}:${candidate.entityId}`))
+      : [];
+
+  function handleAddLink() {
+    if (!entry || !entityType || !id || !linkTarget) return;
+    const [targetType, targetId] = linkTarget.split(':') as [RelationshipEntityType, string];
+    const result = addContentRelationship({ source: { id, type: entityType }, target: { id: targetId, type: targetType }, type: linkType });
+    if (result.status === 'error') {
+      setLinkError(result.message);
+      return;
+    }
+    setLinkError(null);
+    setLinkTarget('');
+    setShowAddLink(false);
+  }
 
   function handleEditRequest() {
     if (!entry) return;
@@ -284,31 +326,114 @@ export default function RepositoryDetail() {
       </Card>
 
       <Card className="p-4">
-        <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          <Link2 className="h-3.5 w-3.5" /> Related Research
-        </p>
+        <div className="mb-3 flex items-center justify-between">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <Link2 className="h-3.5 w-3.5" /> Related Content
+          </p>
+          {repositoryContentTypeSupports(entry.contentType, 'linkable') && !showAddLink && (
+            <Button variant="secondary" size="sm" onClick={() => setShowAddLink(true)}>
+              <Plus className="h-3.5 w-3.5" /> Add link
+            </Button>
+          )}
+        </div>
+
+        {showAddLink && (
+          <div className="mb-3 space-y-2 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+            {linkCandidates.length === 0 ? (
+              <p className="text-sm text-slate-400">Nothing else in this workspace to link to yet.</p>
+            ) : (
+              <>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <label htmlFor="link-target" className="sr-only">
+                    Item to link to
+                  </label>
+                  <select
+                    id="link-target"
+                    value={linkTarget}
+                    onChange={(e) => setLinkTarget(e.target.value)}
+                    className="flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  >
+                    <option value="">Choose an item…</option>
+                    {linkCandidates.map((c) => (
+                      <option key={`${c.entityType}:${c.entityId}`} value={`${c.entityType}:${c.entityId}`}>
+                        {c.title || 'Untitled'} ({getRepositoryContentTypeMeta(c.contentType).label})
+                      </option>
+                    ))}
+                  </select>
+                  <label htmlFor="link-type" className="sr-only">
+                    Relationship type
+                  </label>
+                  <select
+                    id="link-type"
+                    value={linkType}
+                    onChange={(e) => setLinkType(e.target.value as RelationshipType)}
+                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  >
+                    {RELATIONSHIP_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {RELATIONSHIP_TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {linkError && <p className="text-xs text-rose-600 dark:text-rose-400">{linkError}</p>}
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setShowAddLink(false);
+                      setLinkError(null);
+                      setLinkTarget('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleAddLink} disabled={!linkTarget}>
+                    Add link
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {relatedEntries.length === 0 ? (
-          <p className="text-sm text-slate-400">No linked research yet.</p>
+          <p className="text-sm text-slate-400">No linked content yet.</p>
         ) : (
           <div className="space-y-2">
             {relatedEntries.map(({ relationship, entry: relatedEntry }) => {
               const relatedMeta = getRepositoryContentTypeMeta(relatedEntry.contentType);
               return (
-                <Link
+                <div
                   key={relationship.id}
-                  to={repositoryDetailPathFor(relatedEntry.entityType, relatedEntry.entityId)}
-                  aria-label={`Open ${relatedEntry.title || 'Untitled'} (${relatedMeta.label})`}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60"
                 >
-                  <div className="min-w-0">
+                  <Link
+                    to={repositoryDetailPathFor(relatedEntry.entityType, relatedEntry.entityId)}
+                    aria-label={`Open ${relatedEntry.title || 'Untitled'} (${relatedMeta.label})`}
+                    className="min-w-0 flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 rounded"
+                  >
                     <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{relatedEntry.title || 'Untitled'}</p>
                     <div className="mt-1 flex items-center gap-1.5">
                       <Badge tone="neutral">{relatedMeta.label}</Badge>
                       <Badge tone="brand">{RELATIONSHIP_TYPE_LABELS[relationship.type]}</Badge>
                     </div>
+                  </Link>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Link to={repositoryDetailPathFor(relatedEntry.entityType, relatedEntry.entityId)} aria-label={`Open ${relatedEntry.title || 'Untitled'}`}>
+                      <ArrowRight className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600" />
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => deleteContentRelationship(relationship.id)}
+                      aria-label={`Remove link to ${relatedEntry.title || 'Untitled'}`}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-slate-600" />
-                </Link>
+                </div>
               );
             })}
           </div>
