@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { MockTestAttempt, PomodoroSession, PYQAttempt, StudyLogEntry } from './types';
 import { getAllTopicsCount } from '../data/syllabus';
 import { useAppStore } from './store';
+import { getLocalDateString } from './utils';
 
 // Everything here is derived (computed) from data the app already tracks —
 // completed topics, mock test attempts, study log, starred questions, PYQ
@@ -117,7 +118,10 @@ export function computeStreaks(studyLog: Record<string, StudyLogEntry>): StreakI
   let current = 0;
   const cursor = new Date();
   for (;;) {
-    const key = cursor.toISOString().slice(0, 10);
+    // The user's local calendar date, not UTC — studyLog is keyed by getLocalDateString()
+    // everywhere it's written (see lib/utils.ts's own doc comment); using UTC here could look up
+    // "today" under the wrong key in a positive-offset timezone (e.g. IST) during the early hours.
+    const key = getLocalDateString(cursor);
     if (isActiveDay(studyLog[key])) {
       current += 1;
       cursor.setDate(cursor.getDate() - 1);

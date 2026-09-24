@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Play, Pause, RotateCcw, SkipForward, Coffee, BrainCircuit } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
-import { cx, uuid, formatMinutes } from '../lib/utils';
+import { cx, uuid, formatMinutes, getLocalDateString } from '../lib/utils';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import type { PomodoroSession, SubjectColorKey } from '../lib/types';
 
@@ -76,7 +76,10 @@ export default function Pomodoro() {
       };
       addSession(session);
       if (mode === 'focus') {
-        bumpFocusMinutes(new Date().toISOString().slice(0, 10), elapsedMinutes);
+        // The user's local calendar date, not UTC — see lib/utils.ts's getLocalDateString for why
+        // (a positive-offset timezone like IST can already be "tomorrow" locally while UTC is
+        // still "today", which previously mis-keyed focus minutes into the wrong studyLog date).
+        bumpFocusMinutes(getLocalDateString(), elapsedMinutes);
       }
     }
 
@@ -107,8 +110,10 @@ export default function Pomodoro() {
   const mins = Math.floor(secondsLeft / 60);
   const secs = secondsLeft % 60;
 
+  // Same local-date comparison as the bumpFocusMinutes write above — completedAt is a full ISO
+  // timestamp, so its calendar date must be read via the same local-date convention, not UTC.
   const todayFocus = sessions
-    .filter((s) => s.mode === 'focus' && s.completedAt.slice(0, 10) === new Date().toISOString().slice(0, 10))
+    .filter((s) => s.mode === 'focus' && getLocalDateString(new Date(s.completedAt)) === getLocalDateString())
     .reduce((sum, s) => sum + s.durationMinutes, 0);
 
   return (
