@@ -14,9 +14,10 @@ import { generateTodaysStudyItems, type UpscCseTodaysStudyItemKind } from '../li
 import { createUpscCseStudyTask, isValidStudyTaskTitle, tasksForDate, countStudyTasksByStatus } from '../lib/upscCseStudyTask';
 import { examTargetsForWorkspace } from '../lib/examTarget';
 import { ExamTargetCard } from '../components/ui/ExamTargetCard';
-import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 
 // UPSC CSE Study Dashboard — connects the syllabus (lib/upscCseSyllabusCoverage.ts), PYQ practice
 // (data/pyqUpscCsePrelims.ts, lib/upscCsePrelimsPyqPerformance.ts), revision queue
@@ -108,6 +109,10 @@ export default function UpscCseDashboard() {
   );
   const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
 
+  // Study Activity Trend (Phase 4 Step 4) — reuses buildDailyActivityTrend over the SAME
+  // studyLog/today used above; no second date/activity calculation.
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, today, 7), [studyLog, today]);
+
   const todaysStudyItems = useMemo(
     () =>
       generateTodaysStudyItems({
@@ -174,6 +179,8 @@ export default function UpscCseDashboard() {
       </div>
 
       <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} progressLabel="Syllabus coverage" className="mt-6" />
+
+      <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mt-6" />
 
       <Card className="mt-6 p-5 sm:p-6">
         <div className="mb-4 flex items-center gap-2">

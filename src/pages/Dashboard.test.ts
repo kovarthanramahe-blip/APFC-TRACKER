@@ -8,7 +8,7 @@ import { useAppStore } from '../lib/store';
 import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import { getAllTopicsCount } from '../data/syllabus';
-import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import type { StudyLogEntry } from '../lib/types';
 
@@ -153,5 +153,45 @@ describe('APFC Dashboard — Study Progress Insights: completion-target workspac
 
     useAppStore.getState().setActiveWorkspaceId('apfc');
     expect(apfcCompletionTarget(useAppStore.getState().completedTopics)).toEqual(apfcTargetBefore);
+  });
+});
+
+// Study Activity Trend integration (Phase 4 Step 4) — exercises the exact computation
+// pages/Dashboard.tsx performs: buildDailyActivityTrend(studyLog, todayKey, 7) over THIS
+// workspace's own studyLog.
+describe('APFC Dashboard — Study Activity Trend integration', () => {
+  it('dashboard integration: 7 entries, real focus minutes on the matching day, zero elsewhere', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-08': entry('2026-01-08', { focusMinutes: 40, topicsCompleted: 1 }) },
+    });
+    const trend = buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7);
+    expect(trend).toHaveLength(7);
+    expect(trend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(40);
+    expect(trend.filter((d) => d.date !== '2026-01-08').every((d) => d.focusMinutes === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('empty study log: every day in the trend is safely zeroed, never throws', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(() => buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7)).not.toThrow();
+    const trend = buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7);
+    expect(trend.every((d) => d.focusMinutes === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('accent resolution: APFC\'s trend uses the green accent, same as the rest of the dashboard', () => {
+    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-green-600');
+  });
+
+  it('workspace isolation: a trend built from APFC studyLog never reflects activity logged under another workspace', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 40);
+    const apfcStudyLog = useAppStore.getState().studyLog;
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 999);
+    const upscStudyLog = useAppStore.getState().studyLog;
+
+    const apfcTrend = buildDailyActivityTrend(apfcStudyLog, '2026-01-10', 7);
+    const upscTrend = buildDailyActivityTrend(upscStudyLog, '2026-01-10', 7);
+    expect(apfcTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(40);
+    expect(upscTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(999);
   });
 });

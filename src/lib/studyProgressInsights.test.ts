@@ -10,6 +10,7 @@ import {
   computePeriodComparison,
   computeProgressPercent,
   computeStudyProgressInsights,
+  buildDailyActivityTrend,
 } from './studyProgressInsights';
 
 // Study Progress Insights Foundation — this module is a pure calculation layer over the SAME
@@ -268,5 +269,60 @@ describe('computeStudyProgressInsights — streak reuses lib/gamification.ts\'s 
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('buildDailyActivityTrend — Study Activity Trend (Phase 4 Step 4)', () => {
+  it('7-day range generation: always returns exactly `days` entries, oldest first, ending on referenceDate', () => {
+    const trend = buildDailyActivityTrend({}, '2026-01-10', 7);
+    expect(trend).toHaveLength(7);
+    expect(trend.map((d) => d.date)).toEqual(['2026-01-04', '2026-01-05', '2026-01-06', '2026-01-07', '2026-01-08', '2026-01-09', '2026-01-10']);
+  });
+
+  it('zero-activity days appear as explicit zeroed entries, never omitted', () => {
+    const studyLog = log(entry('2026-01-10', { focusMinutes: 30 }));
+    const trend = buildDailyActivityTrend(studyLog, '2026-01-10', 7);
+    const zeroDays = trend.filter((d) => d.date !== '2026-01-10');
+    expect(zeroDays).toHaveLength(6);
+    for (const d of zeroDays) {
+      expect(d).toEqual({ date: d.date, focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0, isActive: false });
+    }
+  });
+
+  it('activity values: focusMinutes/topicsCompleted/testsCompleted are read verbatim from the matching studyLog entry', () => {
+    const studyLog = log(entry('2026-01-08', { focusMinutes: 45, topicsCompleted: 2, testsCompleted: 1 }));
+    const trend = buildDailyActivityTrend(studyLog, '2026-01-10', 7);
+    const day = trend.find((d) => d.date === '2026-01-08')!;
+    expect(day.focusMinutes).toBe(45);
+    expect(day.topicsCompleted).toBe(2);
+    expect(day.testsCompleted).toBe(1);
+    expect(day.isActive).toBe(true);
+  });
+
+  it('a studyLog entry present but with all-zero fields is NOT active, same definition as sumStudyActivity/computeStreaks', () => {
+    const studyLog = log(entry('2026-01-10', { focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0 }));
+    const trend = buildDailyActivityTrend(studyLog, '2026-01-10', 7);
+    expect(trend.find((d) => d.date === '2026-01-10')!.isActive).toBe(false);
+  });
+
+  it('boundary/date handling: a 7-day window crossing a year boundary is generated correctly', () => {
+    const trend = buildDailyActivityTrend({}, '2026-01-02', 7);
+    expect(trend.map((d) => d.date)).toEqual(['2025-12-27', '2025-12-28', '2025-12-29', '2025-12-30', '2025-12-31', '2026-01-01', '2026-01-02']);
+  });
+
+  it('boundary/date handling: a leap-year February window is generated correctly (2028 is a leap year)', () => {
+    const trend = buildDailyActivityTrend({}, '2028-03-02', 7);
+    expect(trend.map((d) => d.date)).toEqual(['2028-02-25', '2028-02-26', '2028-02-27', '2028-02-28', '2028-02-29', '2028-03-01', '2028-03-02']);
+  });
+
+  it('empty study log: every day is zeroed, never throws', () => {
+    expect(() => buildDailyActivityTrend({}, '2026-01-10', 7)).not.toThrow();
+    const trend = buildDailyActivityTrend({}, '2026-01-10', 7);
+    expect(trend.every((d) => d.focusMinutes === 0 && d.topicsCompleted === 0 && d.testsCompleted === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('a different `days` length still produces exactly that many entries', () => {
+    expect(buildDailyActivityTrend({}, '2026-01-10', 14)).toHaveLength(14);
+    expect(buildDailyActivityTrend({}, '2026-01-10', 1)).toEqual([{ date: '2026-01-10', focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0, isActive: false }]);
   });
 });

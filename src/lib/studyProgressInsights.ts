@@ -10,8 +10,8 @@ import { totalFocusMinutes, computeStreaks, type StreakInfo } from './gamificati
 // completion target — see CompletionTarget below) and derives numbers from it. Streaks are NOT
 // recomputed here — computeStreaks (lib/gamification.ts) is already the app's one canonical streak
 // implementation, reused as-is. This module adds exactly what doesn't already exist elsewhere:
-// date-range activity totals (current/previous period) and a generic, target-agnostic completion
-// percentage.
+// date-range activity totals (current/previous period), a day-by-day activity trend, and a
+// generic, target-agnostic completion percentage.
 //
 // Deliberately NOT included (out of scope for this milestone — see the task's own "do not wire a
 // new dashboard yet"): no UI, no store wiring, no per-workspace target definitions (e.g. what the
@@ -75,6 +75,42 @@ export function sumAllStudyActivity(studyLog: Record<string, StudyLogEntry>): St
     testsCompleted: entries.reduce((sum, e) => sum + e.testsCompleted, 0),
     activeDays: entries.filter(isActiveDay).length,
   };
+}
+
+export interface DailyActivity {
+  /** yyyy-mm-dd (local calendar date — see lib/utils.ts's getLocalDateString). */
+  date: string;
+  focusMinutes: number;
+  topicsCompleted: number;
+  testsCompleted: number;
+  /** Same "active day" definition computeStreaks/sumStudyActivity already use — a day with none
+   * of the three fields above > 0 is NOT active, distinct from a day with no studyLog entry at
+   * all (both render as zeroed here; see buildDailyActivityTrend's own doc comment). */
+  isActive: boolean;
+}
+
+/**
+ * A fixed-length, day-by-day activity trend ending on (and including) `referenceDate` — the one
+ * piece date-range logic in this module didn't already have a per-day breakdown for (see
+ * sumStudyActivity for the AGGREGATE over a range). A calendar date with no studyLog entry is
+ * never omitted or backfilled with fabricated activity — it appears as an explicit zeroed
+ * DailyActivity entry (isActive: false), exactly the "zero-activity days must appear as zero, not
+ * disappear" requirement this was built for. Always returns exactly `days` entries, oldest first.
+ */
+export function buildDailyActivityTrend(studyLog: Record<string, StudyLogEntry>, referenceDate: string, days: number): DailyActivity[] {
+  const trend: DailyActivity[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const date = addDaysToDateString(referenceDate, -i);
+    const entry = studyLog[date];
+    trend.push({
+      date,
+      focusMinutes: entry?.focusMinutes ?? 0,
+      topicsCompleted: entry?.topicsCompleted ?? 0,
+      testsCompleted: entry?.testsCompleted ?? 0,
+      isActive: entry ? isActiveDay(entry) : false,
+    });
+  }
+  return trend;
 }
 
 export interface PeriodWindow {

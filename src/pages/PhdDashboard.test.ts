@@ -8,7 +8,7 @@ import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import type { PhdTopicArea } from '../lib/phdTopicArea';
 import type { MicroTarget } from '../lib/microTarget';
-import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 
 function fullReset() {
@@ -295,5 +295,45 @@ describe('PhD Research Dashboard — Study Progress Insights: completion-target 
     // of what either other workspace has accumulated.
     const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog });
     expect(insights.progressPercent).toBeNull();
+  });
+});
+
+// Study Activity Trend integration (Phase 4 Step 4) — exercises the exact computation
+// pages/PhdDashboard.tsx performs: buildDailyActivityTrend(studyLog, today, 7).
+describe('PhD Research Dashboard — Study Activity Trend integration', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('phd_research'));
+
+  it('dashboard integration: 7 entries, real focus minutes on the matching day, zero elsewhere', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-07': { date: '2026-01-07', focusMinutes: 50, topicsCompleted: 0, testsCompleted: 0 } },
+    });
+    const trend = buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7);
+    expect(trend).toHaveLength(7);
+    expect(trend.find((d) => d.date === '2026-01-07')?.focusMinutes).toBe(50);
+    expect(trend.filter((d) => d.date !== '2026-01-07').every((d) => d.focusMinutes === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('empty study log: every day in the trend is safely zeroed, never throws', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(() => buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7)).not.toThrow();
+    expect(buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7).every((d) => d.focusMinutes === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('accent resolution: PhD Research\'s trend uses the violet accent', () => {
+    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-violet-600');
+  });
+
+  it('workspace isolation: a trend built from PhD Research studyLog never reflects activity logged under either other workspace', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 15);
+    const phdStudyLog = useAppStore.getState().studyLog;
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 111);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 222);
+
+    const phdTrend = buildDailyActivityTrend(phdStudyLog, '2026-01-10', 7);
+    expect(phdTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(15);
   });
 });

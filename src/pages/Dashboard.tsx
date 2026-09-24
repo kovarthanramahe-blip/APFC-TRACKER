@@ -38,9 +38,10 @@ import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateStrin
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
 import { examTargetsForWorkspace } from '../lib/examTarget';
 import { ExamTargetCard } from '../components/ui/ExamTargetCard';
-import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 
 export default function Dashboard() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -81,6 +82,10 @@ export default function Dashboard() {
     [studyLog, doneTopics, totalTopics],
   );
   const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+
+  // Study Activity Trend (Phase 4 Step 4) — reuses buildDailyActivityTrend (lib/studyProgressInsights.ts)
+  // over the SAME studyLog/referenceDate used above; no second date/activity calculation.
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, todayKey, 7), [studyLog, todayKey]);
 
   const tookTestToday = attempts.some((a) => a.submittedAt.slice(0, 10) === todayKey);
   const encouragement = getEncouragementMessage({
@@ -340,6 +345,11 @@ export default function Dashboard() {
       {/* Study Progress Insights (Phase 4 Step 2) */}
       <motion.div {...fadeUp}>
         <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} progressLabel="Syllabus" />
+      </motion.div>
+
+      {/* Study Activity Trend (Phase 4 Step 4) */}
+      <motion.div {...fadeUp}>
+        <StudyActivityTrend days={activityTrend} accent={workspaceAccent} />
       </motion.div>
 
       {/* Today's Study (Stage 7) */}
