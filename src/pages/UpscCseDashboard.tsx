@@ -15,6 +15,7 @@ import { createUpscCseStudyTask, isValidStudyTaskTitle, tasksForDate, countStudy
 import { examTargetsForWorkspace } from '../lib/examTarget';
 import { ExamTargetCard } from '../components/ui/ExamTargetCard';
 import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { getEncouragementMessage } from '../lib/gamification';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
 import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
@@ -73,6 +74,7 @@ export default function UpscCseDashboard() {
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const revisionQueue = useAppStore((s) => s.revisionQueue);
   const studyLog = useAppStore((s) => s.studyLog);
+  const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
   const studyTasks = useAppStore((s) => s.upscCseStudyTasks);
   const addStudyTask = useAppStore((s) => s.addUpscCseStudyTask);
   const setStudyTaskStatus = useAppStore((s) => s.setUpscCseStudyTaskStatus);
@@ -112,6 +114,23 @@ export default function UpscCseDashboard() {
   // Study Activity Trend (Phase 4 Step 4) — reuses buildDailyActivityTrend over the SAME
   // studyLog/today used above; no second date/activity calculation.
   const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, today, 7), [studyLog, today]);
+
+  // Context-aware encouragement (Phase 4 Step 6) — reuses the EXISTING getEncouragementMessage
+  // (lib/gamification.ts, already shown on the APFC Dashboard) with this workspace's own data:
+  // today's focus minutes from studyLog, the global dailyGoalMinutes setting (not workspace-owned),
+  // the SAME streak already computed above (studyProgressInsights.streak, never a second streak
+  // calculation), the SAME overallCoverage.weightedPct already used as the completion target above
+  // (never a second UPSC completion number), and whether a UPSC Prelims PYQ test was submitted
+  // today.
+  const todayMinutes = studyLog[today]?.focusMinutes ?? 0;
+  const tookTestToday = attempts.some((a) => a.submittedAt.slice(0, 10) === today);
+  const encouragement = getEncouragementMessage({
+    todayMinutes,
+    dailyGoalMinutes,
+    streakCurrent: studyProgressInsights.streak.current,
+    syllabusPct: snapshot.overallCoverage.weightedPct,
+    tookTestToday,
+  });
 
   const todaysStudyItems = useMemo(
     () =>
@@ -179,6 +198,8 @@ export default function UpscCseDashboard() {
       </div>
 
       <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} progressLabel="Syllabus coverage" className="mt-6" />
+
+      <p className={cx('mt-3 text-sm font-medium', workspaceAccent.text)}>{encouragement}</p>
 
       <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mt-6" />
 

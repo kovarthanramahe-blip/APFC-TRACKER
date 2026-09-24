@@ -11,6 +11,8 @@ import type { UpscCseStudyTask } from '../lib/upscCseStudyTask';
 import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { computeCoverageSummary } from '../lib/upscCseSyllabusCoverage';
+import { getEncouragementMessage } from '../lib/gamification';
+import type { UpscCsePrelimsPyqAttempt } from '../lib/upscCsePrelimsPyqAttempt';
 
 function fullReset() {
   useAppStore.setState({
@@ -300,5 +302,111 @@ describe('UPSC CSE Study Dashboard — Study Activity Trend integration', () => 
     const apfcTrend = buildDailyActivityTrend(apfcStudyLog, '2026-01-10', 7);
     expect(upscTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(25);
     expect(apfcTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(777);
+  });
+});
+
+function attemptFixture(id: string, submittedAt: string): UpscCsePrelimsPyqAttempt {
+  return {
+    id,
+    submittedAt,
+    year: 'all',
+    paper: 'all',
+    subject: 'all',
+    microsyllabusId: 'all',
+    questionIds: [],
+    answers: {},
+    correctCount: 0,
+    wrongCount: 0,
+    unansweredCount: 0,
+    accuracy: 0,
+  };
+}
+
+// Context-aware encouragement integration (Phase 4 Step 6) — exercises the exact inputs
+// pages/UpscCseDashboard.tsx now feeds into the EXISTING getEncouragementMessage (lib/gamification.ts,
+// already shown on the APFC Dashboard): today's focus minutes from studyLog, the global
+// dailyGoalMinutes setting, the SAME streak already computed by Study Progress Insights above, the
+// SAME overallCoverage.weightedPct already used as the completion target above, and whether a UPSC
+// Prelims PYQ test was submitted today.
+describe('UPSC CSE Study Dashboard — Context-aware encouragement integration (Phase 4 Step 6)', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('upsc_cse'));
+
+  it('normal activity: partial progress toward the daily goal reports the exact remaining minutes', () => {
+    useAppStore.setState({
+      dailyGoalMinutes: 60,
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 40, topicsCompleted: 0, testsCompleted: 0 } },
+    });
+    const state = useAppStore.getState();
+    const todayMinutes = state.studyLog['2026-01-08']?.focusMinutes ?? 0;
+    const streak = computeStudyProgressInsights({ studyLog: state.studyLog, referenceDate: '2026-01-08' }).streak.current;
+    const overallCoverage = computeCoverageSummary(['m1', 'm2'], { m1: 'strong', m2: 'not_started' });
+    const encouragement = getEncouragementMessage({
+      todayMinutes,
+      dailyGoalMinutes: state.dailyGoalMinutes,
+      streakCurrent: streak,
+      syllabusPct: overallCoverage.weightedPct,
+      tookTestToday: false,
+    });
+    expect(encouragement).toBe("You're 20 minutes away from today's target.");
+  });
+
+  it('a submitted UPSC Prelims PYQ test today takes priority over every other signal', () => {
+    useAppStore.setState({
+      upscCsePrelimsPyqAttempts: [attemptFixture('a1', '2026-01-08T10:00:00.000Z')],
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 5, topicsCompleted: 0, testsCompleted: 1 } },
+    });
+    const attempts = useAppStore.getState().upscCsePrelimsPyqAttempts;
+    const tookTestToday = attempts.some((a) => a.submittedAt.slice(0, 10) === '2026-01-08');
+    expect(tookTestToday).toBe(true);
+    const encouragement = getEncouragementMessage({
+      todayMinutes: 5,
+      dailyGoalMinutes: 60,
+      streakCurrent: 3,
+      syllabusPct: 90,
+      tookTestToday,
+    });
+    expect(encouragement).toBe('Test completed. Now review the mistakes.');
+  });
+
+  it('uses this workspace\'s own overallCoverage.weightedPct as syllabusPct, never a second UPSC completion number', () => {
+    const overallCoverage = computeCoverageSummary(['m1', 'm2'], { m1: 'strong', m2: 'revised' });
+    expect(overallCoverage.weightedPct).toBeGreaterThanOrEqual(50);
+    expect(overallCoverage.weightedPct).toBeLessThan(100);
+    const encouragement = getEncouragementMessage({
+      todayMinutes: 0,
+      dailyGoalMinutes: 60,
+      streakCurrent: 0,
+      syllabusPct: overallCoverage.weightedPct,
+      tookTestToday: false,
+    });
+    expect(encouragement).toBe('Halfway is not the finish line. Keep moving.');
+  });
+
+  it('empty/zero-activity case: no minutes, no streak, no coverage, no test — the first-session message', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(useAppStore.getState().upscCsePrelimsPyqAttempts).toEqual([]);
+    const overallCoverage = computeCoverageSummary([], {});
+    const encouragement = getEncouragementMessage({
+      todayMinutes: 0,
+      dailyGoalMinutes: useAppStore.getState().dailyGoalMinutes,
+      streakCurrent: 0,
+      syllabusPct: overallCoverage.total > 0 ? overallCoverage.weightedPct : 0,
+      tookTestToday: false,
+    });
+    expect(encouragement).toBe("Your first focused session starts today's progress.");
+  });
+
+  it('workspace isolation: today\'s minutes and test-taken status come only from this workspace\'s own studyLog/attempts', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 60);
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(attemptFixture('cse-a1', '2026-01-08T09:00:00.000Z'));
+    const upscStudyLog = useAppStore.getState().studyLog;
+    const upscAttempts = useAppStore.getState().upscCsePrelimsPyqAttempts;
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().studyLog).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().studyLog).toEqual(upscStudyLog);
+    expect(useAppStore.getState().upscCsePrelimsPyqAttempts).toEqual(upscAttempts);
   });
 });
