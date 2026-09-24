@@ -121,3 +121,37 @@ describe('APFC Dashboard — Study Progress Insights workspace isolation', () =>
     expect(useAppStore.getState().studyLog).toEqual(apfcStudyLog);
   });
 });
+
+// Phase 4 Step 3 — the completion TARGET itself (not just studyLog) must never leak across
+// workspaces: completedTopics is APFC's own workspace-owned field (archived/restored by
+// setActiveWorkspaceId's swap, same invariant every other workspace-owned field already relies on
+// — see lib/store.test.ts), so a percentage derived from it can never be contaminated by, or leak
+// into, another workspace's own target.
+describe('APFC Dashboard — Study Progress Insights: completion-target workspace isolation (Phase 4 Step 3)', () => {
+  it('completedTopics (and the percent derived from it) is archived away while another workspace is active, and is restored exactly on switching back', () => {
+    useAppStore.setState({ completedTopics: { t1: true, t2: true, t3: true } });
+    const apfcTargetBefore = apfcCompletionTarget(useAppStore.getState().completedTopics);
+    const apfcPercentBefore = computeStudyProgressInsights({ studyLog: {}, completionTarget: apfcTargetBefore }).progressPercent;
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    // completedTopics now reflects UPSC CSE's own (unrelated) slice, never a merged/leftover view
+    // of APFC's three completed topics.
+    expect(useAppStore.getState().completedTopics).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const apfcTargetAfter = apfcCompletionTarget(useAppStore.getState().completedTopics);
+    expect(apfcTargetAfter).toEqual(apfcTargetBefore);
+    expect(computeStudyProgressInsights({ studyLog: {}, completionTarget: apfcTargetAfter }).progressPercent).toBe(apfcPercentBefore);
+  });
+
+  it('marking topics complete in another workspace never changes APFC\'s own completedTopics or its derived percent', () => {
+    useAppStore.setState({ completedTopics: { t1: true } });
+    const apfcTargetBefore = apfcCompletionTarget(useAppStore.getState().completedTopics);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.setState({ completedTopics: { 'unrelated-upsc-key': true, another: true } });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(apfcCompletionTarget(useAppStore.getState().completedTopics)).toEqual(apfcTargetBefore);
+  });
+});

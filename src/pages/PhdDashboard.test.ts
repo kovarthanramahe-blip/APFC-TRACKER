@@ -278,3 +278,22 @@ describe('PhD Research Dashboard — Study Progress Insights integration', () =>
     expect(useAppStore.getState().studyLog).toEqual(phdStudyLog); // untouched by the UPSC CSE bump above
   });
 });
+
+// Phase 4 Step 3 — PhD Research never supplies a completionTarget, and no amount of progress in
+// another workspace can cause one to appear here: progressPercent must stay null regardless of
+// APFC's completedTopics or UPSC CSE's upscCseSyllabusCoverage.
+describe('PhD Research Dashboard — Study Progress Insights: completion-target workspace isolation (Phase 4 Step 3)', () => {
+  it('progressPercent stays null for PhD Research even when APFC and UPSC CSE both have real, non-zero completion targets set', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.setState({ completedTopics: { t1: true, t2: true } });
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.setState({ upscCseSyllabusCoverage: { m1: 'strong', m2: 'strong', m3: 'revised' } });
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    // The exact call pages/PhdDashboard.tsx makes — no completionTarget field at all, regardless
+    // of what either other workspace has accumulated.
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog });
+    expect(insights.progressPercent).toBeNull();
+  });
+});

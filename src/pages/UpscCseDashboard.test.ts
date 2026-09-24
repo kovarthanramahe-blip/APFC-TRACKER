@@ -230,3 +230,35 @@ describe('UPSC CSE Study Dashboard — Study Progress Insights integration', () 
     expect(insights.streak).toEqual({ current: 0, best: 0 });
   });
 });
+
+// Phase 4 Step 3 — the completion TARGET itself (upscCseSyllabusCoverage, and the weightedPct
+// derived from it) must never leak across workspaces, same discipline as studyLog above.
+describe('UPSC CSE Study Dashboard — Study Progress Insights: completion-target workspace isolation (Phase 4 Step 3)', () => {
+  it('upscCseSyllabusCoverage (and the weightedPct derived from it) is archived away while another workspace is active, and is restored exactly on switching back', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.setState({ upscCseSyllabusCoverage: { m1: 'strong', m2: 'revised' } });
+    const coverageBefore = computeCoverageSummary(['m1', 'm2', 'm3'], useAppStore.getState().upscCseSyllabusCoverage);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    // upscCseSyllabusCoverage now reflects APFC's own (unrelated, empty) slice, never a
+    // merged/leftover view of the UPSC CSE coverage set above.
+    expect(useAppStore.getState().upscCseSyllabusCoverage).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const coverageAfter = computeCoverageSummary(['m1', 'm2', 'm3'], useAppStore.getState().upscCseSyllabusCoverage);
+    expect(coverageAfter).toEqual(coverageBefore);
+  });
+
+  it('marking coverage in another workspace never changes UPSC CSE\'s own upscCseSyllabusCoverage or its derived weightedPct', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.setState({ upscCseSyllabusCoverage: { m1: 'strong' } });
+    const before = computeCoverageSummary(['m1'], useAppStore.getState().upscCseSyllabusCoverage);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    // No equivalent field exists for PhD Research at all — nothing to even set here; switching
+    // back is enough to prove UPSC CSE's own coverage was never touched.
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(computeCoverageSummary(['m1'], useAppStore.getState().upscCseSyllabusCoverage)).toEqual(before);
+  });
+});
