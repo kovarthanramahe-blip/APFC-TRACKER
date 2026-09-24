@@ -4,8 +4,6 @@ import { Link } from 'react-router-dom';
 import {
   LineChart,
   Line,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   Tooltip,
@@ -18,6 +16,9 @@ import {
 import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList, Brain, Gauge } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
@@ -32,17 +33,6 @@ import { computeExamReadiness, type ExamReadinessReport, type ExamReadinessVerdi
 import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp, WorkspaceComingSoon } from '../components/ui/Primitives';
-
-function lastNDays(n: number) {
-  const days: string[] = [];
-  const d = new Date();
-  for (let i = n - 1; i >= 0; i--) {
-    const dd = new Date(d);
-    dd.setDate(d.getDate() - i);
-    days.push(dd.toISOString().slice(0, 10));
-  }
-  return days;
-}
 
 export default function Analytics() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -99,14 +89,11 @@ export default function Analytics() {
     return { name: s.shortTitle, value: done, colorKey: s.colorKey };
   }).filter((d) => d.value > 0);
 
-  const focusData = useMemo(
-    () =>
-      lastNDays(14).map((date) => ({
-        date: date.slice(5),
-        minutes: studyLog[date]?.focusMinutes ?? 0,
-      })),
-    [studyLog],
-  );
+  // Study Activity Trend (Phase 4 Step 5) — reuses buildDailyActivityTrend (lib/studyProgressInsights.ts),
+  // the same canonical calculation the APFC/UPSC CSE/PhD Research dashboards already use, replacing
+  // this page's own former ad-hoc lastNDays/focusData (UTC-based, never reused elsewhere).
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, getLocalDateString(), 7), [studyLog]);
 
   const scoreTrend = useMemo(
     () =>
@@ -199,20 +186,7 @@ export default function Analytics() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <motion.div {...fadeUp}>
-          <Card className="p-5 sm:p-6 h-full">
-            <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Focus Minutes — Last 14 Days</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={focusData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" allowDecimals={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                  <Bar dataKey="minutes" fill="#3161ee" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
+          <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="h-full" />
         </motion.div>
 
         <motion.div {...fadeUp}>

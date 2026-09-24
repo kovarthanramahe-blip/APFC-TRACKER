@@ -11,6 +11,9 @@ import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
 import { computeUpscCseAnalytics } from '../lib/upscCseAnalytics';
 import { UNMAPPED_MICROSYLLABUS } from '../lib/upscCsePrelimsPyqFilters';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 
 function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
   const tones: Record<string, string> = {
@@ -40,8 +43,13 @@ export default function UpscCseAnalytics() {
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const revisionQueue = useAppStore((s) => s.revisionQueue);
   const studyTasks = useAppStore((s) => s.upscCseStudyTasks);
+  const studyLog = useAppStore((s) => s.studyLog);
 
   const today = useMemo(() => getLocalDateString(), []);
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+  // Study Activity Trend (Phase 4 Step 5) — reuses buildDailyActivityTrend (lib/studyProgressInsights.ts),
+  // the same canonical calculation the dashboards already use; no second calculation.
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, today, 7), [studyLog, today]);
 
   const analytics = useMemo(
     () =>
@@ -116,6 +124,8 @@ export default function UpscCseAnalytics() {
           ))}
         </ul>
       </Card>
+
+      <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mb-6" />
 
       {/* PYQ performance */}
       <Card className="mb-6 p-5 sm:p-6">
