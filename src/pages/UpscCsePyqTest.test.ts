@@ -97,8 +97,9 @@ describe('UPSC CSE PYQ Test page — the 2025 batch is integrated alongside 2026
     expect(bank2025().every((r) => r.correctOptionId !== undefined)).toBe(true);
   });
 
-  it('the combined bank (2026 + 2025) holds exactly 200 questions', () => {
-    expect(UPSC_CSE_PRELIMS_PYQ_BANK).toHaveLength(200);
+  it('the 2026 + 2025 subset holds exactly 200 questions (the combined bank itself has since grown further — see data/pyqUpscCsePrelims.test.ts for its full current size)', () => {
+    const bank2026 = UPSC_CSE_PRELIMS_PYQ_BANK.filter((r) => r.year === 2026);
+    expect(bank2026.length + bank2025().length).toBe(200);
   });
 });
 

@@ -129,8 +129,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -155,8 +155,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -181,8 +181,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Rights Issues",
       "mappingStatus": "review_required"
     },
     {
@@ -207,8 +207,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Rights Issues",
       "mappingStatus": "review_required"
     },
     {
@@ -233,8 +233,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -259,8 +259,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -285,8 +285,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "National Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -311,8 +311,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -337,8 +337,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Rights Issues",
       "mappingStatus": "review_required"
     },
     {
@@ -363,8 +363,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -389,8 +389,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -415,8 +415,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -441,8 +441,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -467,8 +467,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -493,8 +493,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "National Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -519,8 +519,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -545,8 +545,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -571,8 +571,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -597,8 +597,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -623,8 +623,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "National Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -649,8 +649,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Panchayati Raj",
       "mappingStatus": "review_required"
     },
     {
@@ -675,8 +675,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -701,8 +701,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -727,8 +727,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Environmental Ecology",
       "mappingStatus": "review_required"
     },
     {
@@ -753,8 +753,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -779,8 +779,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -805,8 +805,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -831,8 +831,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -857,8 +857,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -883,8 +883,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -909,8 +909,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -935,8 +935,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "National Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -961,8 +961,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -987,7 +987,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1013,8 +1013,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Poverty & Inclusion",
       "mappingStatus": "review_required"
     },
     {
@@ -1039,7 +1039,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1065,7 +1065,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1091,8 +1091,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -1117,8 +1117,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Sustainable Development",
       "mappingStatus": "review_required"
     },
     {
@@ -1143,7 +1143,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1169,7 +1169,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1195,8 +1195,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Sustainable Development",
       "mappingStatus": "review_required"
     },
     {
@@ -1221,7 +1221,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1247,7 +1247,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1273,7 +1273,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1299,7 +1299,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1325,8 +1325,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2026_Q51_Q100: UpscCsePrelimsPyqBatchFil
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Poverty & Inclusion",
       "mappingStatus": "review_required"
     }
   ]
