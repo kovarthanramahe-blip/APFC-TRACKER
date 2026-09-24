@@ -8,6 +8,9 @@ import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import { hasMeaningfulData } from '../lib/cloudSync';
 import type { UpscCseStudyTask } from '../lib/upscCseStudyTask';
+import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { computeCoverageSummary } from '../lib/upscCseSyllabusCoverage';
 
 function fullReset() {
   useAppStore.setState({
@@ -155,5 +158,75 @@ describe('UPSC CSE Study Dashboard — study task persistence (upscCseStudyTasks
       };
       expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.upscCseStudyTasks).toEqual([]);
     });
+  });
+});
+
+// Study Progress Insights integration (Phase 4 Step 2) — exercises the exact computation
+// pages/UpscCseDashboard.tsx performs: computeStudyProgressInsights over THIS workspace's own
+// studyLog, with the completion target reusing lib/upscCseSyllabusCoverage.ts's own
+// computeCoverageSummary (never a second UPSC completion calculation).
+describe('UPSC CSE Study Dashboard — Study Progress Insights integration', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('upsc_cse'));
+
+  it('normal activity: reflects this workspace\'s own studyLog and the existing coverage.weightedPct as the completion target', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 40, topicsCompleted: 0, testsCompleted: 1 } },
+    });
+    const overallCoverage = computeCoverageSummary(['m1', 'm2', 'm3', 'm4'], { m1: 'strong', m2: 'strong', m3: 'revised', m4: 'not_started' });
+    expect(overallCoverage.total).toBeGreaterThan(0);
+    const insights = computeStudyProgressInsights({
+      studyLog: useAppStore.getState().studyLog,
+      completionTarget: { completed: overallCoverage.weightedPct, total: 100 },
+      referenceDate: '2026-01-08',
+    });
+    expect(insights.currentPeriod.focusMinutes).toBe(40);
+    expect(insights.progressPercent).toBe(overallCoverage.weightedPct);
+  });
+
+  it('unavailable completion target: an empty coverage map (total 0) leaves progressPercent null, never invented', () => {
+    const overallCoverage = computeCoverageSummary([], {});
+    expect(overallCoverage.total).toBe(0);
+    const insights = computeStudyProgressInsights({
+      studyLog: useAppStore.getState().studyLog,
+      completionTarget: overallCoverage.total > 0 ? { completed: overallCoverage.weightedPct, total: 100 } : undefined,
+    });
+    expect(insights.progressPercent).toBeNull();
+  });
+
+  it('current vs previous period comparison uses computePeriodComparison, not a second date calculation', () => {
+    useAppStore.setState({
+      studyLog: {
+        '2026-01-02': { date: '2026-01-02', focusMinutes: 15, topicsCompleted: 0, testsCompleted: 0 },
+        '2026-01-09': { date: '2026-01-09', focusMinutes: 35, topicsCompleted: 0, testsCompleted: 0 },
+      },
+    });
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog, referenceDate: '2026-01-10', periodDays: 7 });
+    expect(insights.currentPeriod.focusMinutes).toBe(35);
+    expect(insights.previousPeriod.focusMinutes).toBe(15);
+  });
+
+  it('workspace accent: UPSC CSE resolves to the existing brand blue, not a new colour', () => {
+    const accent = getWorkspaceAccent(useAppStore.getState().activeWorkspaceId);
+    expect(accent.bg).toBe('bg-brand-600');
+  });
+
+  it('workspace isolation: studyLog logged while UPSC CSE is active is invisible after switching to APFC', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 25);
+    const upscStudyLog = useAppStore.getState().studyLog;
+    expect(Object.keys(upscStudyLog).length).toBeGreaterThan(0);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().studyLog).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().studyLog).toEqual(upscStudyLog);
+  });
+
+  it('empty study-log state produces a fully zeroed snapshot, never an error', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(() => computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog })).not.toThrow();
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog });
+    expect(insights.totalActivity).toEqual({ focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0, activeDays: 0 });
+    expect(insights.streak).toEqual({ current: 0, best: 0 });
   });
 });

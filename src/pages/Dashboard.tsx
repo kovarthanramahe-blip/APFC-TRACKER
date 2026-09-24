@@ -38,6 +38,9 @@ import { SUBJECT_COLORS, daysUntil, formatDate, formatMinutes, getLocalDateStrin
 import { Card, ProgressBar, Badge, Button, fadeUp, staggerContainer } from '../components/ui/Primitives';
 import { examTargetsForWorkspace } from '../lib/examTarget';
 import { ExamTargetCard } from '../components/ui/ExamTargetCard';
+import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
 
 export default function Dashboard() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -68,6 +71,16 @@ export default function Dashboard() {
   const totalTopics = getAllTopicsCount();
   const doneTopics = Object.values(completedTopics).filter(Boolean).length;
   const overallPct = totalTopics ? Math.round((doneTopics / totalTopics) * 100) : 0;
+
+  // Study Progress Insights (Phase 4 Step 2) — reuses computePeriodComparison/computeStreaks
+  // (lib/studyProgressInsights.ts / lib/gamification.ts) over THIS workspace's own studyLog; the
+  // completion target reuses the exact same completedTopics/getAllTopicsCount() numbers overallPct
+  // above already derives from, never a separately invented syllabus total.
+  const studyProgressInsights = useMemo(
+    () => computeStudyProgressInsights({ studyLog, completionTarget: totalTopics > 0 ? { completed: doneTopics, total: totalTopics } : undefined }),
+    [studyLog, doneTopics, totalTopics],
+  );
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
 
   const tookTestToday = attempts.some((a) => a.submittedAt.slice(0, 10) === todayKey);
   const encouragement = getEncouragementMessage({
@@ -322,6 +335,11 @@ export default function Dashboard() {
             </div>
           )}
         </Card>
+      </motion.div>
+
+      {/* Study Progress Insights (Phase 4 Step 2) */}
+      <motion.div {...fadeUp}>
+        <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} progressLabel="Syllabus" />
       </motion.div>
 
       {/* Today's Study (Stage 7) */}

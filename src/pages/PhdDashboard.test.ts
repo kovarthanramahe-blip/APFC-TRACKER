@@ -8,6 +8,8 @@ import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import type { PhdTopicArea } from '../lib/phdTopicArea';
 import type { MicroTarget } from '../lib/microTarget';
+import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
 
 function fullReset() {
   useAppStore.setState({
@@ -206,5 +208,73 @@ describe('PhD Research Dashboard — migration backfill', () => {
     expect(leafEntries.every(([, v]) => v === 'strong')).toBe(true);
     // the original direct entry is preserved too
     expect(migrated.upscCseSyllabusCoverage['prelims-gs1-polity-constitution']).toBe('strong');
+  });
+});
+
+// Study Progress Insights integration (Phase 4 Step 2) — exercises the exact computation
+// pages/PhdDashboard.tsx performs: computeStudyProgressInsights over THIS workspace's own
+// studyLog, with NO completion target (PhD Research has no syllabus/topic-count equivalent to
+// derive one from honestly — see pages/PhdDashboard.tsx's own comment on this).
+describe('PhD Research Dashboard — Study Progress Insights integration', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('phd_research'));
+
+  it('normal activity: reflects this workspace\'s own studyLog', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 60, topicsCompleted: 0, testsCompleted: 0 } },
+    });
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog, referenceDate: '2026-01-08' });
+    expect(insights.currentPeriod.focusMinutes).toBe(60);
+    expect(insights.totalActivity.focusMinutes).toBe(60);
+  });
+
+  it('unavailable completion target: PhD Research never supplies one, so progressPercent is always null, never invented', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 60, topicsCompleted: 0, testsCompleted: 0 } },
+    });
+    // The exact call pages/PhdDashboard.tsx makes: no completionTarget field at all.
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog });
+    expect(insights.progressPercent).toBeNull();
+  });
+
+  it('empty study-log state produces a fully zeroed snapshot, never an error', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(() => computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog })).not.toThrow();
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog });
+    expect(insights.totalActivity).toEqual({ focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0, activeDays: 0 });
+    expect(insights.progressPercent).toBeNull();
+    expect(insights.streak).toEqual({ current: 0, best: 0 });
+  });
+
+  it('current vs previous period comparison', () => {
+    useAppStore.setState({
+      studyLog: {
+        '2026-01-01': { date: '2026-01-01', focusMinutes: 10, topicsCompleted: 0, testsCompleted: 0 },
+        '2026-01-09': { date: '2026-01-09', focusMinutes: 40, topicsCompleted: 0, testsCompleted: 0 },
+      },
+    });
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog, referenceDate: '2026-01-10', periodDays: 7 });
+    expect(insights.currentPeriod.focusMinutes).toBe(40);
+    expect(insights.previousPeriod.focusMinutes).toBe(10);
+  });
+
+  it('workspace accent: PhD Research resolves to the violet accent', () => {
+    const accent = getWorkspaceAccent(useAppStore.getState().activeWorkspaceId);
+    expect(accent.bg).toBe('bg-violet-600');
+  });
+
+  it('workspace isolation: studyLog logged while PhD Research is active is invisible after switching to UPSC CSE, and never mixes with either other workspace', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 20);
+    const phdStudyLog = useAppStore.getState().studyLog;
+    expect(Object.keys(phdStudyLog).length).toBeGreaterThan(0);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().studyLog).toEqual({});
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 99);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().studyLog).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().studyLog).toEqual(phdStudyLog); // untouched by the UPSC CSE bump above
   });
 });

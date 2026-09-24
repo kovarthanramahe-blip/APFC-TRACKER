@@ -24,6 +24,9 @@ import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { computePhdDashboardSnapshot } from '../lib/phdDashboard';
 import { isValidTopicAreaTitle, searchPhdTopicAreas, getPhdTopicAreaById, type PhdTopicArea } from '../lib/phdTopicArea';
 import { isValidMicroTargetTitle, type MicroTarget, type MicroTargetPriority } from '../lib/microTarget';
+import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
 
 // PhD Research Dashboard — the research-start/duration overview plus Topic Area and micro-target
 // management for the PhD Research workspace. Reuses the existing repository architecture for
@@ -106,6 +109,7 @@ export default function PhdDashboard() {
   const setMicroTargetStatus = useAppStore((s) => s.setPhdMicroTargetStatus);
   const deleteMicroTarget = useAppStore((s) => s.deletePhdMicroTarget);
   const importedContent = useAppStore((s) => s.importedContent);
+  const studyLog = useAppStore((s) => s.studyLog);
 
   const today = useMemo(() => getLocalDateString(), []);
 
@@ -113,6 +117,12 @@ export default function PhdDashboard() {
     () => computePhdDashboardSnapshot({ researchStartDate, topicAreas, microTargets, importedContent, today }),
     [researchStartDate, topicAreas, microTargets, importedContent, today],
   );
+
+  // Study Progress Insights (Phase 4 Step 2) — reuses this workspace's own studyLog. No completion
+  // target: PhD Research has no syllabus/topic-count equivalent to derive one from honestly, so
+  // none is invented (progressPercent stays null/unavailable — see studyProgressInsights.ts).
+  const studyProgressInsights = useMemo(() => computeStudyProgressInsights({ studyLog }), [studyLog]);
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
 
   // Topic Areas
   const [areaQuery, setAreaQuery] = useState('');
@@ -221,6 +231,8 @@ export default function PhdDashboard() {
           )}
         </Card>
       </div>
+
+      <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} className="mt-6" />
 
       {/* Topic Areas */}
       <Card className="mt-6 p-5 sm:p-6">

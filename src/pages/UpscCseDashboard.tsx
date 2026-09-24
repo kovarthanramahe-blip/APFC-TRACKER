@@ -14,6 +14,9 @@ import { generateTodaysStudyItems, type UpscCseTodaysStudyItemKind } from '../li
 import { createUpscCseStudyTask, isValidStudyTaskTitle, tasksForDate, countStudyTasksByStatus } from '../lib/upscCseStudyTask';
 import { examTargetsForWorkspace } from '../lib/examTarget';
 import { ExamTargetCard } from '../components/ui/ExamTargetCard';
+import { computeStudyProgressInsights } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
 
 // UPSC CSE Study Dashboard — connects the syllabus (lib/upscCseSyllabusCoverage.ts), PYQ practice
 // (data/pyqUpscCsePrelims.ts, lib/upscCsePrelimsPyqPerformance.ts), revision queue
@@ -68,6 +71,7 @@ export default function UpscCseDashboard() {
   const attempts = useAppStore((s) => s.upscCsePrelimsPyqAttempts);
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const revisionQueue = useAppStore((s) => s.revisionQueue);
+  const studyLog = useAppStore((s) => s.studyLog);
   const studyTasks = useAppStore((s) => s.upscCseStudyTasks);
   const addStudyTask = useAppStore((s) => s.addUpscCseStudyTask);
   const setStudyTaskStatus = useAppStore((s) => s.setUpscCseStudyTaskStatus);
@@ -91,6 +95,18 @@ export default function UpscCseDashboard() {
       }),
     [coverage, attempts, bookmarkedPyqIds, revisionQueue, studyTasks, today],
   );
+
+  // Study Progress Insights (Phase 4 Step 2) — reuses this workspace's own studyLog (never
+  // APFC's/PhD's, see lib/store.ts's workspace-owned fields) and, for the completion percentage,
+  // the ALREADY-COMPUTED overallCoverage.weightedPct (lib/upscCseSyllabusCoverage.ts) — never a
+  // separately invented UPSC target. weightedPct is already 0-100, so it is passed through as
+  // "completed out of 100" rather than re-deriving a completed/total pair from raw coverage
+  // counts, which would be a second, possibly-diverging completion calculation.
+  const studyProgressInsights = useMemo(
+    () => computeStudyProgressInsights({ studyLog, completionTarget: snapshot.overallCoverage.total > 0 ? { completed: snapshot.overallCoverage.weightedPct, total: 100 } : undefined }),
+    [studyLog, snapshot.overallCoverage.total, snapshot.overallCoverage.weightedPct],
+  );
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
 
   const todaysStudyItems = useMemo(
     () =>
@@ -156,6 +172,8 @@ export default function UpscCseDashboard() {
         <StatTile label="Revision Due" value={`${snapshot.revisionDueCount}`} tone={snapshot.revisionDueCount > 0 ? 'danger' : 'neutral'} />
         <StatTile label="Marked for Revision" value={`${snapshot.bookmarkedCount}`} />
       </div>
+
+      <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} progressLabel="Syllabus coverage" className="mt-6" />
 
       <Card className="mt-6 p-5 sm:p-6">
         <div className="mb-4 flex items-center gap-2">
