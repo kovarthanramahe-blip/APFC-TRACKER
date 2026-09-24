@@ -218,3 +218,160 @@ export function computePyqPerformance(bank: PYQ[], attempts: PYQAttempt[]): PyqP
 
   return { overall, subjects, topics, weakTopics, strongestTopics, years, strongestSubject, weakestSubject, unattemptedCount };
 }
+
+// ============================================================================================
+// PYQ Weak Spots & Repeated Mistakes (Phase 6 Step 2) — additive to everything above, never a
+// second scoring/accuracy implementation. computeRepeatedMistakes is the one new per-question
+// aggregation this stage introduces (neither computePyqPerformance's subjectAgg/topicAgg nor
+// computeRevisionStatusMap expose a per-question wrong-count — the former discards question-level
+// detail once folded into a subject/topic bucket, and the latter only tracks each question's
+// single MOST RECENT status, by design, for the Revision filter). topTopicsByMistakes/
+// topSubjectsByMistakes deliberately do NOT rescan attempts — they re-sort the topics[]/subjects[]
+// arrays computePyqPerformance already computed (both already carry a full-history `wrong` count),
+// so "weak area by mistake volume" reuses that existing aggregation pass verbatim rather than
+// duplicating it. This is a different ranking signal from weakTopics/weakestSubject above (which
+// rank by lowest accuracy) — a topic attempted 10 times with 4 wrong ranks above a topic attempted
+// once and missed, which lowest-accuracy sorting alone would not surface.
+// ============================================================================================
+
+export interface PyqRepeatedMistake {
+  questionId: string;
+  /** correctCount + wrongCount — an attempt where this question was left unanswered doesn't count. */
+  totalAttempts: number;
+  correctCount: number;
+  wrongCount: number;
+  /** submittedAt of the most recent attempt that included this question (answered or not). */
+  lastAttemptAt: string;
+  /** Whether the MOST RECENT attempt got it right — mirrors lib/pyqFilters.ts's revisionStatusOf
+   * "latest wins" semantics for display purposes only. wrongCount above is never reduced by a
+   * later correct answer — this module's whole point is to preserve that full mistake history. */
+  latestCorrect: boolean;
+}
+
+/**
+ * Full-history per-question mistake tally across every attempt, never just the latest one (see
+ * this section's own header). Reuses pyqQuestionStatus for correctness — never a second
+ * correct/wrong determination. Only questions that were answered at least once appear in the
+ * result; a question never attempted, or only ever left unanswered, is simply absent.
+ */
+export function computeRepeatedMistakes(bank: PYQ[], attempts: PYQAttempt[]): PyqRepeatedMistake[] {
+  const agg = new Map<string, { correctCount: number; wrongCount: number; lastAttemptAt: string; latestCorrect: boolean }>();
+
+  // Oldest first, so each question's entry is simply overwritten as we go — the last write for a
+  // given question is always its most recent attempt.
+  const chronological = [...attempts].sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+
+  for (const attempt of chronological) {
+    for (const qid of attempt.questionIds) {
+      const pyq = bank.find((p) => p.id === qid);
+      if (!pyq) continue; // defensive: skip if a question id can't be resolved, same as computePyqPerformance
+      const status = pyqQuestionStatus(pyq, attempt.answers);
+      if (status === 'unanswered') continue;
+
+      const entry = agg.get(qid) ?? { correctCount: 0, wrongCount: 0, lastAttemptAt: attempt.submittedAt, latestCorrect: false };
+      if (status === 'correct') entry.correctCount += 1;
+      else entry.wrongCount += 1;
+      entry.lastAttemptAt = attempt.submittedAt;
+      entry.latestCorrect = status === 'correct';
+      agg.set(qid, entry);
+    }
+  }
+
+  return Array.from(agg.entries()).map(([questionId, v]) => ({
+    questionId,
+    totalAttempts: v.correctCount + v.wrongCount,
+    correctCount: v.correctCount,
+    wrongCount: v.wrongCount,
+    lastAttemptAt: v.lastAttemptAt,
+    latestCorrect: v.latestCorrect,
+  }));
+}
+
+/** Worst-first view of computeRepeatedMistakes's output — questions with at least one wrong
+ * answer, most mistakes first. Ties broken by questionId for a stable, deterministic order. */
+export function topRepeatedMistakes(mistakes: PyqRepeatedMistake[], limit = 6): PyqRepeatedMistake[] {
+  return [...mistakes]
+    .filter((m) => m.wrongCount > 0)
+    .sort((a, b) => b.wrongCount - a.wrongCount || a.questionId.localeCompare(b.questionId))
+    .slice(0, limit);
+}
+
+/** Topics ranked by raw mistake volume (not accuracy) — re-sorts computePyqPerformance's own
+ * topics[], never a second attempt scan. See this section's header for why this ranking differs
+ * from weakTopics. */
+export function topTopicsByMistakes(topics: PyqTopicPerformance[], limit = 6): PyqTopicPerformance[] {
+  return [...topics]
+    .filter((t) => t.wrong > 0)
+    .sort((a, b) => b.wrong - a.wrong || a.topicTitle.localeCompare(b.topicTitle))
+    .slice(0, limit);
+}
+
+/** Same as topTopicsByMistakes, at subject granularity. */
+export function topSubjectsByMistakes(subjects: PyqSubjectPerformance[], limit = 6): PyqSubjectPerformance[] {
+  return [...subjects]
+    .filter((s) => s.wrong > 0)
+    .sort((a, b) => b.wrong - a.wrong || a.subjectTitle.localeCompare(b.subjectTitle))
+    .slice(0, limit);
+}
+
+export type PyqPerformanceTrendDirection = 'improving' | 'declining' | 'stable' | 'insufficient_data';
+
+export interface PyqPerformanceTrend {
+  recentAttemptCount: number;
+  previousAttemptCount: number;
+  /** Null only when insufficient_data, or in the edge case where a window's attempts had nothing
+   * answered — never fabricated as 0. */
+  recentAccuracy: number | null;
+  previousAccuracy: number | null;
+  direction: PyqPerformanceTrendDirection;
+}
+
+/** Test attempts (not questions) per comparison window — small enough to reflect genuinely recent
+ * form, large enough that one unusually easy/hard test doesn't swing the whole verdict. Consistent
+ * with this app's existing "small N before trusting a signal" convention (see
+ * lib/topicStatus.ts's MIN_PYQ_ATTEMPTS_FOR_SIGNAL = 3 for individual questions within a topic). */
+export const TREND_WINDOW_SIZE = 5;
+
+/** A recent-vs-previous accuracy swing smaller than this (percentage points) reads as noise, not a
+ * genuine trend — no existing constant in this codebase covers a delta band (WEAK_PYQ_ACCURACY_THRESHOLD
+ * is an absolute cutoff, a different concept), so this is a new, explicit, documented value. */
+export const TREND_STABLE_BAND_PCT = 5;
+
+/**
+ * Deterministic recent-vs-previous accuracy comparison, reusing each attempt's OWN already-stored
+ * correctCount/wrongCount (never recomputed) — no bank lookup needed at all. Requires a FULL
+ * window on both sides (2 * windowSize attempts minimum) before returning anything but
+ * 'insufficient_data', per this stage's explicit "never invent a trend from a partial window" rule.
+ */
+export function computeRecentVsPreviousTrend(attempts: PYQAttempt[], windowSize: number = TREND_WINDOW_SIZE): PyqPerformanceTrend {
+  const insufficient: PyqPerformanceTrend = {
+    recentAttemptCount: Math.min(attempts.length, windowSize),
+    previousAttemptCount: Math.max(0, Math.min(attempts.length - windowSize, windowSize)),
+    recentAccuracy: null,
+    previousAccuracy: null,
+    direction: 'insufficient_data',
+  };
+  if (attempts.length < windowSize * 2) return insufficient;
+
+  const newestFirst = [...attempts].sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  const recent = newestFirst.slice(0, windowSize);
+  const previous = newestFirst.slice(windowSize, windowSize * 2);
+
+  const accuracyOf = (window: PYQAttempt[]): number | null => {
+    const correct = window.reduce((sum, a) => sum + a.correctCount, 0);
+    const wrong = window.reduce((sum, a) => sum + a.wrongCount, 0);
+    const attemptedQuestions = correct + wrong;
+    return attemptedQuestions > 0 ? (correct / attemptedQuestions) * 100 : null;
+  };
+
+  const recentAccuracy = accuracyOf(recent);
+  const previousAccuracy = accuracyOf(previous);
+  if (recentAccuracy === null || previousAccuracy === null) {
+    return { recentAttemptCount: recent.length, previousAttemptCount: previous.length, recentAccuracy, previousAccuracy, direction: 'insufficient_data' };
+  }
+
+  const delta = recentAccuracy - previousAccuracy;
+  const direction: PyqPerformanceTrendDirection = delta > TREND_STABLE_BAND_PCT ? 'improving' : delta < -TREND_STABLE_BAND_PCT ? 'declining' : 'stable';
+
+  return { recentAttemptCount: recent.length, previousAttemptCount: previous.length, recentAccuracy, previousAccuracy, direction };
+}

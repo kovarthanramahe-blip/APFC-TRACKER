@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { computePyqPerformance, pyqQuestionStatus, MARKS_CORRECT, MARKS_WRONG } from './pyqPerformance';
+import {
+  computePyqPerformance,
+  pyqQuestionStatus,
+  MARKS_CORRECT,
+  MARKS_WRONG,
+  computeRepeatedMistakes,
+  topRepeatedMistakes,
+  topTopicsByMistakes,
+  topSubjectsByMistakes,
+  computeRecentVsPreviousTrend,
+  TREND_WINDOW_SIZE,
+} from './pyqPerformance';
 import { PYQ_BANK } from '../data/pyq';
+import { useAppStore } from './store';
+import { createRevisionQueue } from './revisionQueue';
+import { DEFAULT_WORKSPACE_ID } from './workspace';
 import type { PYQ, PYQAttempt } from './types';
 
 // Synthetic fixture bank/attempts — independent of PYQ_BANK, so these tests exercise the
@@ -25,7 +39,7 @@ function pyq(id: string, year: number, subject: PYQ['subject'], topicId: string)
 function attempt(overrides: Partial<PYQAttempt>): PYQAttempt {
   return {
     id: overrides.id ?? `attempt-${Math.random()}`,
-    submittedAt: new Date().toISOString(),
+    submittedAt: overrides.submittedAt ?? new Date().toISOString(),
     year: 'all',
     subject: 'all',
     topicId: 'all',
@@ -205,5 +219,191 @@ describe('computePyqPerformance — real PYQ_BANK sanity', () => {
     expect(() => computePyqPerformance(PYQ_BANK, [a])).not.toThrow();
     const perf = computePyqPerformance(PYQ_BANK, [a]);
     expect(perf!.overall.overallAccuracy).toBe(100);
+  });
+});
+
+// ============================================================================================
+// PYQ Weak Spots & Repeated Mistakes (Phase 6 Step 2)
+// ============================================================================================
+
+describe('computeRepeatedMistakes — empty/single-attempt cases', () => {
+  it('an empty attempt history produces an empty result, never throws', () => {
+    expect(computeRepeatedMistakes(bank, [])).toEqual([]);
+  });
+
+  it('a single attempt produces one entry per answered question, correctly split correct/wrong', () => {
+    const mistakes = computeRepeatedMistakes(bank, [attempt1]); // q1 correct, q2 wrong, q3 unanswered
+    const byId = Object.fromEntries(mistakes.map((m) => [m.questionId, m]));
+    expect(mistakes).toHaveLength(2); // q3 excluded (never answered)
+    expect(byId.q1).toMatchObject({ totalAttempts: 1, correctCount: 1, wrongCount: 0, latestCorrect: true });
+    expect(byId.q2).toMatchObject({ totalAttempts: 1, correctCount: 0, wrongCount: 1, latestCorrect: false });
+  });
+});
+
+describe('computeRepeatedMistakes — full mistake history is preserved, never just the latest attempt', () => {
+  it('wrong, wrong, correct -> wrongCount stays 2 even after the later correct answer', () => {
+    const attempts = [
+      attempt({ id: 'r1', submittedAt: '2026-01-01T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'q1-o1' } }), // wrong
+      attempt({ id: 'r2', submittedAt: '2026-01-02T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'q1-o1' } }), // wrong
+      attempt({ id: 'r3', submittedAt: '2026-01-03T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'q1-o0' } }), // correct
+    ];
+    const mistakes = computeRepeatedMistakes(bank, attempts);
+    expect(mistakes).toEqual([
+      { questionId: 'q1', totalAttempts: 3, correctCount: 1, wrongCount: 2, lastAttemptAt: '2026-01-03T00:00:00.000Z', latestCorrect: true },
+    ]);
+  });
+
+  it('lastAttemptAt/latestCorrect reflect the most recent attempt regardless of input order', () => {
+    // Deliberately out of chronological order — the function must sort internally.
+    const attempts = [
+      attempt({ id: 'r2', submittedAt: '2026-01-02T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'q1-o0' } }), // correct
+      attempt({ id: 'r1', submittedAt: '2026-01-01T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'q1-o1' } }), // wrong
+    ];
+    const mistakes = computeRepeatedMistakes(bank, attempts);
+    expect(mistakes[0]).toMatchObject({ lastAttemptAt: '2026-01-02T00:00:00.000Z', latestCorrect: true, wrongCount: 1, correctCount: 1 });
+  });
+});
+
+describe('computeRepeatedMistakes — multiple questions aggregated correctly', () => {
+  it('each question gets its own independent tally across several attempts', () => {
+    const mistakes = computeRepeatedMistakes(bank, [attempt1, attempt2]);
+    const byId = Object.fromEntries(mistakes.map((m) => [m.questionId, m]));
+    expect(Object.keys(byId).sort()).toEqual(['q1', 'q2', 'q4']); // q3 excluded (unanswered)
+    expect(byId.q4).toMatchObject({ totalAttempts: 1, correctCount: 1, wrongCount: 0 });
+  });
+});
+
+describe('topRepeatedMistakes — worst-first view', () => {
+  it('only includes questions with at least one wrong answer, worst first', () => {
+    const attempts = [
+      attempt({ id: 'm1', submittedAt: '2026-01-01T00:00:00.000Z', questionIds: ['q1', 'q2'], answers: { q1: 'q1-o1', q2: 'q2-o1' } }), // both wrong
+      attempt({ id: 'm2', submittedAt: '2026-01-02T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'q1-o1' } }), // q1 wrong again
+      attempt({ id: 'm3', submittedAt: '2026-01-03T00:00:00.000Z', questionIds: ['q4'], answers: { q4: 'q4-o0' } }), // q4 correct, never wrong
+    ];
+    const mistakes = computeRepeatedMistakes(bank, attempts);
+    const top = topRepeatedMistakes(mistakes, 6);
+    expect(top.map((m) => m.questionId)).toEqual(['q1', 'q2']); // q4 excluded (0 wrongCount)
+    expect(top[0].questionId).toBe('q1'); // 2 wrong beats q2's 1 wrong
+    expect(top[0].wrongCount).toBe(2);
+  });
+
+  it('respects the limit parameter', () => {
+    const attempts = [attempt({ questionIds: ['q1', 'q2'], answers: { q1: 'q1-o1', q2: 'q2-o1' } })];
+    const mistakes = computeRepeatedMistakes(bank, attempts);
+    expect(topRepeatedMistakes(mistakes, 1)).toHaveLength(1);
+  });
+});
+
+describe('topTopicsByMistakes / topSubjectsByMistakes — weak-area ranking by mistake volume, reusing computePyqPerformance\'s own arrays', () => {
+  it('ranks topics by raw wrong count, not accuracy — never a second aggregation pass over attempts', () => {
+    // t-en-1 (q1, q2): 1 wrong across attempt1. t-po-2 (q4): 0 wrong.
+    const perf = computePyqPerformance(bank, [attempt1, attempt2]);
+    const top = topTopicsByMistakes(perf!.topics, 6);
+    expect(top.map((t) => t.topicId)).toEqual(['t-en-1']); // t-po-2 has 0 wrong, excluded; t-po-1's q3 was never answered
+  });
+
+  it('subject-level ranking mirrors the same reuse pattern', () => {
+    const perf = computePyqPerformance(bank, [attempt1, attempt2]);
+    const top = topSubjectsByMistakes(perf!.subjects, 6);
+    expect(top.map((s) => s.subject)).toEqual(['english']);
+  });
+});
+
+describe('computeRecentVsPreviousTrend — insufficient data', () => {
+  it('fewer than 2 * windowSize attempts -> insufficient_data, never a fabricated trend', () => {
+    const attempts = Array.from({ length: TREND_WINDOW_SIZE }, (_, i) => attempt({ id: `t${i}`, submittedAt: `2026-01-0${i + 1}T00:00:00.000Z`, correctCount: 1 }));
+    const trend = computeRecentVsPreviousTrend(attempts);
+    expect(trend.direction).toBe('insufficient_data');
+    expect(trend.recentAccuracy).toBeNull();
+    expect(trend.previousAccuracy).toBeNull();
+  });
+
+  it('zero attempts -> insufficient_data with zero counts', () => {
+    const trend = computeRecentVsPreviousTrend([]);
+    expect(trend).toEqual({ recentAttemptCount: 0, previousAttemptCount: 0, recentAccuracy: null, previousAccuracy: null, direction: 'insufficient_data' });
+  });
+});
+
+describe('computeRecentVsPreviousTrend — improving / declining / stable, using each attempt\'s own stored correct/wrongCount (never recomputed)', () => {
+  function windowAttempts(prefix: string, startDay: number, count: number, correctCount: number, wrongCount: number): PYQAttempt[] {
+    return Array.from({ length: count }, (_, i) =>
+      attempt({
+        id: `${prefix}${i}`,
+        submittedAt: `2026-02-${String(startDay + i).padStart(2, '0')}T00:00:00.000Z`,
+        correctCount,
+        wrongCount,
+      }),
+    );
+  }
+
+  it('improving: recent accuracy well above previous accuracy (beyond the stable band)', () => {
+    const previous = windowAttempts('p', 1, TREND_WINDOW_SIZE, 2, 8); // 20% accuracy
+    const recent = windowAttempts('r', 10, TREND_WINDOW_SIZE, 8, 2); // 80% accuracy
+    const trend = computeRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('improving');
+    expect(trend.recentAccuracy).toBe(80);
+    expect(trend.previousAccuracy).toBe(20);
+  });
+
+  it('declining: recent accuracy well below previous accuracy', () => {
+    const previous = windowAttempts('p', 1, TREND_WINDOW_SIZE, 8, 2); // 80%
+    const recent = windowAttempts('r', 10, TREND_WINDOW_SIZE, 2, 8); // 20%
+    const trend = computeRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('declining');
+  });
+
+  it('stable: identical accuracy in both windows is safely inside the stable band', () => {
+    const previous = windowAttempts('p', 1, TREND_WINDOW_SIZE, 6, 4); // 60%
+    const recent = windowAttempts('r', 10, TREND_WINDOW_SIZE, 6, 4); // 60% — no swing at all
+    const trend = computeRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('stable');
+    expect(trend.recentAccuracy).toBe(60);
+    expect(trend.previousAccuracy).toBe(60);
+  });
+
+  it('exactly 2 * windowSize attempts is enough — the boundary is inclusive', () => {
+    const previous = windowAttempts('p', 1, TREND_WINDOW_SIZE, 5, 5); // 50%
+    const recent = windowAttempts('r', 10, TREND_WINDOW_SIZE, 5, 5); // 50%
+    const trend = computeRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('stable');
+    expect(trend.recentAttemptCount).toBe(TREND_WINDOW_SIZE);
+    expect(trend.previousAttemptCount).toBe(TREND_WINDOW_SIZE);
+  });
+});
+
+describe('PYQ Weak Spots — workspace isolation (reading the real store, not a mock)', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+      contentRelationships: [],
+    });
+  }
+
+  it('computeRepeatedMistakes fed with pyqAttempts after a workspace switch never reflects the other workspace\'s attempts', () => {
+    fullReset();
+    useAppStore.getState().addPyqAttempt(attempt({ id: 'apfc-a1', questionIds: ['q1'], answers: { q1: 'q1-o1' } })); // wrong
+    expect(computeRepeatedMistakes(bank, useAppStore.getState().pyqAttempts)).toHaveLength(1);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    // pyqAttempts is workspace-owned — structurally empty here, nothing from APFC leaks through.
+    expect(useAppStore.getState().pyqAttempts).toEqual([]);
+    expect(computeRepeatedMistakes(bank, useAppStore.getState().pyqAttempts)).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(computeRepeatedMistakes(bank, useAppStore.getState().pyqAttempts)).toHaveLength(1);
   });
 });

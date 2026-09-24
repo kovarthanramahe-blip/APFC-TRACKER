@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Compass, TrendingUp, TrendingDown, BarChart3, BookOpen, Brain, ListChecks, Clock, CheckCircle2 } from 'lucide-react';
+import { Compass, TrendingUp, TrendingDown, Minus, Repeat, Gauge, BarChart3, BookOpen, Brain, ListChecks, Clock, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, cx } from '../lib/utils';
@@ -11,6 +11,7 @@ import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
 import { computeUpscCseAnalytics } from '../lib/upscCseAnalytics';
 import { UNMAPPED_MICROSYLLABUS } from '../lib/upscCsePrelimsPyqFilters';
+import type { UpscCsePrelimsPerformanceTrend } from '../lib/upscCsePrelimsPyqPerformance';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
@@ -34,6 +35,32 @@ function progressToneClass(pct: number): string {
   if (pct >= 90) return 'bg-emerald-500';
   if (pct >= 34) return 'bg-amber-500';
   return 'bg-slate-400 dark:bg-slate-600';
+}
+
+// PYQ Weak Spots — Recent Performance (Phase 6 Step 2). A deterministic recent-vs-previous accuracy
+// comparison (lib/upscCsePrelimsPyqPerformance.ts's computeUpscCsePrelimsRecentVsPreviousTrend) —
+// never a subjective score, and explicit about not having enough data yet rather than guessing.
+function PyqTrendBadge({ trend }: { trend: UpscCsePrelimsPerformanceTrend }) {
+  if (trend.direction === 'insufficient_data') {
+    return <p className="text-xs text-slate-400">Not enough recent tests yet to judge a trend.</p>;
+  }
+  const meta: Record<Exclude<UpscCsePrelimsPerformanceTrend['direction'], 'insufficient_data'>, { label: string; tone: 'success' | 'danger' | 'neutral'; icon: typeof TrendingUp }> = {
+    improving: { label: 'Improving', tone: 'success', icon: TrendingUp },
+    declining: { label: 'Declining', tone: 'danger', icon: TrendingDown },
+    stable: { label: 'Stable', tone: 'neutral', icon: Minus },
+  };
+  const m = meta[trend.direction];
+  const Icon = m.icon;
+  return (
+    <div>
+      <Badge tone={m.tone}>
+        <Icon className="h-3 w-3" /> {m.label}
+      </Badge>
+      <p className="mt-1.5 text-[11px] text-slate-400">
+        Last {trend.recentAttemptCount} tests: {trend.recentAccuracy?.toFixed(0)}% vs previous {trend.previousAttemptCount}: {trend.previousAccuracy?.toFixed(0)}%
+      </p>
+    </div>
+  );
 }
 
 export default function UpscCseAnalytics() {
@@ -77,7 +104,7 @@ export default function UpscCseAnalytics() {
     );
   }
 
-  const { performance } = analytics;
+  const { performance, weakSpots } = analytics;
   const weakAreas = performance ? performance.weakMicrosyllabus.filter((m) => m.microsyllabusId !== UNMAPPED_MICROSYLLABUS && m.attempted >= 2) : [];
   const strongAreas = performance ? performance.strongestMicrosyllabus.filter((m) => m.microsyllabusId !== UNMAPPED_MICROSYLLABUS && m.attempted >= 2) : [];
 
@@ -191,6 +218,58 @@ export default function UpscCseAnalytics() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {(weakSpots.repeatedMistakeMicrosyllabus.length > 0 || weakSpots.repeatedMistakeSubjects.length > 0 || weakSpots.trend.direction !== 'insufficient_data') && (
+              <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">PYQ Weak Spots</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <Repeat className="h-3.5 w-3.5 text-rose-500" /> Repeated Mistakes
+                    </div>
+                    {weakSpots.repeatedMistakeMicrosyllabus.length === 0 ? (
+                      <p className="text-xs text-slate-400">No repeated mistakes yet.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {weakSpots.repeatedMistakeMicrosyllabus.slice(0, 4).map((m) => (
+                          <li key={m.microsyllabusId} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{m.title}</span>
+                            <Badge tone="danger">
+                              {m.wrong} mistake{m.wrong === 1 ? '' : 's'}
+                            </Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <ListChecks className="h-3.5 w-3.5 text-brand-500" /> Revise Next
+                    </div>
+                    {weakSpots.repeatedMistakeSubjects.length === 0 ? (
+                      <p className="text-xs text-slate-400">Nothing flagged yet.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {weakSpots.repeatedMistakeSubjects.slice(0, 3).map((s) => (
+                          <li key={s.subject} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{s.subject}</span>
+                            <Badge tone="warning">
+                              {s.wrong} mistake{s.wrong === 1 ? '' : 's'}
+                            </Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <Gauge className="h-3.5 w-3.5 text-brand-500" /> Recent Performance
+                    </div>
+                    <PyqTrendBadge trend={weakSpots.trend} />
+                  </div>
+                </div>
               </div>
             )}
           </>

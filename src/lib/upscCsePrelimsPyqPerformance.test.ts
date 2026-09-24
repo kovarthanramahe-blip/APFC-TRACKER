@@ -1,8 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { computeUpscCsePrelimsPerformance, upscCsePrelimsQuestionStatus } from './upscCsePrelimsPyqPerformance';
+import {
+  computeUpscCsePrelimsPerformance,
+  upscCsePrelimsQuestionStatus,
+  computeUpscCsePrelimsRepeatedMistakes,
+  topUpscCsePrelimsRepeatedMistakes,
+  topMicrosyllabusByMistakes,
+  topUpscCsePrelimsSubjectsByMistakes,
+  computeUpscCsePrelimsRecentVsPreviousTrend,
+  UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE,
+} from './upscCsePrelimsPyqPerformance';
 import type { UpscCsePrelimsBatchPyq } from './upscCsePrelimsPyqBatchImport';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
+import { useAppStore } from './store';
+import { createRevisionQueue } from './revisionQueue';
+import { DEFAULT_WORKSPACE_ID } from './workspace';
 
 const HISTORY_ANCIENT_ID = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.title === 'Ancient India')!.id;
 
@@ -123,5 +135,183 @@ describe('computeUpscCsePrelimsPerformance', () => {
     const snapshot = computeUpscCsePrelimsPerformance(BANK, [mixedAttempt], UPSC_CSE_PRELIMS_SYLLABUS)!;
     expect(snapshot.weakMicrosyllabus[0].accuracy).toBeLessThanOrEqual(snapshot.weakMicrosyllabus.at(-1)!.accuracy);
     expect(snapshot.strongestMicrosyllabus[0].accuracy).toBeGreaterThanOrEqual(snapshot.strongestMicrosyllabus.at(-1)!.accuracy);
+  });
+});
+
+// ============================================================================================
+// PYQ Weak Spots & Repeated Mistakes (Phase 6 Step 2)
+// ============================================================================================
+
+describe('computeUpscCsePrelimsRepeatedMistakes — empty/single-attempt cases', () => {
+  it('an empty attempt history produces an empty result, never throws', () => {
+    expect(computeUpscCsePrelimsRepeatedMistakes(BANK, [])).toEqual([]);
+  });
+
+  it('a single attempt produces one entry per answered question, correctly split correct/wrong', () => {
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(BANK, [attempt()]); // q1 correct ('a'), q2 wrong ('b' != 'a')
+    const byId = Object.fromEntries(mistakes.map((m) => [m.questionId, m]));
+    expect(mistakes).toHaveLength(2);
+    expect(byId.q1).toMatchObject({ totalAttempts: 1, correctCount: 1, wrongCount: 0, latestCorrect: true });
+    expect(byId.q2).toMatchObject({ totalAttempts: 1, correctCount: 0, wrongCount: 1, latestCorrect: false });
+  });
+});
+
+describe('computeUpscCsePrelimsRepeatedMistakes — full mistake history is preserved, never just the latest attempt', () => {
+  it('wrong, wrong, correct -> wrongCount stays 2 even after the later correct answer', () => {
+    const attempts = [
+      attempt({ id: 'r1', submittedAt: '2026-01-01T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'b' } }), // wrong
+      attempt({ id: 'r2', submittedAt: '2026-01-02T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'b' } }), // wrong
+      attempt({ id: 'r3', submittedAt: '2026-01-03T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'a' } }), // correct
+    ];
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(BANK, attempts);
+    expect(mistakes).toEqual([
+      { questionId: 'q1', totalAttempts: 3, correctCount: 1, wrongCount: 2, lastAttemptAt: '2026-01-03T00:00:00.000Z', latestCorrect: true },
+    ]);
+  });
+});
+
+describe('computeUpscCsePrelimsRepeatedMistakes — multiple questions aggregated correctly', () => {
+  it('each question gets its own independent tally', () => {
+    const attempts = [attempt({ questionIds: ['q1', 'q2'], answers: { q1: 'a', q2: 'a' }, correctCount: 2, wrongCount: 0 })]; // both correct
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(BANK, attempts);
+    expect(mistakes.map((m) => m.questionId).sort()).toEqual(['q1', 'q2']);
+    expect(mistakes.every((m) => m.wrongCount === 0 && m.correctCount === 1)).toBe(true);
+  });
+});
+
+describe('computeUpscCsePrelimsRepeatedMistakes — 2024 answer-key limitation: never fabricates a result for an unkeyed question', () => {
+  it('a question with no correctOptionId (e.g. an unkeyed 2024 record) is skipped entirely, never counted as a mistake', () => {
+    const unkeyed2024 = q({ id: 'q2024', year: 2024, correctOptionId: undefined });
+    const bankWith2024 = [...BANK, unkeyed2024];
+    // The user answered it, but there is no key to score against.
+    const attempts = [attempt({ questionIds: ['q1', 'q2024'], answers: { q1: 'a', q2024: 'a' }, correctCount: 1, wrongCount: 0 })];
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(bankWith2024, attempts);
+    expect(mistakes.map((m) => m.questionId)).toEqual(['q1']); // q2024 never appears — not correct, not wrong
+  });
+});
+
+describe('topUpscCsePrelimsRepeatedMistakes — worst-first view', () => {
+  it('only includes questions with at least one wrong answer, worst first', () => {
+    const attempts = [
+      attempt({ id: 'm1', submittedAt: '2026-01-01T00:00:00.000Z', questionIds: ['q1', 'q2'], answers: { q1: 'b', q2: 'b' } }), // both wrong
+      attempt({ id: 'm2', submittedAt: '2026-01-02T00:00:00.000Z', questionIds: ['q1'], answers: { q1: 'b' } }), // q1 wrong again
+    ];
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(BANK, attempts);
+    const top = topUpscCsePrelimsRepeatedMistakes(mistakes, 6);
+    expect(top[0]).toMatchObject({ questionId: 'q1', wrongCount: 2 });
+    expect(top[1]).toMatchObject({ questionId: 'q2', wrongCount: 1 });
+  });
+});
+
+describe('topMicrosyllabusByMistakes / topUpscCsePrelimsSubjectsByMistakes — weak-area ranking by mistake volume, reusing computeUpscCsePrelimsPerformance\'s own arrays', () => {
+  it('ranks microsyllabus areas by raw wrong count, never a second aggregation pass over attempts', () => {
+    const attempts = [attempt({ questionIds: ['q1', 'q2'], answers: { q1: 'b', q2: 'b' }, correctCount: 0, wrongCount: 2 })]; // both wrong
+    const snapshot = computeUpscCsePrelimsPerformance(BANK, attempts, UPSC_CSE_PRELIMS_SYLLABUS)!;
+    const top = topMicrosyllabusByMistakes(snapshot.microsyllabus, 6);
+    expect(top.some((m) => m.microsyllabusId === 'unmapped')).toBe(true); // q2's needs_review bucket is never dropped
+  });
+
+  it('never forces a needs_review question into a real microsyllabus — its mistakes surface only under the Unmapped bucket', () => {
+    const attempts = [attempt({ questionIds: ['q2'], answers: { q2: 'b' }, correctCount: 0, wrongCount: 1 })]; // q2 is needs_review
+    const snapshot = computeUpscCsePrelimsPerformance(BANK, attempts, UPSC_CSE_PRELIMS_SYLLABUS)!;
+    const top = topMicrosyllabusByMistakes(snapshot.microsyllabus, 6);
+    expect(top).toHaveLength(1);
+    expect(top[0].microsyllabusId).toBe('unmapped');
+    expect(top[0].title).toBe('Needs Review / Unmapped');
+  });
+
+  it('subject-level ranking mirrors the same reuse pattern', () => {
+    const attempts = [attempt({ questionIds: ['q1', 'q2'], answers: { q1: 'b', q2: 'b' }, correctCount: 0, wrongCount: 2 })];
+    const snapshot = computeUpscCsePrelimsPerformance(BANK, attempts, UPSC_CSE_PRELIMS_SYLLABUS)!;
+    const top = topUpscCsePrelimsSubjectsByMistakes(snapshot.subjects, 6);
+    expect(top.map((s) => s.subject).sort()).toEqual(['Geography', 'History']);
+  });
+});
+
+describe('computeUpscCsePrelimsRecentVsPreviousTrend — insufficient data', () => {
+  it('fewer than 2 * windowSize attempts -> insufficient_data, never a fabricated trend', () => {
+    const attempts = Array.from({ length: UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE }, (_, i) =>
+      attempt({ id: `t${i}`, submittedAt: `2026-01-0${i + 1}T00:00:00.000Z`, correctCount: 1, wrongCount: 0 }),
+    );
+    const trend = computeUpscCsePrelimsRecentVsPreviousTrend(attempts);
+    expect(trend.direction).toBe('insufficient_data');
+    expect(trend.recentAccuracy).toBeNull();
+  });
+
+  it('zero attempts -> insufficient_data with zero counts', () => {
+    const trend = computeUpscCsePrelimsRecentVsPreviousTrend([]);
+    expect(trend).toEqual({ recentAttemptCount: 0, previousAttemptCount: 0, recentAccuracy: null, previousAccuracy: null, direction: 'insufficient_data' });
+  });
+});
+
+describe('computeUpscCsePrelimsRecentVsPreviousTrend — improving / declining / stable, using each attempt\'s own stored correct/wrongCount (never recomputed)', () => {
+  function windowAttempts(prefix: string, startDay: number, count: number, correctCount: number, wrongCount: number): UpscCsePrelimsPyqAttempt[] {
+    return Array.from({ length: count }, (_, i) =>
+      attempt({
+        id: `${prefix}${i}`,
+        submittedAt: `2026-02-${String(startDay + i).padStart(2, '0')}T00:00:00.000Z`,
+        correctCount,
+        wrongCount,
+      }),
+    );
+  }
+
+  it('improving: recent accuracy well above previous accuracy', () => {
+    const previous = windowAttempts('p', 1, UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE, 2, 8); // 20%
+    const recent = windowAttempts('r', 10, UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE, 8, 2); // 80%
+    const trend = computeUpscCsePrelimsRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('improving');
+  });
+
+  it('declining: recent accuracy well below previous accuracy', () => {
+    const previous = windowAttempts('p', 1, UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE, 8, 2); // 80%
+    const recent = windowAttempts('r', 10, UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE, 2, 8); // 20%
+    const trend = computeUpscCsePrelimsRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('declining');
+  });
+
+  it('stable: identical accuracy in both windows is safely inside the stable band', () => {
+    const previous = windowAttempts('p', 1, UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE, 6, 4); // 60%
+    const recent = windowAttempts('r', 10, UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE, 6, 4); // 60%
+    const trend = computeUpscCsePrelimsRecentVsPreviousTrend([...previous, ...recent]);
+    expect(trend.direction).toBe('stable');
+  });
+});
+
+describe('PYQ Weak Spots — workspace isolation (reading the real store, not a mock)', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+      contentRelationships: [],
+      upscCsePrelimsPyqAttempts: [],
+    });
+  }
+
+  it('computeUpscCsePrelimsRepeatedMistakes fed with upscCsePrelimsPyqAttempts after a workspace switch never reflects another workspace\'s attempts', () => {
+    fullReset();
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(attempt({ id: 'upsc-a1', questionIds: ['q1'], answers: { q1: 'b' }, correctCount: 0, wrongCount: 1 }));
+    expect(computeUpscCsePrelimsRepeatedMistakes(BANK, useAppStore.getState().upscCsePrelimsPyqAttempts)).toHaveLength(1);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().upscCsePrelimsPyqAttempts).toEqual([]);
+    expect(computeUpscCsePrelimsRepeatedMistakes(BANK, useAppStore.getState().upscCsePrelimsPyqAttempts)).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(computeUpscCsePrelimsRepeatedMistakes(BANK, useAppStore.getState().upscCsePrelimsPyqAttempts)).toHaveLength(1);
   });
 });

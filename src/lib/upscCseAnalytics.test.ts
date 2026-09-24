@@ -193,3 +193,37 @@ describe('computeUpscCseAnalytics — study task analytics', () => {
     expect(snapshot.studyTasks.overdueCount).toBe(0);
   });
 });
+
+describe('computeUpscCseAnalytics — weakSpots wiring (Phase 6 Step 2)', () => {
+  it('weakSpots is present with empty arrays and an insufficient_data trend when there is no performance yet', () => {
+    const snapshot = computeUpscCseAnalytics(baseInput({ pyqBank: [pyq({ id: 'q1' })] }));
+    expect(snapshot.weakSpots).toEqual({
+      repeatedMistakeMicrosyllabus: [],
+      repeatedMistakeSubjects: [],
+      trend: { recentAttemptCount: 0, previousAttemptCount: 0, recentAccuracy: null, previousAccuracy: null, direction: 'insufficient_data' },
+    });
+  });
+
+  it('repeatedMistakeMicrosyllabus/repeatedMistakeSubjects reuse performance\'s own microsyllabus[]/subjects[] — real mistakes surface without a second attempt scan', () => {
+    const bank = [pyq({ id: 'q1' })];
+    const attempts: UpscCsePrelimsPyqAttempt[] = [
+      {
+        id: 'a1',
+        submittedAt: '2026-09-01T00:00:00.000Z',
+        year: 2026,
+        paper: 'GS Paper I',
+        subject: 'all',
+        microsyllabusId: 'all',
+        questionIds: ['q1'],
+        answers: { q1: 'b' }, // wrong
+        correctCount: 0,
+        wrongCount: 1,
+        unansweredCount: 0,
+        accuracy: 0,
+      },
+    ];
+    const snapshot = computeUpscCseAnalytics(baseInput({ pyqBank: bank, attempts }));
+    expect(snapshot.weakSpots.repeatedMistakeMicrosyllabus).toEqual([expect.objectContaining({ microsyllabusId: 'ms1', wrong: 1 })]);
+    expect(snapshot.weakSpots.repeatedMistakeSubjects).toEqual([expect.objectContaining({ subject: 'History', wrong: 1 })]);
+  });
+});

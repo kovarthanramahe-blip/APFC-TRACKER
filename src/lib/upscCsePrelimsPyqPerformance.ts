@@ -199,3 +199,163 @@ export function computeUpscCsePrelimsPerformance(
 
   return { overall, subjects, microsyllabus, weakMicrosyllabus, strongestMicrosyllabus, yearPaper, unattemptedCount };
 }
+
+// ============================================================================================
+// PYQ Weak Spots & Repeated Mistakes (Phase 6 Step 2) — the UPSC CSE counterpart to
+// lib/pyqPerformance.ts's own section of the same name; see that module's header for the full
+// design rationale (why this is additive, not a second scoring/accuracy implementation, and why
+// "weak area by mistake volume" re-sorts the existing microsyllabus[] array rather than rescanning
+// attempts). topMicrosyllabusByMistakes/topSubjectsByMistakes preserve the existing
+// UNMAPPED_MICROSYLLABUS/UNCLASSIFIED_SUBJECT buckets automatically, simply by re-sorting arrays
+// that already fold needs_review questions into those sentinel buckets — a needs_review question's
+// mistakes are never dropped and never misattributed to a real microsyllabus/subject.
+//
+// 2024 answer-key limitation (see data/upscCsePrelimsPyqBatch2024Q1Q100Raw.ts's own header): 2024
+// questions have no correctOptionId at all. computeRepeatedMistakes below explicitly skips any
+// question with no correctOptionId, so an attempted-but-unkeyed 2024 question contributes to
+// NEITHER correctCount nor wrongCount here — never fabricated as a "mistake". This mirrors the
+// same caution the batch import pipeline already applies to classification (never guess); this
+// module applies it to scoring output instead.
+// ============================================================================================
+
+export interface UpscCsePrelimsRepeatedMistake {
+  questionId: string;
+  /** correctCount + wrongCount — an attempt where this question was left unanswered, or where the
+   * question has no correctOptionId at all (see 2024 note above), doesn't count. */
+  totalAttempts: number;
+  correctCount: number;
+  wrongCount: number;
+  /** submittedAt of the most recent SCOREABLE attempt that included this question. */
+  lastAttemptAt: string;
+  /** Whether that most recent attempt got it right — mirrors revisionStatusOf's "latest wins"
+   * semantics for display only; wrongCount is never reduced by a later correct answer. */
+  latestCorrect: boolean;
+}
+
+/**
+ * Full-history per-question mistake tally across every attempt (see this section's header).
+ * Reuses upscCsePrelimsQuestionStatus for correctness — never a second correct/wrong
+ * determination. A question with no correctOptionId (2024, until a key is attached) is skipped
+ * entirely, never counted as a fabricated "wrong".
+ */
+export function computeUpscCsePrelimsRepeatedMistakes(
+  bank: readonly UpscCsePrelimsBatchPyq[],
+  attempts: readonly UpscCsePrelimsPyqAttempt[],
+): UpscCsePrelimsRepeatedMistake[] {
+  const agg = new Map<string, { correctCount: number; wrongCount: number; lastAttemptAt: string; latestCorrect: boolean }>();
+
+  const chronological = [...attempts].sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+
+  for (const attempt of chronological) {
+    for (const qid of attempt.questionIds) {
+      const q = bank.find((p) => p.id === qid);
+      if (!q) continue; // defensive: skip if a question id can't be resolved
+      if (q.correctOptionId === undefined) continue; // no answer key yet (2024) — never fabricate a result
+      const status = upscCsePrelimsQuestionStatus(q, attempt.answers);
+      if (status === 'unanswered') continue;
+
+      const entry = agg.get(qid) ?? { correctCount: 0, wrongCount: 0, lastAttemptAt: attempt.submittedAt, latestCorrect: false };
+      if (status === 'correct') entry.correctCount += 1;
+      else entry.wrongCount += 1;
+      entry.lastAttemptAt = attempt.submittedAt;
+      entry.latestCorrect = status === 'correct';
+      agg.set(qid, entry);
+    }
+  }
+
+  return Array.from(agg.entries()).map(([questionId, v]) => ({
+    questionId,
+    totalAttempts: v.correctCount + v.wrongCount,
+    correctCount: v.correctCount,
+    wrongCount: v.wrongCount,
+    lastAttemptAt: v.lastAttemptAt,
+    latestCorrect: v.latestCorrect,
+  }));
+}
+
+/** Worst-first view of computeUpscCsePrelimsRepeatedMistakes's output. */
+export function topUpscCsePrelimsRepeatedMistakes(mistakes: UpscCsePrelimsRepeatedMistake[], limit = 6): UpscCsePrelimsRepeatedMistake[] {
+  return [...mistakes]
+    .filter((m) => m.wrongCount > 0)
+    .sort((a, b) => b.wrongCount - a.wrongCount || a.questionId.localeCompare(b.questionId))
+    .slice(0, limit);
+}
+
+/** Microsyllabus areas ranked by raw mistake volume (not accuracy) — re-sorts
+ * computeUpscCsePrelimsPerformance's own microsyllabus[], never a second attempt scan. Includes
+ * the "Needs Review / Unmapped" bucket exactly as computeUpscCsePrelimsPerformance already built
+ * it, never dropped. */
+export function topMicrosyllabusByMistakes(microsyllabus: UpscCsePrelimsMicrosyllabusPerformance[], limit = 6): UpscCsePrelimsMicrosyllabusPerformance[] {
+  return [...microsyllabus]
+    .filter((m) => m.wrong > 0)
+    .sort((a, b) => b.wrong - a.wrong || a.title.localeCompare(b.title))
+    .slice(0, limit);
+}
+
+/** Same as topMicrosyllabusByMistakes, at subject granularity. */
+export function topUpscCsePrelimsSubjectsByMistakes(subjects: UpscCsePrelimsSubjectPerformance[], limit = 6): UpscCsePrelimsSubjectPerformance[] {
+  return [...subjects]
+    .filter((s) => s.wrong > 0)
+    .sort((a, b) => b.wrong - a.wrong || a.subject.localeCompare(b.subject))
+    .slice(0, limit);
+}
+
+export type UpscCsePrelimsPerformanceTrendDirection = 'improving' | 'declining' | 'stable' | 'insufficient_data';
+
+export interface UpscCsePrelimsPerformanceTrend {
+  recentAttemptCount: number;
+  previousAttemptCount: number;
+  recentAccuracy: number | null;
+  previousAccuracy: number | null;
+  direction: UpscCsePrelimsPerformanceTrendDirection;
+}
+
+/** Same window size and reasoning as lib/pyqPerformance.ts's own TREND_WINDOW_SIZE — kept as a
+ * separate constant (not imported from that file) to preserve this module's existing "no shared
+ * code between the two workspaces' PYQ modules" convention, same as every other export here. */
+export const UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE = 5;
+
+/** Same reasoning as lib/pyqPerformance.ts's own TREND_STABLE_BAND_PCT. */
+export const UPSC_CSE_PRELIMS_TREND_STABLE_BAND_PCT = 5;
+
+/**
+ * Deterministic recent-vs-previous accuracy comparison, reusing each attempt's OWN already-stored
+ * correctCount/wrongCount (never recomputed). Requires a FULL window on both sides before
+ * returning anything but 'insufficient_data'.
+ */
+export function computeUpscCsePrelimsRecentVsPreviousTrend(
+  attempts: readonly UpscCsePrelimsPyqAttempt[],
+  windowSize: number = UPSC_CSE_PRELIMS_TREND_WINDOW_SIZE,
+): UpscCsePrelimsPerformanceTrend {
+  const insufficient: UpscCsePrelimsPerformanceTrend = {
+    recentAttemptCount: Math.min(attempts.length, windowSize),
+    previousAttemptCount: Math.max(0, Math.min(attempts.length - windowSize, windowSize)),
+    recentAccuracy: null,
+    previousAccuracy: null,
+    direction: 'insufficient_data',
+  };
+  if (attempts.length < windowSize * 2) return insufficient;
+
+  const newestFirst = [...attempts].sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  const recent = newestFirst.slice(0, windowSize);
+  const previous = newestFirst.slice(windowSize, windowSize * 2);
+
+  const accuracyOf = (window: readonly UpscCsePrelimsPyqAttempt[]): number | null => {
+    const correct = window.reduce((sum, a) => sum + a.correctCount, 0);
+    const wrong = window.reduce((sum, a) => sum + a.wrongCount, 0);
+    const attemptedQuestions = correct + wrong;
+    return attemptedQuestions > 0 ? (correct / attemptedQuestions) * 100 : null;
+  };
+
+  const recentAccuracy = accuracyOf(recent);
+  const previousAccuracy = accuracyOf(previous);
+  if (recentAccuracy === null || previousAccuracy === null) {
+    return { recentAttemptCount: recent.length, previousAttemptCount: previous.length, recentAccuracy, previousAccuracy, direction: 'insufficient_data' };
+  }
+
+  const delta = recentAccuracy - previousAccuracy;
+  const direction: UpscCsePrelimsPerformanceTrendDirection =
+    delta > UPSC_CSE_PRELIMS_TREND_STABLE_BAND_PCT ? 'improving' : delta < -UPSC_CSE_PRELIMS_TREND_STABLE_BAND_PCT ? 'declining' : 'stable';
+
+  return { recentAttemptCount: recent.length, previousAttemptCount: previous.length, recentAccuracy, previousAccuracy, direction };
+}
