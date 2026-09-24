@@ -5,6 +5,7 @@ import { GraduationCap, Menu, X, Moon, Sun, Laptop } from 'lucide-react';
 import { getNavItemsForWorkspace, getMobileNavItemsForWorkspace, resolveActiveNavItem } from './nav';
 import { useAppStore } from '../../lib/store';
 import { ACTIVE_WORKSPACES, getWorkspaceMeta } from '../../lib/workspace';
+import { getWorkspaceAccent } from '../../lib/workspaceAccent';
 import { daysUntil } from '../../lib/utils';
 import { cx } from '../../lib/utils';
 
@@ -30,7 +31,7 @@ function WorkspaceSwitch() {
           {activeWorkspaceId === w.id && (
             <motion.span
               layoutId="workspace-pill"
-              className="absolute inset-0 rounded-full bg-brand-600"
+              className={cx('absolute inset-0 rounded-full', getWorkspaceAccent(w.id).bg)}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             />
           )}
@@ -97,11 +98,12 @@ function CountdownChip() {
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const workspace = getWorkspaceMeta(activeWorkspaceId);
+  const accent = getWorkspaceAccent(activeWorkspaceId);
   const navItems = getNavItemsForWorkspace(activeWorkspaceId);
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2.5 px-5 py-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-900 text-gold-300 shadow-lg shadow-brand-900/30">
+        <div className={cx('flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br text-gold-300 shadow-lg', accent.gradientFrom, accent.gradientTo, accent.shadow)}>
           <GraduationCap className="h-5 w-5" strokeWidth={2.2} />
         </div>
         <div>
@@ -130,7 +132,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               cx(
                 'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-brand-600 text-white shadow-sm shadow-brand-600/30'
+                  ? cx(accent.bg, 'text-white shadow-sm', accent.shadow)
                   : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white',
               )
             }
@@ -158,6 +160,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // so e.g. "/phd-research/bibliography" resolves to "Working Bibliography", never falling back to
   // "Research Documents" just because that route is also a path prefix.
   const activeLabel = resolveActiveNavItem(getNavItemsForWorkspace(activeWorkspaceId), location.pathname)?.label ?? getWorkspaceMeta(activeWorkspaceId).shortLabel;
+  const accent = getWorkspaceAccent(activeWorkspaceId);
 
   return (
     <div className="min-h-screen bg-grid">
@@ -241,10 +244,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               to={item.to}
               end={item.end ?? item.to === '/'}
               className={({ isActive }) =>
-                cx(
-                  'flex flex-col items-center gap-0.5 rounded-lg px-3 py-1.5 text-[10px] font-medium transition-colors',
-                  isActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500',
-                )
+                cx('flex flex-col items-center gap-0.5 rounded-lg px-3 py-1.5 text-[10px] font-medium transition-colors', isActive ? accent.text : 'text-slate-400 dark:text-slate-500')
               }
             >
               {({ isActive }) => (

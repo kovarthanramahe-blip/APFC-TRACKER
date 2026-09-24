@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
 import {
@@ -354,6 +355,7 @@ export function DeleteConfirmModal({ entry, onCancel, onConfirm }: { entry: Repo
 export default function Repository() {
   const navigate = useNavigate();
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const accent = getWorkspaceAccent(activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
   const notes = useAppStore((s) => s.notes);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
@@ -590,9 +592,7 @@ export default function Repository() {
                       aria-label={`Filter by tag: ${tag}`}
                       className={cx(
                         'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
-                        active
-                          ? 'bg-brand-600 text-white'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
+                        active ? cx(accent.bg, 'text-white') : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
                       )}
                     >
                       <Tag className="h-3 w-3" aria-hidden="true" /> {tag}

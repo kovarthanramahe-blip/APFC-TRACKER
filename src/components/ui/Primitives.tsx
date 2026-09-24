@@ -2,6 +2,8 @@ import { type ReactNode, type ButtonHTMLAttributes, type HTMLAttributes } from '
 import { motion } from 'framer-motion';
 import type { LucideIcon } from 'lucide-react';
 import { cx } from '../../lib/utils';
+import { useAppStore } from '../../lib/store';
+import { getWorkspaceAccent } from '../../lib/workspaceAccent';
 
 export function Card({
   children,
@@ -20,10 +22,15 @@ export function Card({
   );
 }
 
+/** `colorClassName` defaults to the ACTIVE workspace's own accent bar colour (see
+ * lib/workspaceAccent.ts) rather than a hard-coded blue, so every caller that doesn't need a
+ * specific semantic colour (e.g. accuracy-based green/red) automatically reflects the current
+ * workspace. A caller passing its own `colorClassName` is unaffected — this default is only ever
+ * used when one isn't supplied. */
 export function ProgressBar({
   value,
   max = 100,
-  colorClassName = 'bg-brand-500',
+  colorClassName,
   trackClassName,
   height = 'h-2',
 }: {
@@ -33,11 +40,13 @@ export function ProgressBar({
   trackClassName?: string;
   height?: string;
 }) {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const resolvedColor = colorClassName ?? getWorkspaceAccent(activeWorkspaceId).bar;
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
   return (
     <div className={cx('w-full rounded-full bg-slate-200/70 dark:bg-slate-700/50 overflow-hidden', height, trackClassName)}>
       <motion.div
-        className={cx('h-full rounded-full', colorClassName)}
+        className={cx('h-full rounded-full', resolvedColor)}
         initial={{ width: 0 }}
         animate={{ width: `${pct}%` }}
         transition={{ duration: 0.7, ease: 'easeOut' }}
@@ -119,10 +128,12 @@ export function PageHeader({
   description?: string;
   action?: ReactNode;
 }) {
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const accent = getWorkspaceAccent(activeWorkspaceId);
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6">
       <div>
-        {eyebrow && <p className="text-xs font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400 mb-1">{eyebrow}</p>}
+        {eyebrow && <p className={cx('text-xs font-semibold uppercase tracking-widest mb-1', accent.text)}>{eyebrow}</p>}
         <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">{title}</h1>
         {description && <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base">{description}</p>}
       </div>
