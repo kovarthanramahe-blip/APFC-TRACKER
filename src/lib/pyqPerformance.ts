@@ -375,3 +375,29 @@ export function computeRecentVsPreviousTrend(attempts: PYQAttempt[], windowSize:
 
   return { recentAttemptCount: recent.length, previousAttemptCount: previous.length, recentAccuracy, previousAccuracy, direction };
 }
+
+// ============================================================================================
+// Revise My Repeated Mistakes (Phase 6 Step 3) — turns computeRepeatedMistakes's own worst-first
+// ranking into a session-ready list of PYQ ids, launched through the EXISTING revision session
+// (pages/PYQTest.tsx's startRevision/recordRevisionCorrect/recordRevisionIncorrect, backed by the
+// unmodified lib/revisionQueue.ts). This selector invents no new priority score of its own — it
+// reuses topRepeatedMistakes's ranking verbatim, exactly like lib/weakTopicPractice.ts's
+// selectWeakTopicPracticeIds reuses sortByAttentionPriority rather than re-deriving urgency itself.
+// ============================================================================================
+
+/** Roughly one focused revision session's worth of repeated-mistake questions. */
+export const DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP = 20;
+
+/**
+ * Selects PYQ ids for a "Revise My Repeated Mistakes" session: the worst-first ranking
+ * topRepeatedMistakes already computes (most wrong answers first), capped to a session-sized
+ * list — order is preserved exactly as topRepeatedMistakes returns it. Ids are defensively
+ * de-duplicated via a Set, even though computeRepeatedMistakes's own per-question aggregation
+ * already guarantees uniqueness. Never mutates `mistakes`. Returns [] when there are no repeated
+ * mistakes yet, or when `cap` is zero or negative.
+ */
+export function selectRepeatedMistakePracticeIds(mistakes: PyqRepeatedMistake[], cap: number = DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP): string[] {
+  if (cap <= 0) return [];
+  const ranked = topRepeatedMistakes(mistakes, cap);
+  return [...new Set(ranked.map((m) => m.questionId))];
+}

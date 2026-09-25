@@ -359,3 +359,32 @@ export function computeUpscCsePrelimsRecentVsPreviousTrend(
 
   return { recentAttemptCount: recent.length, previousAttemptCount: previous.length, recentAccuracy, previousAccuracy, direction };
 }
+
+// ============================================================================================
+// Revise My Repeated Mistakes (Phase 6 Step 3) — the UPSC CSE counterpart to
+// lib/pyqPerformance.ts's own selectRepeatedMistakePracticeIds, same design: turns
+// computeUpscCsePrelimsRepeatedMistakes's worst-first ranking into a session-ready list of
+// question ids, launched through the EXISTING revision session (pages/UpscCsePyqTest.tsx's
+// startRevision, backed by the unmodified lib/revisionQueue.ts). Since
+// computeUpscCsePrelimsRepeatedMistakes already skips any question with no correctOptionId (the
+// 2024 set, until a real answer key is attached — see that function's own header), a 2024
+// question can never appear in this selector's output either.
+// ============================================================================================
+
+/** Same reasoning as lib/pyqPerformance.ts's own DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP. */
+export const DEFAULT_UPSC_CSE_PRELIMS_REPEATED_MISTAKE_PRACTICE_CAP = 20;
+
+/**
+ * Selects question ids for a "Revise My Repeated Mistakes" session: the worst-first ranking
+ * topUpscCsePrelimsRepeatedMistakes already computes, capped to a session-sized list — order
+ * preserved exactly, ids defensively de-duplicated via a Set. Never mutates `mistakes`. Returns
+ * [] when there are no repeated mistakes yet, or when `cap` is zero or negative.
+ */
+export function selectUpscCsePrelimsRepeatedMistakePracticeIds(
+  mistakes: UpscCsePrelimsRepeatedMistake[],
+  cap: number = DEFAULT_UPSC_CSE_PRELIMS_REPEATED_MISTAKE_PRACTICE_CAP,
+): string[] {
+  if (cap <= 0) return [];
+  const ranked = topUpscCsePrelimsRepeatedMistakes(mistakes, cap);
+  return [...new Set(ranked.map((m) => m.questionId))];
+}

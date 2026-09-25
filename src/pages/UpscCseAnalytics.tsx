@@ -11,7 +11,11 @@ import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
 import { computeUpscCseAnalytics } from '../lib/upscCseAnalytics';
 import { UNMAPPED_MICROSYLLABUS } from '../lib/upscCsePrelimsPyqFilters';
-import type { UpscCsePrelimsPerformanceTrend } from '../lib/upscCsePrelimsPyqPerformance';
+import {
+  computeUpscCsePrelimsRepeatedMistakes,
+  selectUpscCsePrelimsRepeatedMistakePracticeIds,
+  type UpscCsePrelimsPerformanceTrend,
+} from '../lib/upscCsePrelimsPyqPerformance';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
@@ -93,6 +97,15 @@ export default function UpscCseAnalytics() {
         today,
       }),
     [coverage, attempts, bookmarkedPyqIds, revisionQueue, studyTasks, today],
+  );
+
+  // "Revise My Repeated Mistakes" (Phase 6 Step 3) — the actual question-level candidate list for
+  // the action below, computed the same way pages/UpscCsePyqTest.tsx computes it for its own
+  // auto-start deep link (?view=revise_mistakes). computeUpscCsePrelimsRepeatedMistakes already
+  // excludes any 2024 question (no correctOptionId), so one can never appear here either.
+  const repeatedMistakePracticeIds = useMemo(
+    () => selectUpscCsePrelimsRepeatedMistakePracticeIds(computeUpscCsePrelimsRepeatedMistakes(UPSC_CSE_PRELIMS_PYQ_BANK, attempts)),
+    [attempts],
   );
 
   if (activeWorkspaceId !== 'upsc_cse') {
@@ -242,6 +255,19 @@ export default function UpscCseAnalytics() {
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {/* Revise My Repeated Mistakes (Phase 6 Step 3) — question-level, not
+                        microsyllabus-level: launches the EXISTING revision session
+                        (pages/UpscCsePyqTest.tsx's startRevision) via the ?view=revise_mistakes deep link. */}
+                    {repeatedMistakePracticeIds.length > 0 ? (
+                      <Link
+                        to="/upsc-pyq-test?view=revise_mistakes"
+                        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                      >
+                        <Repeat className="h-3 w-3" /> Revise My Repeated Mistakes ({repeatedMistakePracticeIds.length})
+                      </Link>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-slate-400">Revise My Repeated Mistakes — nothing to revise yet.</p>
                     )}
                   </div>
                   <div>

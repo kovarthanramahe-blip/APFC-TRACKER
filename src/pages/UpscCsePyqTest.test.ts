@@ -5,7 +5,11 @@ import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import { NAV_ITEMS } from '../components/layout/nav';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
 import { computeEligibleRevisionIds, computeRevisionStatusMap } from '../lib/upscCsePrelimsPyqFilters';
-import { computeUpscCsePrelimsPerformance } from '../lib/upscCsePrelimsPyqPerformance';
+import {
+  computeUpscCsePrelimsPerformance,
+  computeUpscCsePrelimsRepeatedMistakes,
+  selectUpscCsePrelimsRepeatedMistakePracticeIds,
+} from '../lib/upscCsePrelimsPyqPerformance';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import type { UpscCsePrelimsPyqAttempt } from '../lib/upscCsePrelimsPyqAttempt';
 import { SYLLABUS } from '../data/syllabus';
@@ -258,5 +262,52 @@ describe('UPSC CSE PYQ Test page — APFC/PhD regression', () => {
     useAppStore.setState({ activeWorkspaceId: 'upsc_cse', pyqAttempts: [] });
     useAppStore.getState().addUpscCsePrelimsPyqAttempt(fixtureAttempt());
     expect(useAppStore.getState().pyqAttempts).toEqual([]);
+  });
+});
+
+describe('UPSC CSE PYQ Test page — existing "Revise Now" flow still works (Phase 6 Step 3 regression)', () => {
+  beforeEach(fullReset);
+
+  it('recordRevisionCorrect/Incorrect and getDueItems behave exactly as before startRevision gained idsOverride', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const qid = UPSC_CSE_PRELIMS_PYQ_BANK[0].id;
+    useAppStore.getState().recordRevisionIncorrect(qid, '2026-01-01');
+    expect(useAppStore.getState().revisionQueue[qid].box).toBe(1);
+    useAppStore.getState().recordRevisionCorrect(qid, '2026-01-02');
+    expect(useAppStore.getState().revisionQueue[qid].box).toBe(2);
+    const due = getDueItems(useAppStore.getState().revisionQueue, [qid], '2026-01-02');
+    expect(due.some((d) => d.pyqId === qid)).toBe(false); // just advanced, not due again same day
+  });
+});
+
+describe('UPSC CSE PYQ Test page — "Revise My Repeated Mistakes" resolves to real questions (Phase 6 Step 3)', () => {
+  beforeEach(fullReset);
+
+  it('selectUpscCsePrelimsRepeatedMistakePracticeIds, fed from real store attempts, resolves to a real bank id', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const q = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.correctOptionId !== undefined)!;
+    const wrongOption = q.options.find((o) => o.id !== q.correctOptionId)!.id;
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(
+      fixtureAttempt({ questionIds: [q.id], answers: { [q.id]: wrongOption }, correctCount: 0, wrongCount: 1, accuracy: 0 }),
+    );
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(UPSC_CSE_PRELIMS_PYQ_BANK, useAppStore.getState().upscCsePrelimsPyqAttempts);
+    const ids = selectUpscCsePrelimsRepeatedMistakePracticeIds(mistakes);
+    expect(ids).toEqual([q.id]);
+    expect(UPSC_CSE_PRELIMS_PYQ_BANK.some((p) => p.id === ids[0])).toBe(true);
+  });
+
+  it('a 2024 question can never appear even if it was answered in the same attempt as a real mistake', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const q2024 = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.year === 2024);
+    const q = UPSC_CSE_PRELIMS_PYQ_BANK.find((r) => r.correctOptionId !== undefined)!;
+    const wrongOption = q.options.find((o) => o.id !== q.correctOptionId)!.id;
+    const questionIds = q2024 ? [q.id, q2024.id] : [q.id];
+    const answers: Record<string, string> = { [q.id]: wrongOption };
+    if (q2024) answers[q2024.id] = q2024.options[0].id;
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(fixtureAttempt({ questionIds, answers, correctCount: 0, wrongCount: q2024 ? 1 : 1, accuracy: 0 }));
+    const mistakes = computeUpscCsePrelimsRepeatedMistakes(UPSC_CSE_PRELIMS_PYQ_BANK, useAppStore.getState().upscCsePrelimsPyqAttempts);
+    const ids = selectUpscCsePrelimsRepeatedMistakePracticeIds(mistakes);
+    if (q2024) expect(ids).not.toContain(q2024.id);
+    expect(ids).toContain(q.id);
   });
 });

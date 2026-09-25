@@ -23,7 +23,15 @@ import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
 import { computeAggregateAccuracy } from '../lib/mockTestStats';
-import { computePyqPerformance, topTopicsByMistakes, topSubjectsByMistakes, computeRecentVsPreviousTrend, type PyqPerformanceTrend } from '../lib/pyqPerformance';
+import {
+  computePyqPerformance,
+  computeRepeatedMistakes,
+  topTopicsByMistakes,
+  topSubjectsByMistakes,
+  computeRecentVsPreviousTrend,
+  selectRepeatedMistakePracticeIds,
+  type PyqPerformanceTrend,
+} from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressResult } from '../lib/studyPlanProgress';
 import type { PlanTaskType } from '../lib/studyPlan';
@@ -59,6 +67,11 @@ export default function Analytics() {
   const repeatedMistakeTopics = useMemo(() => (pyqPerf ? topTopicsByMistakes(pyqPerf.topics, 4) : []), [pyqPerf]);
   const repeatedMistakeSubjects = useMemo(() => (pyqPerf ? topSubjectsByMistakes(pyqPerf.subjects, 3) : []), [pyqPerf]);
   const pyqTrend = useMemo(() => computeRecentVsPreviousTrend(pyqAttempts), [pyqAttempts]);
+
+  // "Revise My Repeated Mistakes" (Phase 6 Step 3) — the actual question-level candidate list for
+  // the action below, computed the same way pages/PYQTest.tsx computes it for its own auto-start
+  // deep link (?mode=repeated_mistakes); no scoring/session logic lives on this page.
+  const repeatedMistakePracticeIds = useMemo(() => selectRepeatedMistakePracticeIds(computeRepeatedMistakes(PYQ_BANK, pyqAttempts)), [pyqAttempts]);
 
   // Revision Queue summary (Stage 3) — reuses lib/revisionQueue's getQueueCounts and
   // lib/pyqFilters' computeEligibleRevisionIds verbatim; no second scheduling/eligibility engine.
@@ -395,6 +408,19 @@ export default function Analytics() {
                             </li>
                           ))}
                         </ul>
+                      )}
+                      {/* Revise My Repeated Mistakes (Phase 6 Step 3) — question-level, not topic-level:
+                          launches the EXISTING revision session (pages/PYQTest.tsx's startRevision) over
+                          topRepeatedMistakes' own ranking, via the ?mode=repeated_mistakes deep link. */}
+                      {repeatedMistakePracticeIds.length > 0 ? (
+                        <Link
+                          to="/pyq-test?mode=repeated_mistakes"
+                          className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        >
+                          <Repeat className="h-3 w-3" /> Revise My Repeated Mistakes ({repeatedMistakePracticeIds.length})
+                        </Link>
+                      ) : (
+                        <p className="mt-2 text-[11px] text-slate-400">Revise My Repeated Mistakes — nothing to revise yet.</p>
                       )}
                     </div>
                     <div>

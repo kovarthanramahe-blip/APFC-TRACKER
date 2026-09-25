@@ -10,6 +10,9 @@ import {
   topSubjectsByMistakes,
   computeRecentVsPreviousTrend,
   TREND_WINDOW_SIZE,
+  selectRepeatedMistakePracticeIds,
+  DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP,
+  type PyqRepeatedMistake,
 } from './pyqPerformance';
 import { PYQ_BANK } from '../data/pyq';
 import { useAppStore } from './store';
@@ -405,5 +408,98 @@ describe('PYQ Weak Spots — workspace isolation (reading the real store, not a 
 
     useAppStore.getState().setActiveWorkspaceId('apfc');
     expect(computeRepeatedMistakes(bank, useAppStore.getState().pyqAttempts)).toHaveLength(1);
+  });
+});
+
+// ============================================================================================
+// Revise My Repeated Mistakes (Phase 6 Step 3) — selectRepeatedMistakePracticeIds
+// ============================================================================================
+
+function mistake(questionId: string, wrongCount: number, overrides: Partial<PyqRepeatedMistake> = {}): PyqRepeatedMistake {
+  return {
+    questionId,
+    totalAttempts: wrongCount,
+    correctCount: 0,
+    wrongCount,
+    lastAttemptAt: '2026-01-01T00:00:00.000Z',
+    latestCorrect: false,
+    ...overrides,
+  };
+}
+
+describe('selectRepeatedMistakePracticeIds — empty input', () => {
+  it('returns [] when there are no repeated mistakes at all', () => {
+    expect(selectRepeatedMistakePracticeIds([])).toEqual([]);
+  });
+});
+
+describe('selectRepeatedMistakePracticeIds — single mistake', () => {
+  it('returns exactly that question id', () => {
+    expect(selectRepeatedMistakePracticeIds([mistake('q1', 3)])).toEqual(['q1']);
+  });
+});
+
+describe('selectRepeatedMistakePracticeIds — ranking/order preserved', () => {
+  it('keeps topRepeatedMistakes\' own worst-first order (most wrong first, id tie-break)', () => {
+    const mistakes = [mistake('q-b', 1), mistake('q-a', 5), mistake('q-c', 5)];
+    // q-a and q-c tie on wrongCount (5) -> alphabetical id tie-break (matches topRepeatedMistakes).
+    expect(selectRepeatedMistakePracticeIds(mistakes)).toEqual(['q-a', 'q-c', 'q-b']);
+  });
+
+  it('never includes a question with zero wrong answers (nothing to revise about it)', () => {
+    const mistakes = [mistake('q-never-wrong', 0, { correctCount: 4, totalAttempts: 4, latestCorrect: true }), mistake('q-wrong', 2)];
+    expect(selectRepeatedMistakePracticeIds(mistakes)).toEqual(['q-wrong']);
+  });
+});
+
+describe('selectRepeatedMistakePracticeIds — duplicate ids defensively deduplicated', () => {
+  it('de-duplicates a questionId that appears more than once in the input', () => {
+    const mistakes = [mistake('q1', 3), mistake('q1', 3)];
+    expect(selectRepeatedMistakePracticeIds(mistakes)).toEqual(['q1']);
+  });
+});
+
+describe('selectRepeatedMistakePracticeIds — cap enforced', () => {
+  it('truncates to the given cap, keeping the worst mistakes first', () => {
+    const mistakes = [mistake('q1', 5), mistake('q2', 4), mistake('q3', 3)];
+    expect(selectRepeatedMistakePracticeIds(mistakes, 2)).toEqual(['q1', 'q2']);
+  });
+
+  it('returns everything when the cap exceeds the eligible count (no padding)', () => {
+    const mistakes = [mistake('q1', 5), mistake('q2', 4)];
+    expect(selectRepeatedMistakePracticeIds(mistakes, 50)).toEqual(['q1', 'q2']);
+  });
+
+  it('returns [] for a zero or negative cap', () => {
+    const mistakes = [mistake('q1', 5)];
+    expect(selectRepeatedMistakePracticeIds(mistakes, 0)).toEqual([]);
+    expect(selectRepeatedMistakePracticeIds(mistakes, -3)).toEqual([]);
+  });
+
+  it('applies DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP when no cap is given', () => {
+    const mistakes = Array.from({ length: 30 }, (_, i) => mistake(`q${i}`, 30 - i));
+    const ids = selectRepeatedMistakePracticeIds(mistakes);
+    expect(ids).toHaveLength(DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP);
+    expect(ids).toEqual(mistakes.slice(0, DEFAULT_REPEATED_MISTAKE_PRACTICE_CAP).map((m) => m.questionId));
+  });
+});
+
+describe('selectRepeatedMistakePracticeIds — immutability', () => {
+  it('never mutates the mistakes input', () => {
+    const mistakes = [mistake('q1', 5), mistake('q2', 3)];
+    const snapshot = JSON.stringify(mistakes);
+    selectRepeatedMistakePracticeIds(mistakes, 1);
+    expect(JSON.stringify(mistakes)).toBe(snapshot);
+  });
+});
+
+describe('selectRepeatedMistakePracticeIds — end-to-end with computeRepeatedMistakes', () => {
+  it('resolves to real, currently-wrong questions from a real attempt history', () => {
+    // q1 wrong twice, q2 correct once (never a repeated mistake), q3 wrong once then corrected later
+    // (latestCorrect true, but wrongCount is still 1 in its full history — still a repeated mistake).
+    const a1 = attempt({ id: 'a1', submittedAt: '2026-01-01T00:00:00.000Z', questionIds: ['q1', 'q2', 'q3'], answers: { q1: 'q1-o1', q2: 'q2-o0', q3: 'q3-o1' } });
+    const a2 = attempt({ id: 'a2', submittedAt: '2026-01-02T00:00:00.000Z', questionIds: ['q1', 'q3'], answers: { q1: 'q1-o1', q3: 'q3-o0' } });
+    const mistakes = computeRepeatedMistakes(bank, [a1, a2]);
+    expect(selectRepeatedMistakePracticeIds(mistakes)).toEqual(['q1', 'q3']);
   });
 });
