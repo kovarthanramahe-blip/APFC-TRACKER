@@ -400,6 +400,84 @@ describe('AnnotationLayer — drawing/lasso/eraser still work after moving point
       cleanup();
     }
   });
+
+  // Regression test (Phase 8E) — a real S Pen's pressure trails to exactly 0 right before it lifts
+  // off; that is normal, real data, not an absence of data. It must be stored as the point's true
+  // pressure, never silently discarded/replaced.
+  it('a pointermove sample with pressure exactly 0 keeps that real pressure value, not undefined', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const penButton = findButtonByLabel(container, 'Pen (')!;
+      act(() => {
+        penButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      act(() => {
+        wrapper.dispatchEvent(pointerEvent('pointerdown', 10, 10, 'pen', 0.8));
+        wrapper.dispatchEvent(pointerEvent('pointermove', 40, 10, 'pen', 0.3));
+        // The trailing sample, right as the pen lifts — pressure 0 is real, expected data here.
+        wrapper.dispatchEvent(pointerEvent('pointermove', 60, 10, 'pen', 0));
+        wrapper.dispatchEvent(pointerEvent('pointerup', 60, 10, 'pen', 0));
+      });
+      const strokes = useAppStore.getState().annotations.filter((a): a is Extract<typeof a, { type: 'ink' }> => a.type === 'ink');
+      expect(strokes).toHaveLength(1);
+      const lastPoint = strokes[0].points[strokes[0].points.length - 1];
+      expect(lastPoint.pressure).toBe(0); // not undefined
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Regression test (Phase 8E) — pointercancel used to unconditionally discard the entire active
+  // stroke, even though the live preview canvas had already rendered it. On Android, pointercancel
+  // fires far more readily than on desktop (OS/WebView gesture arbitration can claim an in-progress
+  // pointer sequence mid-stroke) — silently throwing the stroke away is exactly what "handwriting
+  // disappeared after lifting the pen" looks like. A cancel must commit whatever was drawn so far,
+  // the same as a clean pointerup would.
+  it('a pointercancel mid-stroke commits the ink drawn so far, instead of discarding it', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const penButton = findButtonByLabel(container, 'Pen (')!;
+      act(() => {
+        penButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      act(() => {
+        wrapper.dispatchEvent(pointerEvent('pointerdown', 10, 10, 'pen'));
+        wrapper.dispatchEvent(pointerEvent('pointermove', 60, 60, 'pen'));
+        // The gesture is interrupted by a cancel (e.g. the OS claiming it for a system gesture)
+        // instead of a clean pointerup.
+        wrapper.dispatchEvent(pointerEvent('pointercancel', 60, 60, 'pen'));
+      });
+      const strokes = useAppStore.getState().annotations.filter((a) => a.type === 'ink');
+      expect(strokes).toHaveLength(1); // committed, not lost
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Regression test (Phase 8E) — a cancelled ERASER gesture must not somehow create a stray ink
+  // annotation from whatever (empty) activePointsRef state happens to be lying around; erase
+  // removals already happened live, per point, during pointermove.
+  it('a pointercancel mid-erase-drag does not create a stray annotation', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const eraserButton = findButtonByLabel(container, 'Eraser')!;
+      act(() => {
+        eraserButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      expect(() => {
+        act(() => {
+          wrapper.dispatchEvent(pointerEvent('pointerdown', 10, 10, 'mouse'));
+          wrapper.dispatchEvent(pointerEvent('pointercancel', 10, 10, 'mouse'));
+        });
+      }).not.toThrow();
+      expect(useAppStore.getState().annotations).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 // Regression test (Phase 7B) — root cause of "cannot select ANY text in a Repository document"

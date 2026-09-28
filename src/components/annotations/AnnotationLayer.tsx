@@ -409,10 +409,17 @@ export function AnnotationLayer({
   }
 
   /** Generic over any {clientX, clientY, pressure}-shaped source — a React pointer event, or one
-   * of a native PointerEvent's own getCoalescedEvents() entries (see handlePointerMove). */
+   * of a native PointerEvent's own getCoalescedEvents() entries (see handlePointerMove).
+   *
+   * Phase 8E fix — this used to discard a real pressure of exactly 0 (`e.pressure > 0 ? e.pressure
+   * : undefined`), treating it as "no pressure data" rather than a genuine sample. A pressure of 0
+   * is the NORMAL, expected value for the trailing samples right before a stylus lifts off — it is
+   * real data, not a signal to erase or discard anything (only the Eraser tool/eraser-tip ever
+   * removes a stroke — see handleErase). Passing it straight through leaves mouse input unaffected
+   * (a mouse always reports a constant pressure of 0.5, which already passed the old `>0` check). */
   function toRelativePoint(e: { clientX: number; clientY: number; pressure: number }): NormalizedPoint {
     const rect = wrapperRef.current!.getBoundingClientRect();
-    return relativePointFromClient(e.clientX, e.clientY, rect, e.pressure > 0 ? e.pressure : undefined);
+    return relativePointFromClient(e.clientX, e.clientY, rect, e.pressure);
   }
 
   function handleErase(e: ReactPointerEvent) {
@@ -583,17 +590,39 @@ export function AnnotationLayer({
     finishStroke();
   }
 
+  // Phase 8E fix — this used to unconditionally discard the entire active gesture on cancel
+  // (activePointsRef wiped, canvas cleared, nothing committed). On Android, pointercancel fires far
+  // more readily than on desktop: the OS/WebView's own gesture arbitration (edge-swipe-back and
+  // other system gestures) can claim an in-progress pointer sequence mid-stroke even though the
+  // user's physical S Pen contact never actually broke. The live preview canvas had already
+  // rendered the stroke by then, so silently throwing it away on cancel is exactly what "the
+  // handwriting disappeared after lifting the pen" looks like from the user's side — real user data
+  // loss, not a deliberate erase. A note-taking app should salvage what was drawn so far rather than
+  // discard it: for ink/highlighter/shape/arrow, cancel now commits through the SAME path pointerup
+  // already uses (finishStroke — still gated by isMeaningfulStroke/isMeaningfulShape, so a
+  // degenerate/near-empty gesture still commits nothing). Lasso and eraser are unaffected: a
+  // cancelled lasso never had drawn content to lose (just abandon the in-progress selection), and
+  // an eraser's removals already happened live, per point, during pointermove — there is nothing
+  // pending to commit or lose on cancel for either.
   function handlePointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
     if (drawingPointerIdRef.current !== e.pointerId) return;
     drawingPointerIdRef.current = null;
     releaseCaptureSafely(e.currentTarget, e.pointerId);
+    const wasEraserGesture = activeTool === 'eraser' || eraserOverrideRef.current;
     eraserOverrideRef.current = false;
-    activePointsRef.current = [];
-    lassoPointsRef.current = [];
-    moveStartRef.current = null;
-    moveDeltaRef.current = null;
-    erasedThisDragRef.current = new Set();
-    clearActiveCanvas();
+    if (activeTool === 'lasso') {
+      lassoPointsRef.current = [];
+      moveStartRef.current = null;
+      moveDeltaRef.current = null;
+      clearActiveCanvas();
+      return;
+    }
+    if (wasEraserGesture) {
+      erasedThisDragRef.current = new Set();
+      clearActiveCanvas();
+      return;
+    }
+    finishStroke();
   }
 
   function handleDeleteSelection() {
