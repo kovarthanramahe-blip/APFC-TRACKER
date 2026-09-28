@@ -11,6 +11,7 @@ import {
 import { getRelatedContent, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
 import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry } from './Repository';
+import { createInkAnnotation, createHighlighterInkAnnotation, createStickyNote, createBookmark, annotationsForDocument } from '../lib/annotations';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see every other *.test.ts file for the established convention). These tests exercise exactly
@@ -42,6 +43,7 @@ function fullReset() {
     revisionQueue: createRevisionQueue(),
     importedContent: [],
     contentRelationships: [],
+    annotations: [],
   });
 }
 
@@ -545,5 +547,193 @@ describe('Repository Detail — manual link: persistence through export/import (
 
     const related = getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content');
     expect(related.map((r) => r.relatedId)).toEqual([bib.id]); // the removed link never comes back
+  });
+});
+
+// ============================================================================================
+// Document Reading & Annotation (Phase 7) — store-level tests for addAnnotation/
+// updateAnnotationText/deleteAnnotation (lib/store.ts), exercised exactly as
+// components/annotations/DocumentAnnotator.tsx calls them.
+// ============================================================================================
+
+function inkAt(documentId: string, overrides: Partial<Parameters<typeof createInkAnnotation>[0]> = {}) {
+  return createInkAnnotation({ documentId, renderMode: 'raw', color: '#000', thickness: 2, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], ...overrides });
+}
+function highlighterAt(documentId: string) {
+  return createHighlighterInkAnnotation({ documentId, renderMode: 'raw', color: '#ff0', thickness: 10, points: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }] });
+}
+function stickyAt(documentId: string, overrides: Partial<Parameters<typeof createStickyNote>[0]> = {}) {
+  return createStickyNote({ documentId, renderMode: 'raw', color: '#fde047', ...overrides });
+}
+function bookmarkAt(documentId: string) {
+  return createBookmark({ documentId, renderMode: 'raw' });
+}
+
+describe('annotations — create + persist', () => {
+  beforeEach(fullReset);
+
+  it('addAnnotation writes a stroke to the store, newest first, matching every other collection\'s convention', () => {
+    const s1 = inkAt('note:d1');
+    const s2 = highlighterAt('note:d1');
+    useAppStore.getState().addAnnotation(s1);
+    useAppStore.getState().addAnnotation(s2);
+    expect(useAppStore.getState().annotations.map((a) => a.id)).toEqual([s2.id, s1.id]);
+  });
+
+  it('a note and a bookmark persist alongside strokes without interfering with each other', () => {
+    const note = stickyAt('note:d1', { text: 'hello' });
+    const bookmark = bookmarkAt('note:d1');
+    useAppStore.getState().addAnnotation(note);
+    useAppStore.getState().addAnnotation(bookmark);
+    expect(useAppStore.getState().annotations).toHaveLength(2);
+    expect(useAppStore.getState().annotations.find((a) => a.id === note.id)?.type).toBe('stickyNote');
+    expect(useAppStore.getState().annotations.find((a) => a.id === bookmark.id)?.type).toBe('bookmark');
+  });
+});
+
+describe('annotations — reload (export/import round-trip)', () => {
+  beforeEach(fullReset);
+
+  it('a stroke, a note, and a bookmark all survive an export -> reset -> import cycle intact', () => {
+    const stroke = inkAt('note:d1', { color: '#123456', thickness: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.3, y: 0.4 }] });
+    const note = stickyAt('note:d1', { text: 'remember this' });
+    const bookmark = bookmarkAt('note:d1');
+    useAppStore.getState().addAnnotation(stroke);
+    useAppStore.getState().addAnnotation(note);
+    useAppStore.getState().addAnnotation(bookmark);
+
+    const json = exportAllData();
+    fullReset();
+    expect(useAppStore.getState().annotations).toEqual([]);
+
+    importAllData(json);
+    expect(useAppStore.getState().annotations).toHaveLength(3);
+    expect(useAppStore.getState().annotations.find((a) => a.id === stroke.id)).toEqual(stroke);
+    expect(useAppStore.getState().annotations.find((a) => a.id === note.id)).toEqual(note);
+  });
+
+  it('importing a backup from before this field existed backfills annotations: [] rather than crashing', () => {
+    const legacyJson = JSON.stringify({ completedTopics: {}, notes: [], activeWorkspaceId: 'apfc' });
+    importAllData(legacyJson);
+    expect(useAppStore.getState().annotations).toEqual([]);
+  });
+});
+
+describe('annotations — delete', () => {
+  beforeEach(fullReset);
+
+  it('deleteAnnotation removes exactly the targeted annotation, leaving every other one untouched', () => {
+    const s1 = inkAt('note:d1');
+    const s2 = inkAt('note:d1');
+    useAppStore.getState().addAnnotation(s1);
+    useAppStore.getState().addAnnotation(s2);
+    useAppStore.getState().deleteAnnotation(s1.id);
+    expect(useAppStore.getState().annotations.map((a) => a.id)).toEqual([s2.id]);
+  });
+
+  it('deleting a note removes it entirely (note deletion)', () => {
+    const note = stickyAt('note:d1', { text: 'temp' });
+    useAppStore.getState().addAnnotation(note);
+    useAppStore.getState().deleteAnnotation(note.id);
+    expect(useAppStore.getState().annotations).toEqual([]);
+  });
+
+  it('deleting an id that does not exist is a safe no-op', () => {
+    const note = stickyAt('note:d1', { text: 'stays' });
+    useAppStore.getState().addAnnotation(note);
+    useAppStore.getState().deleteAnnotation('does-not-exist');
+    expect(useAppStore.getState().annotations).toHaveLength(1);
+  });
+});
+
+describe('annotations — updateAnnotationText (note editing)', () => {
+  beforeEach(fullReset);
+
+  it('updates only the targeted note\'s text and updatedAt, leaving createdAt and other annotations untouched', () => {
+    const note = stickyAt('note:d1', { text: 'old text', now: '2026-01-01T00:00:00.000Z' });
+    const stroke = inkAt('note:d1');
+    useAppStore.getState().addAnnotation(note);
+    useAppStore.getState().addAnnotation(stroke);
+
+    useAppStore.getState().updateAnnotationText(note.id, 'new text');
+    const updated = useAppStore.getState().annotations.find((a) => a.id === note.id)!;
+    expect(updated).toMatchObject({ text: 'new text' });
+    expect((updated as typeof note).createdAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(updated.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
+    expect(useAppStore.getState().annotations.find((a) => a.id === stroke.id)).toEqual(stroke); // untouched
+  });
+
+  it('is a no-op on a non-note annotation (e.g. an ink stroke id) — never silently mutates the wrong type', () => {
+    const stroke = inkAt('note:d1');
+    useAppStore.getState().addAnnotation(stroke);
+    useAppStore.getState().updateAnnotationText(stroke.id, 'should not apply');
+    expect(useAppStore.getState().annotations.find((a) => a.id === stroke.id)).toEqual(stroke);
+  });
+});
+
+describe('annotations — bookmark preservation across reload', () => {
+  beforeEach(fullReset);
+
+  it('a document bookmark survives export/import exactly like a stroke or note does', () => {
+    const bookmark = bookmarkAt('imported_content:doc1');
+    useAppStore.getState().addAnnotation(bookmark);
+    const json = exportAllData();
+    fullReset();
+    importAllData(json);
+    expect(useAppStore.getState().annotations).toEqual([bookmark]);
+  });
+});
+
+describe('annotations — correct document association / multiple annotations / no cross-document bleed', () => {
+  beforeEach(fullReset);
+
+  it('annotations on two different documents in the same store never mix when filtered by documentId', () => {
+    const onDoc1 = inkAt('note:doc1');
+    const onDoc2 = stickyAt('imported_content:doc2', { text: 'different document' });
+    useAppStore.getState().addAnnotation(onDoc1);
+    useAppStore.getState().addAnnotation(onDoc2);
+
+    const forDoc1 = annotationsForDocument(useAppStore.getState().annotations, 'note:doc1');
+    const forDoc2 = annotationsForDocument(useAppStore.getState().annotations, 'imported_content:doc2');
+    expect(forDoc1).toEqual([onDoc1]);
+    expect(forDoc2).toEqual([onDoc2]);
+  });
+});
+
+describe('annotations — empty state', () => {
+  beforeEach(fullReset);
+
+  it('a freshly reset store has no annotations at all', () => {
+    expect(useAppStore.getState().annotations).toEqual([]);
+    expect(annotationsForDocument(useAppStore.getState().annotations, 'note:anything')).toEqual([]);
+  });
+});
+
+describe('annotations — workspace isolation (Phase 7)', () => {
+  beforeEach(fullReset);
+
+  it('annotations added while apfc is active are invisible after switching to upsc_cse, and restored on switching back', () => {
+    const s = inkAt('note:d1');
+    useAppStore.getState().addAnnotation(s);
+    expect(useAppStore.getState().annotations).toHaveLength(1);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().annotations).toEqual([]); // workspace-owned, archived on switch
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().annotations).toEqual([s]);
+  });
+
+  it('a third, never-visited workspace (phd_research) never inherits another workspace\'s annotations', () => {
+    useAppStore.getState().addAnnotation(bookmarkAt('note:d1'));
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().annotations).toEqual([]);
+  });
+
+  it('resetAllData clears annotations for every workspace, not just the active one', () => {
+    useAppStore.getState().addAnnotation(inkAt('note:d1'));
+    useAppStore.getState().setActiveWorkspaceId('apfc'); // no-op, already active; archives nothing new
+    useAppStore.getState().resetAllData();
+    expect(useAppStore.getState().annotations).toEqual([]);
   });
 });

@@ -62,6 +62,12 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     // report "meaningful data" and defeat its own purpose.
     ((data.phdTopicAreas as unknown[]) ?? []).length,
     ((data.phdMicroTargets as unknown[]) ?? []).length,
+    // Document Reading & Annotation (Phase 7) — a pen/highlighter stroke, note, or bookmark over a
+    // repository document is real user data too, same reasoning as importedContent above.
+    ((data.annotations as unknown[]) ?? []).length,
+    // Premium Note Organisation (Phase 3B) — a user-created folder is real user data too, same
+    // reasoning as importedContent above.
+    ((data.folders as unknown[]) ?? []).length,
   ];
   return counts.some((c) => c > 0);
 }

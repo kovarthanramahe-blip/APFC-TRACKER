@@ -8,6 +8,8 @@ import { PYQ_BANK } from '../data/pyq';
 import type { ContentRelationship } from './contentRelationships';
 import type { Note } from './types';
 import { countRelatedContent } from './relatedContentSummary';
+import { createTextHighlight, createBookmark } from './annotations';
+import { createFolder } from './folders';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
 // works directly outside React for in-memory state (persist's localStorage access is safely
@@ -214,6 +216,7 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'completedTopics',
         'contentRelationships',
         'dailyGoalMinutes',
+        'folders',
         'importedContent',
         'inactiveWorkspaceOwnedData',
         'notes',
@@ -1749,5 +1752,301 @@ describe('Workspace-aware Study Plan + Analytics — upscCseStudyPlanConfig, ext
     expect(useAppStore.getState().upscCseStudyTasks).toEqual([]);
     expect(useAppStore.getState().phdMicroTargets).toEqual([]);
     expect(useAppStore.getState().phdTopicAreas).toEqual([]);
+  });
+});
+
+// Premium Study Reader (Phase E) — the `annotations` field is a WorkspaceOwnedData member exactly
+// like notes/contentRelationships already are (see lib/store.ts's own emptyWorkspaceOwnedData),
+// so it gets the SAME archive/restore treatment on setActiveWorkspaceId — this proves that
+// mechanism actually covers annotations specifically (it wasn't exercised by any test until now),
+// not just that the generic mechanism works in the abstract.
+describe('updateAnnotationPoints (Phase F — lasso move)', () => {
+  beforeEach(() => useAppStore.setState({ activeWorkspaceId: DEFAULT_WORKSPACE_ID, inactiveWorkspaceOwnedData: {}, annotations: [] }));
+
+  it('replaces the points of a geometry annotation and bumps updatedAt', () => {
+    const ink = { id: 'ink-1', documentId: 'note:doc-a', renderMode: 'raw' as const, pageNumber: 1, studyTags: [], type: 'ink' as const, penStyle: 'pen' as const, color: '#000', thickness: 2, opacity: 1, points: [{ x: 0.1, y: 0.1 }], createdAt: 't0', updatedAt: 't0' };
+    useAppStore.setState({ annotations: [ink] });
+    useAppStore.getState().updateAnnotationPoints('ink-1', [{ x: 0.5, y: 0.5 }]);
+    const updated = useAppStore.getState().annotations[0];
+    expect(updated.type === 'ink' && updated.points).toEqual([{ x: 0.5, y: 0.5 }]);
+    expect(updated.updatedAt).not.toBe('t0');
+  });
+
+  it('is a no-op for a non-geometry annotation id (e.g. a bookmark, which has no points)', () => {
+    const bookmark = createBookmark({ documentId: 'note:doc-a', renderMode: 'raw' });
+    useAppStore.setState({ annotations: [bookmark] });
+    useAppStore.getState().updateAnnotationPoints(bookmark.id, [{ x: 0.5, y: 0.5 }]);
+    expect(useAppStore.getState().annotations[0]).toEqual(bookmark);
+  });
+
+  it('is a no-op for an unknown id', () => {
+    useAppStore.getState().updateAnnotationPoints('does-not-exist', [{ x: 0.5, y: 0.5 }]);
+    expect(useAppStore.getState().annotations).toEqual([]);
+  });
+});
+
+describe('annotations — workspace isolation (Phase E)', () => {
+  function fullReset() {
+    useAppStore.setState({ activeWorkspaceId: DEFAULT_WORKSPACE_ID, inactiveWorkspaceOwnedData: {}, annotations: [] });
+  }
+  beforeEach(fullReset);
+
+  it('an annotation created in one workspace is invisible after switching to another, and reappears after switching back', () => {
+    const a = createTextHighlight({ documentId: 'note:doc-a', renderMode: 'raw', anchor: { quote: 'q', prefix: '', suffix: '', start: 0, end: 1 }, color: '#facc15' });
+    useAppStore.getState().addAnnotation(a);
+    expect(useAppStore.getState().annotations).toHaveLength(1);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().annotations).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().annotations.map((x) => x.id)).toEqual([a.id]);
+  });
+
+  it('annotations made in two different workspaces never bleed into one another', () => {
+    const inApfc = createBookmark({ documentId: 'note:doc-a', renderMode: 'raw' });
+    useAppStore.getState().addAnnotation(inApfc);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const inCse = createBookmark({ documentId: 'note:doc-b', renderMode: 'raw' });
+    useAppStore.getState().addAnnotation(inCse);
+    expect(useAppStore.getState().annotations.map((x) => x.id)).toEqual([inCse.id]);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().annotations.map((x) => x.id)).toEqual([inApfc.id]);
+  });
+
+  it('a third, never-visited workspace starts with no annotations at all', () => {
+    useAppStore.getState().addAnnotation(createBookmark({ documentId: 'note:doc-a', renderMode: 'raw' }));
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().annotations).toEqual([]);
+  });
+
+  it('resetAllData clears annotations in the active workspace AND the archived-away ones', () => {
+    useAppStore.getState().addAnnotation(createBookmark({ documentId: 'note:doc-a', renderMode: 'raw' }));
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse'); // archives apfc's annotation away
+    useAppStore.getState().resetAllData();
+    expect(useAppStore.getState().annotations).toEqual([]);
+    expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
+  });
+});
+
+// Premium Note Organisation, Phase 3B — folders (lib/folders.ts) + bulkUpdateNotes/
+// bulkUpdateImportedContent (lib/noteOrganization.ts / lib/importedContentRepository.ts).
+describe('Premium Note Organisation — folders + bulk organisation actions', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      completedTopics: {},
+      notes: [],
+      attempts: [],
+      pyqAttempts: [],
+      sessions: [],
+      studyLog: {},
+      starredQuestionIds: [],
+      bookmarkedPyqIds: [],
+      rewardUnlocks: {},
+      studyPlan: null,
+      studyPlanGeneratedAt: null,
+      personalStudyPlanTasks: [],
+      revisionQueue: createRevisionQueue(),
+      contentRelationships: [],
+      importedContent: [],
+      folders: [],
+    });
+  }
+  beforeEach(fullReset);
+
+  function noteFixture(overrides: Partial<Note> = {}): Note {
+    return {
+      id: overrides.id ?? 'n1',
+      subject: 'general',
+      title: overrides.title ?? 'A note',
+      content: overrides.content ?? 'Body',
+      createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
+      updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
+      pinned: overrides.pinned ?? false,
+      workspaceId: overrides.workspaceId ?? 'apfc',
+      folderId: overrides.folderId,
+    };
+  }
+
+  function contentFixture(overrides: Partial<ImportedContent> = {}): ImportedContent {
+    return {
+      id: overrides.id ?? 'c1',
+      workspaceId: overrides.workspaceId ?? 'apfc',
+      contentType: overrides.contentType ?? 'note',
+      title: overrides.title ?? 'Imported thing',
+      rawContent: overrides.rawContent ?? 'Some raw text',
+      provenance: overrides.provenance ?? { sourceFilename: 'source.md', originalFormat: 'markdown', importedAt: '2026-01-01T00:00:00.000Z' },
+      metadata: overrides.metadata,
+    };
+  }
+
+  describe('addFolder / renameFolder / deleteFolder', () => {
+    it('addFolder adds a new folder', () => {
+      useAppStore.getState().addFolder(createFolder('apfc', 'UPSC'));
+      expect(useAppStore.getState().folders).toHaveLength(1);
+      expect(useAppStore.getState().folders[0].name).toBe('UPSC');
+    });
+
+    it('renameFolder renames the matching folder', () => {
+      const folder = createFolder('apfc', 'Old');
+      useAppStore.getState().addFolder(folder);
+      useAppStore.getState().renameFolder(folder.id, 'New');
+      expect(useAppStore.getState().folders[0].name).toBe('New');
+    });
+
+    it('deleteFolder removes the folder and re-files its notes/documents to its own parent', () => {
+      const root = createFolder('apfc', 'Root');
+      const child = createFolder('apfc', 'Child', root.id);
+      useAppStore.getState().addFolder(root);
+      useAppStore.getState().addFolder(child);
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n1', folderId: child.id }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1', metadata: { folderId: child.id } }));
+
+      useAppStore.getState().deleteFolder(child.id, 'moveToParent');
+
+      expect(useAppStore.getState().folders.map((f) => f.id)).toEqual([root.id]);
+      expect(useAppStore.getState().notes.find((n) => n.id === 'n1')!.folderId).toBe(root.id);
+      expect(useAppStore.getState().importedContent.find((c) => c.id === 'c1')!.metadata?.folderId).toBe(root.id);
+    });
+
+    it('deleting a root-level folder re-files its contents to root (null), never deleting them', () => {
+      const root = createFolder('apfc', 'Root');
+      useAppStore.getState().addFolder(root);
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n1', folderId: root.id }));
+
+      useAppStore.getState().deleteFolder(root.id, 'moveToParent');
+
+      expect(useAppStore.getState().notes).toHaveLength(1); // never deleted
+      expect(useAppStore.getState().notes[0].folderId).toBeNull();
+    });
+
+    it('deleting a folder promotes its own child folders to its parent, never recursively deleting them', () => {
+      const root = createFolder('apfc', 'Root');
+      const child = createFolder('apfc', 'Child', root.id);
+      const grandchild = createFolder('apfc', 'Grandchild', child.id);
+      useAppStore.getState().addFolder(root);
+      useAppStore.getState().addFolder(child);
+      useAppStore.getState().addFolder(grandchild);
+
+      useAppStore.getState().deleteFolder(child.id, 'moveToParent');
+
+      expect(useAppStore.getState().folders).toHaveLength(2);
+      expect(useAppStore.getState().folders.find((f) => f.id === grandchild.id)!.parentId).toBe(root.id);
+    });
+  });
+
+  describe('workspace isolation', () => {
+    it('folders created in one workspace are invisible after switching to another, and reappear after switching back', () => {
+      const apfcFolder = createFolder('apfc', 'APFC Folder');
+      useAppStore.getState().addFolder(apfcFolder);
+
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().folders).toEqual([]);
+
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().folders.map((f) => f.id)).toEqual([apfcFolder.id]);
+    });
+
+    it('a third, never-visited workspace starts with no folders at all', () => {
+      useAppStore.getState().addFolder(createFolder('apfc', 'APFC Folder'));
+      useAppStore.getState().setActiveWorkspaceId('phd_research');
+      expect(useAppStore.getState().folders).toEqual([]);
+    });
+  });
+
+  describe('persistence / migration', () => {
+    it('migrateAppStorage backfills folders: [] onto a persisted blob that predates it', () => {
+      const migrated = migrateAppStorage({ notes: [] }, 1) as { folders: unknown };
+      expect(migrated.folders).toEqual([]);
+    });
+
+    it('migrateAppStorage preserves an already-present folders array unchanged', () => {
+      const folder = createFolder('apfc', 'Existing');
+      const migrated = migrateAppStorage({ notes: [], folders: [folder] }, 1) as { folders: unknown };
+      expect(migrated.folders).toEqual([folder]);
+    });
+
+    it('APP_STORE_PERSIST_VERSION was bumped for this stage', () => {
+      expect(APP_STORE_PERSIST_VERSION).toBeGreaterThanOrEqual(14);
+    });
+  });
+
+  describe('export / import round-trip', () => {
+    it('exportAllData includes folders; importAllData restores them', () => {
+      const folder = createFolder('apfc', 'Exported Folder');
+      useAppStore.getState().addFolder(folder);
+      const json = exportAllData();
+
+      useAppStore.getState().resetAllData();
+      expect(useAppStore.getState().folders).toEqual([]);
+
+      importAllData(json);
+      expect(useAppStore.getState().folders.map((f) => f.id)).toEqual([folder.id]);
+    });
+
+    it('importAllData defaults to an empty folders array for a legacy backup with no folders key', () => {
+      importAllData(JSON.stringify({ notes: [] }));
+      expect(useAppStore.getState().folders).toEqual([]);
+    });
+  });
+
+  describe('cloud-sync payload inclusion', () => {
+    it('a folder alone counts as meaningful data', () => {
+      expect(hasMeaningfulData({ folders: [createFolder('apfc', 'X')] })).toBe(true);
+    });
+
+    it('no folders (and nothing else) is not meaningful data', () => {
+      expect(hasMeaningfulData({ folders: [] })).toBe(false);
+    });
+  });
+
+  describe('bulkUpdateNotes', () => {
+    it('applies the patch to exactly the given ids, leaving others untouched', () => {
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n2' }));
+      useAppStore.getState().bulkUpdateNotes(['n1'], { isArchived: true });
+      expect(useAppStore.getState().notes.find((n) => n.id === 'n1')!.isArchived).toBe(true);
+      expect(useAppStore.getState().notes.find((n) => n.id === 'n2')!.isArchived).toBeUndefined();
+    });
+
+    it('bulk-applies to multiple ids in one call', () => {
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n1' }));
+      useAppStore.getState().upsertNote(noteFixture({ id: 'n2' }));
+      useAppStore.getState().bulkUpdateNotes(['n1', 'n2'], { addTags: ['Revision'] });
+      expect(useAppStore.getState().notes.every((n) => n.tags?.includes('Revision'))).toBe(true);
+    });
+  });
+
+  describe('bulkUpdateImportedContent', () => {
+    it('applies the patch to exactly the given ids, never touching rawContent/provenance', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c1', rawContent: 'Original' }));
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'c2', rawContent: 'Original' }));
+      useAppStore.getState().bulkUpdateImportedContent(['c1'], { isPinned: true });
+      const c1 = useAppStore.getState().importedContent.find((c) => c.id === 'c1')!;
+      const c2 = useAppStore.getState().importedContent.find((c) => c.id === 'c2')!;
+      expect(c1.metadata?.isPinned).toBe(true);
+      expect(c1.rawContent).toBe('Original');
+      expect(c2.metadata?.isPinned).toBeUndefined();
+    });
+  });
+
+  describe('annotation identity is unaffected by organisation changes', () => {
+    it('moving a document between folders never changes its id, and its annotations stay keyed to the same documentId', () => {
+      useAppStore.getState().addImportedContent(contentFixture({ id: 'doc-1' }));
+      const annotation = createBookmark({ documentId: 'imported_content:doc-1', renderMode: 'raw' });
+      useAppStore.getState().addAnnotation(annotation);
+
+      const folder = createFolder('apfc', 'Some Folder');
+      useAppStore.getState().addFolder(folder);
+      useAppStore.getState().bulkUpdateImportedContent(['doc-1'], { folderId: folder.id, isArchived: true });
+
+      expect(useAppStore.getState().importedContent.find((c) => c.id === 'doc-1')!.id).toBe('doc-1');
+      expect(useAppStore.getState().annotations).toEqual([annotation]);
+      expect(useAppStore.getState().annotations[0].documentId).toBe('imported_content:doc-1');
+    });
   });
 });

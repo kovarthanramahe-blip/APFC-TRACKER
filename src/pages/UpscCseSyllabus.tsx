@@ -37,6 +37,7 @@ import {
   expandToLeafCoverageIds,
   microsyllabusOrGranularMatchesQuery,
   resolveGranularBreadcrumb,
+  searchGranularNodes,
   type UpscCseGranularNode,
 } from '../lib/upscCseGranularSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
@@ -78,6 +79,34 @@ function progressToneClass(pct: number): string {
   return COVERAGE_PROGRESS_CLASS.low;
 }
 
+// Phase 6 — reuses the existing searchGranularNodes (lib/upscCseGranularSyllabus.ts) so a search
+// actually filters DOWN to the matching Topic/Subtopic/Micro-topic rows, not just gating whether a
+// microsyllabus item's whole subtree is shown (see this page's own use of
+// microsyllabusOrGranularMatchesQuery for that coarser gate, unchanged). A node "matches" here if
+// it matches the query directly OR is an ancestor of one that does — so finding "Indus Valley
+// Civilization" also keeps its parent Topic row visible. Returns null for an empty query (callers
+// then skip filtering entirely, identical to today's unfiltered behaviour).
+function granularQueryMatchIds(query: string): Set<string> | null {
+  if (!query.trim()) return null;
+  const matched = searchGranularNodes(UPSC_CSE_GRANULAR_NODES, query);
+  const ids = new Set<string>();
+  for (const n of matched) {
+    ids.add(n.id);
+    ids.add(n.topicId);
+    if (n.subtopicId) ids.add(n.subtopicId);
+  }
+  return ids;
+}
+
+/** Whether `node` ITSELF (its own title/description, not a descendant's) matches the query — used
+ * to decide "show every child unfiltered" (the heading itself is the match, so its whole subtree is
+ * relevant context) vs "filter children down to only the ones that matched". True for an empty
+ * query, matching lib/upscCseSyllabusSearch.ts's matchesMicrosyllabusQuery convention. */
+function granularNodeDirectlyMatches(node: UpscCseGranularNode, query: string): boolean {
+  if (!query.trim()) return true;
+  return searchGranularNodes(UPSC_CSE_GRANULAR_NODES, query).some((n) => n.id === node.id);
+}
+
 function CoverageStatePicker({ value, onChange }: { value: UpscCseCoverageState; onChange: (next: UpscCseCoverageState) => void }) {
   return (
     <div className="flex items-center rounded-full bg-slate-100 dark:bg-slate-800 p-1 gap-0.5 shrink-0" role="radiogroup" aria-label="Coverage state">
@@ -93,7 +122,7 @@ function CoverageStatePicker({ value, onChange }: { value: UpscCseCoverageState;
             aria-label={UPSC_CSE_COVERAGE_LABELS[state]}
             onClick={() => onChange(state)}
             className={cx(
-              'relative flex h-6 w-6 items-center justify-center rounded-full transition-colors',
+              'relative flex h-8 w-8 items-center justify-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500',
               isActive ? 'ring-2 ring-offset-1 ring-offset-white dark:ring-offset-slate-900' : 'opacity-50 hover:opacity-80',
               isActive && (state === 'not_started' ? 'ring-slate-400' : state === 'learning' ? 'ring-amber-400' : state === 'revised' ? 'ring-brand-400' : 'ring-emerald-400'),
             )}
@@ -169,8 +198,13 @@ function GranularSubtopicRow({
   deepLinkRef: React.Ref<HTMLLIElement> | undefined;
 }) {
   const [isOpen, setIsOpen] = useState(forceOpen);
-  const microTopics = useMemo(() => getMicroTopicsForSubtopic(UPSC_CSE_GRANULAR_NODES, node.id), [node.id]);
-  const summary = useMemo(() => computeCoverageSummary(microTopics.map((m) => m.id), coverage), [microTopics, coverage]);
+  const allMicroTopics = useMemo(() => getMicroTopicsForSubtopic(UPSC_CSE_GRANULAR_NODES, node.id), [node.id]);
+  const microTopics = useMemo(() => {
+    if (granularNodeDirectlyMatches(node, query)) return allMicroTopics;
+    const matchIds = granularQueryMatchIds(query);
+    return matchIds ? allMicroTopics.filter((mt) => matchIds.has(mt.id)) : allMicroTopics;
+  }, [node, allMicroTopics, query]);
+  const summary = useMemo(() => computeCoverageSummary(allMicroTopics.map((m) => m.id), coverage), [allMicroTopics, coverage]);
   const isSelfDeepLinked = deepLinkId === node.id;
   const expanded = isOpen || forceOpen || !!query.trim();
 
@@ -219,9 +253,16 @@ function GranularTopicRow({
   deepLinkRef: React.Ref<HTMLLIElement> | undefined;
 }) {
   const [isOpen, setIsOpen] = useState(forceOpen);
-  const subtopics = useMemo(() => getSubtopicsForTopic(UPSC_CSE_GRANULAR_NODES, node.id), [node.id]);
-  const leafIds = useMemo(() => subtopics.flatMap((st) => getMicroTopicsForSubtopic(UPSC_CSE_GRANULAR_NODES, st.id).map((mt) => mt.id)), [subtopics]);
+  const allSubtopics = useMemo(() => getSubtopicsForTopic(UPSC_CSE_GRANULAR_NODES, node.id), [node.id]);
+  // Progress always rolls up from the FULL subtree — never the search-filtered subset below, or the
+  // percentage badge would misleadingly shift while a search is active.
+  const leafIds = useMemo(() => allSubtopics.flatMap((st) => getMicroTopicsForSubtopic(UPSC_CSE_GRANULAR_NODES, st.id).map((mt) => mt.id)), [allSubtopics]);
   const summary = useMemo(() => computeCoverageSummary(leafIds, coverage), [leafIds, coverage]);
+  const subtopics = useMemo(() => {
+    if (granularNodeDirectlyMatches(node, query)) return allSubtopics;
+    const matchIds = granularQueryMatchIds(query);
+    return matchIds ? allSubtopics.filter((st) => matchIds.has(st.id)) : allSubtopics;
+  }, [node, allSubtopics, query]);
   const isSelfDeepLinked = deepLinkId === node.id;
   const expanded = isOpen || forceOpen || !!query.trim();
 
@@ -280,7 +321,14 @@ function MicrosyllabusRow({
   // Every hook this component might need is called unconditionally, before the branch below, so
   // hook order never changes between a granularized and non-granularized render (React's Rules of
   // Hooks) — the granular-only values are simply unused on the non-granular branch.
-  const topics = useMemo(() => getTopicsForMicrosyllabus(UPSC_CSE_GRANULAR_NODES, item.id), [item.id]);
+  const topics = useMemo(() => {
+    const all = getTopicsForMicrosyllabus(UPSC_CSE_GRANULAR_NODES, item.id);
+    // The microsyllabus item's OWN title/description matched (not a granular descendant) — every
+    // topic beneath it is relevant context, so show them all rather than filtering down further.
+    if (matchesMicrosyllabusQuery(item, query)) return all;
+    const matchIds = granularQueryMatchIds(query);
+    return matchIds ? all.filter((t) => matchIds.has(t.id)) : all;
+  }, [item, query]);
   const leafIds = useMemo(() => leafGranularIdsForMicrosyllabus(UPSC_CSE_GRANULAR_NODES, item.id), [item.id]);
   const summary = useMemo(() => computeCoverageSummary(leafIds, coverage), [leafIds, coverage]);
 
@@ -585,6 +633,27 @@ export default function UpscCseSyllabus() {
   const stageLeafIds = useMemo(() => expandToLeafCoverageIds(activeTree.microsyllabus.map((m) => m.id), UPSC_CSE_GRANULAR_NODES), [activeTree]);
   const stageSummary = useMemo(() => computeCoverageSummary(stageLeafIds, coverage), [stageLeafIds, coverage]);
 
+  // Phase 6 — "UPSC CSE → GS Paper I → History → Ancient India → Indus Valley Civilization",
+  // composed entirely from the two EXISTING path resolvers (resolveMicrosyllabusPath,
+  // resolveGranularBreadcrumb) — no new resolution logic, just surfacing what they already compute
+  // for deep-link scroll targeting. Shown only while a deep link is active, since there is no
+  // "currently selected row" concept otherwise (rows are independent expand/collapse toggles).
+  const deepLinkTrail = useMemo(() => {
+    if (!deepLinkMicrosyllabusId) return null;
+    const path = resolveMicrosyllabusPath(activeTree, deepLinkMicrosyllabusId);
+    if (!path) return null;
+    const granular = deepLinkGranularId ? resolveGranularBreadcrumb(UPSC_CSE_GRANULAR_NODES, deepLinkGranularId) : undefined;
+    return [
+      'UPSC CSE',
+      path.paper.shortTitle,
+      path.subject.title,
+      path.item.title,
+      granular?.topic?.title,
+      granular?.subtopic?.title,
+      granular?.microTopic?.title,
+    ].filter((label): label is string => !!label);
+  }, [activeTree, deepLinkMicrosyllabusId, deepLinkGranularId]);
+
   if (activeWorkspaceId !== 'upsc_cse') {
     return (
       <div>
@@ -616,6 +685,17 @@ export default function UpscCseSyllabus() {
           </div>
         }
       />
+
+      {deepLinkTrail && (
+        <nav aria-label="Breadcrumb" className="mb-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-slate-400 dark:text-slate-500">
+          {deepLinkTrail.map((label, i) => (
+            <span key={i} className="flex items-center gap-1.5">
+              {i > 0 && <span aria-hidden="true">›</span>}
+              <span className={i === deepLinkTrail.length - 1 ? 'font-medium text-slate-600 dark:text-slate-300' : undefined}>{label}</span>
+            </span>
+          ))}
+        </nav>
+      )}
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center rounded-full bg-slate-100 dark:bg-slate-800 p-1 gap-0.5 self-start">

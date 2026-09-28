@@ -56,7 +56,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -82,7 +82,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -108,8 +108,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -134,8 +134,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Sustainable Development",
       "mappingStatus": "review_required"
     },
     {
@@ -160,7 +160,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -186,8 +186,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Sustainable Development",
       "mappingStatus": "review_required"
     },
     {
@@ -212,7 +212,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -238,7 +238,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -264,8 +264,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Sustainable Development",
       "mappingStatus": "review_required"
     },
     {
@@ -290,7 +290,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -316,8 +316,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Modern India",
       "mappingStatus": "review_required"
     },
     {
@@ -342,8 +342,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Indian National Movement",
       "mappingStatus": "review_required"
     },
     {
@@ -368,8 +368,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Medieval India",
       "mappingStatus": "review_required"
     },
     {
@@ -394,8 +394,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Ancient India",
       "mappingStatus": "review_required"
     },
     {
@@ -420,8 +420,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Ancient India",
       "mappingStatus": "review_required"
     },
     {
@@ -446,8 +446,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Ancient India",
       "mappingStatus": "review_required"
     },
     {
@@ -472,8 +472,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Ancient India",
       "mappingStatus": "review_required"
     },
     {
@@ -498,8 +498,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Modern India",
       "mappingStatus": "review_required"
     },
     {
@@ -524,8 +524,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Ancient India",
       "mappingStatus": "review_required"
     },
     {
@@ -550,8 +550,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Indian National Movement",
       "mappingStatus": "review_required"
     },
     {
@@ -576,8 +576,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -602,8 +602,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -628,8 +628,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -654,8 +654,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Economic Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -680,8 +680,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -706,8 +706,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -732,8 +732,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -758,8 +758,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -784,8 +784,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -810,8 +810,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Social Sector Initiatives",
       "mappingStatus": "review_required"
     },
     {
@@ -836,8 +836,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Climate Change",
       "mappingStatus": "review_required"
     },
     {
@@ -862,8 +862,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Climate Change",
       "mappingStatus": "review_required"
     },
     {
@@ -888,8 +888,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -914,8 +914,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Climate Change",
       "mappingStatus": "review_required"
     },
     {
@@ -940,8 +940,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Environmental Ecology",
       "mappingStatus": "review_required"
     },
     {
@@ -966,8 +966,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Climate Change",
       "mappingStatus": "review_required"
     },
     {
@@ -992,8 +992,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Biodiversity",
       "mappingStatus": "review_required"
     },
     {
@@ -1018,8 +1018,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Climate Change",
       "mappingStatus": "review_required"
     },
     {
@@ -1044,8 +1044,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Biodiversity",
       "mappingStatus": "review_required"
     },
     {
@@ -1070,8 +1070,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Environmental Ecology",
       "mappingStatus": "review_required"
     },
     {
@@ -1096,8 +1096,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -1122,8 +1122,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -1148,8 +1148,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -1174,8 +1174,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Environmental Ecology",
       "mappingStatus": "review_required"
     },
     {
@@ -1200,8 +1200,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "General Science",
       "mappingStatus": "review_required"
     },
     {
@@ -1226,8 +1226,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "General Science",
       "mappingStatus": "review_required"
     },
     {
@@ -1252,8 +1252,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -1278,8 +1278,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "General Science",
       "mappingStatus": "review_required"
     },
     {
@@ -1304,8 +1304,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "General Science",
       "mappingStatus": "review_required"
     },
     {
@@ -1330,8 +1330,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Environmental Ecology",
       "mappingStatus": "review_required"
     },
     {
@@ -1356,8 +1356,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1382,8 +1382,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -1408,8 +1408,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1434,8 +1434,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1460,8 +1460,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1486,8 +1486,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1512,8 +1512,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -1538,8 +1538,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1564,8 +1564,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1590,8 +1590,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Public Policy",
       "mappingStatus": "review_required"
     },
     {
@@ -1616,7 +1616,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1642,8 +1642,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -1668,8 +1668,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Economic Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -1694,8 +1694,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Climate Change",
       "mappingStatus": "review_required"
     },
     {
@@ -1720,7 +1720,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1746,8 +1746,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -1772,8 +1772,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -1798,7 +1798,7 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
+      "subject": "Economic & Social Development",
       "microsyllabusHint": null,
       "mappingStatus": "review_required"
     },
@@ -1824,8 +1824,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Social Sector Initiatives",
       "mappingStatus": "review_required"
     },
     {
@@ -1850,8 +1850,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Economic & Social Development",
+      "microsyllabusHint": "Social Sector Initiatives",
       "mappingStatus": "review_required"
     },
     {
@@ -1876,8 +1876,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Indian National Movement",
       "mappingStatus": "review_required"
     },
     {
@@ -1902,8 +1902,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Ancient India",
       "mappingStatus": "review_required"
     },
     {
@@ -1928,8 +1928,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Indian National Movement",
       "mappingStatus": "review_required"
     },
     {
@@ -1954,8 +1954,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Indian National Movement",
       "mappingStatus": "review_required"
     },
     {
@@ -1980,8 +1980,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Medieval India",
       "mappingStatus": "review_required"
     },
     {
@@ -2006,8 +2006,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -2032,8 +2032,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -2058,8 +2058,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "History",
+      "microsyllabusHint": "Modern India",
       "mappingStatus": "review_required"
     },
     {
@@ -2084,8 +2084,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Economic Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -2110,8 +2110,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Geography",
+      "microsyllabusHint": "Physical Geography",
       "mappingStatus": "review_required"
     },
     {
@@ -2136,8 +2136,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "General Science",
       "mappingStatus": "review_required"
     },
     {
@@ -2162,8 +2162,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -2188,8 +2188,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -2214,8 +2214,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "National Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -2240,8 +2240,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "General Science",
       "mappingStatus": "review_required"
     },
     {
@@ -2266,8 +2266,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -2292,8 +2292,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -2318,8 +2318,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -2344,8 +2344,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -2370,8 +2370,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Environment & Ecology",
+      "microsyllabusHint": "Biodiversity",
       "mappingStatus": "review_required"
     },
     {
@@ -2396,8 +2396,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Panchayati Raj",
       "mappingStatus": "review_required"
     },
     {
@@ -2422,8 +2422,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -2448,8 +2448,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Political System",
       "mappingStatus": "review_required"
     },
     {
@@ -2474,8 +2474,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Science & Technology",
+      "microsyllabusHint": "Science & Technology in Everyday Life",
       "mappingStatus": "review_required"
     },
     {
@@ -2500,8 +2500,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -2526,8 +2526,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -2552,8 +2552,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -2578,8 +2578,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Indian Polity & Governance",
+      "microsyllabusHint": "Constitution",
       "mappingStatus": "review_required"
     },
     {
@@ -2604,8 +2604,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "National Current Affairs",
       "mappingStatus": "review_required"
     },
     {
@@ -2630,8 +2630,8 @@ export const UPSC_CSE_PRELIMS_PYQ_BATCH_2025_Q1_Q100: UpscCsePrelimsPyqBatchFile
         }
       ],
       "correctOptionId": null,
-      "subject": null,
-      "microsyllabusHint": null,
+      "subject": "Current Affairs",
+      "microsyllabusHint": "International Current Affairs",
       "mappingStatus": "review_required"
     }
   ]

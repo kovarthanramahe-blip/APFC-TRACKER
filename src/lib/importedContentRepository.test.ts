@@ -5,6 +5,9 @@ import {
   filterImportedContentByTags,
   filterImportedContentByCategory,
   filterImportedContentUncategorized,
+  filterImportedContentByFolder,
+  filterImportedContentPinned,
+  filterImportedContentByArchived,
   sortImportedContent,
   queryImportedContent,
   collectImportedContentTags,
@@ -13,6 +16,10 @@ import {
   getContentCategory,
   getContentDescription,
   getContentUpdatedAt,
+  getContentFolderId,
+  isContentPinned,
+  isContentArchived,
+  applyImportedContentOrganizationPatch,
   parseTagsInput,
 } from './importedContentRepository';
 
@@ -313,5 +320,132 @@ describe('parseTagsInput', () => {
   it('an empty string produces an empty array', () => {
     expect(parseTagsInput('')).toEqual([]);
     expect(parseTagsInput('   ')).toEqual([]);
+  });
+});
+
+// Premium Note Organisation, Phase 3B — folder/pin/archive accessors, filters, and the
+// bulk-organisation patch. All additive to the existing metadata shape (see contentImport.ts's
+// ImportedContentMetadata) — nothing above this point in the file is touched by these additions.
+describe('getContentFolderId / isContentPinned / isContentArchived — missing metadata handling', () => {
+  it('defaults to unfiled/root, not pinned, not archived for an item with no metadata at all', () => {
+    const i = item({ metadata: undefined });
+    expect(getContentFolderId(i)).toBeNull();
+    expect(isContentPinned(i)).toBe(false);
+    expect(isContentArchived(i)).toBe(false);
+  });
+
+  it('reads whatever is actually set', () => {
+    const i = item({ metadata: { folderId: 'f1', isPinned: true, isArchived: true } });
+    expect(getContentFolderId(i)).toBe('f1');
+    expect(isContentPinned(i)).toBe(true);
+    expect(isContentArchived(i)).toBe(true);
+  });
+});
+
+describe('filterImportedContentByFolder / filterImportedContentPinned / filterImportedContentByArchived', () => {
+  it('filterImportedContentByFolder matches exactly one folder, including null (root)', () => {
+    const a = item({ id: 'a', metadata: { folderId: 'f1' } });
+    const b = item({ id: 'b', metadata: { folderId: 'f2' } });
+    const c = item({ id: 'c', metadata: undefined });
+    expect(filterImportedContentByFolder([a, b, c], 'f1')).toEqual([a]);
+    expect(filterImportedContentByFolder([a, b, c], null)).toEqual([c]);
+  });
+
+  it('filterImportedContentPinned returns only pinned items', () => {
+    const a = item({ id: 'a', metadata: { isPinned: true } });
+    const b = item({ id: 'b', metadata: { isPinned: false } });
+    expect(filterImportedContentPinned([a, b])).toEqual([a]);
+  });
+
+  it('filterImportedContentByArchived(false) excludes archived; (true) returns only archived', () => {
+    const a = item({ id: 'a', metadata: { isArchived: true } });
+    const b = item({ id: 'b', metadata: { isArchived: false } });
+    const c = item({ id: 'c', metadata: undefined });
+    expect(filterImportedContentByArchived([a, b, c], false)).toEqual([b, c]);
+    expect(filterImportedContentByArchived([a, b, c], true)).toEqual([a]);
+  });
+});
+
+describe('queryImportedContent — archive/folder/pin integration', () => {
+  it('excludes archived items by default, unaffected by any other filter', () => {
+    const active = item({ id: 'active', title: 'Active' });
+    const archived = item({ id: 'archived', title: 'Archived', metadata: { isArchived: true } });
+    expect(queryImportedContent([active, archived], {})).toEqual([active]);
+  });
+
+  it('archived: true returns only archived items', () => {
+    const active = item({ id: 'active' });
+    const archived = item({ id: 'archived', metadata: { isArchived: true } });
+    expect(queryImportedContent([active, archived], { archived: true })).toEqual([archived]);
+  });
+
+  it('folderId filters to exactly one folder', () => {
+    const inFolder = item({ id: 'a', metadata: { folderId: 'f1' } });
+    const elsewhere = item({ id: 'b', metadata: { folderId: 'f2' } });
+    expect(queryImportedContent([inFolder, elsewhere], { folderId: 'f1' })).toEqual([inFolder]);
+  });
+
+  it('pinnedOnly filters to pinned items', () => {
+    const pinned = item({ id: 'a', metadata: { isPinned: true } });
+    const unpinned = item({ id: 'b' });
+    expect(queryImportedContent([pinned, unpinned], { pinnedOnly: true })).toEqual([pinned]);
+  });
+
+  it('existing callers passing no archive/folder/pin options are completely unaffected — nothing new is silently applied beyond archive exclusion (a no-op for pre-existing data)', () => {
+    const a = item({ id: 'a', title: 'B Title' });
+    const b = item({ id: 'b', title: 'A Title' });
+    expect(queryImportedContent([a, b], { sort: 'title' }).map((i) => i.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('applyImportedContentOrganizationPatch', () => {
+  it('sets folderId, leaving everything else untouched', () => {
+    const i = item({ metadata: { tags: ['existing'] } });
+    const patched = applyImportedContentOrganizationPatch(i, { folderId: 'f1' }, '2026-02-01T00:00:00.000Z');
+    expect(patched.metadata?.folderId).toBe('f1');
+    expect(patched.metadata?.tags).toEqual(['existing']);
+    expect(patched.updatedAt).toBe('2026-02-01T00:00:00.000Z');
+  });
+
+  it('folderId: null explicitly moves to root, distinct from omitting folderId entirely', () => {
+    const i = item({ metadata: { folderId: 'f1' } });
+    const patched = applyImportedContentOrganizationPatch(i, { folderId: null });
+    expect(patched.metadata?.folderId).toBeNull();
+
+    const untouched = applyImportedContentOrganizationPatch(i, { isPinned: true });
+    expect(untouched.metadata?.folderId).toBe('f1'); // omitted — unchanged
+  });
+
+  it('toggles isPinned/isArchived independently', () => {
+    const i = item({});
+    expect(applyImportedContentOrganizationPatch(i, { isPinned: true }).metadata?.isPinned).toBe(true);
+    expect(applyImportedContentOrganizationPatch(i, { isArchived: true }).metadata?.isArchived).toBe(true);
+  });
+
+  it('addTags merges, deduplicated case-insensitively, keeping first-seen casing', () => {
+    const i = item({ metadata: { tags: ['Revision'] } });
+    const patched = applyImportedContentOrganizationPatch(i, { addTags: ['revision', 'Important'] });
+    expect(patched.metadata?.tags).toEqual(['Revision', 'Important']);
+  });
+
+  it('removeTags removes case-insensitively', () => {
+    const i = item({ metadata: { tags: ['Revision', 'Important'] } });
+    const patched = applyImportedContentOrganizationPatch(i, { removeTags: ['REVISION'] });
+    expect(patched.metadata?.tags).toEqual(['Important']);
+  });
+
+  it('never touches rawContent or provenance — organisation is metadata-only', () => {
+    const i = item({ rawContent: 'Original body', provenance: { sourceFilename: 'a.md', originalFormat: 'markdown', importedAt: '2026-01-01T00:00:00.000Z' } });
+    const patched = applyImportedContentOrganizationPatch(i, { isArchived: true, folderId: 'f1', addTags: ['x'] });
+    expect(patched.rawContent).toBe('Original body');
+    expect(patched.provenance).toEqual(i.provenance);
+    expect(patched.id).toBe(i.id);
+  });
+
+  it('never mutates the input item', () => {
+    const i = item({ metadata: { tags: ['a'] } });
+    const snapshot = JSON.parse(JSON.stringify(i));
+    applyImportedContentOrganizationPatch(i, { isPinned: true, addTags: ['b'] });
+    expect(i).toEqual(snapshot);
   });
 });

@@ -38,6 +38,29 @@ describe('workspace accent — colour assignment', () => {
   });
 });
 
+describe('workspace accent — Phase 6 ring/focusRing/hoverText/solidText tokens', () => {
+  it('every workspace has the four new tokens, matching its own colour family', () => {
+    for (const [id, family] of [
+      ['apfc', 'green'],
+      ['upsc_cse', 'brand'],
+      ['phd_research', 'violet'],
+    ] as const) {
+      const accent = getWorkspaceAccent(id);
+      expect(accent.ring).toContain(family);
+      expect(accent.focusRing).toContain(family);
+      expect(accent.hoverText).toContain(family);
+      expect(accent.solidText).toContain(family);
+    }
+  });
+
+  it('ring/focusRing/hoverText are complete literal utility classes, never a bare colour needing further composition', () => {
+    const accent = getWorkspaceAccent('apfc');
+    expect(accent.ring).toMatch(/^ring-/);
+    expect(accent.focusRing).toMatch(/^focus:ring-/);
+    expect(accent.hoverText).toMatch(/^hover:text-/);
+  });
+});
+
 describe('workspace accent — never confusable with a semantic colour', () => {
   it('APFC\'s workspace green is a different Tailwind colour family from the app\'s semantic "success" green (emerald) — see Primitives.tsx\'s Badge success tone', () => {
     const accent = getWorkspaceAccent('apfc');

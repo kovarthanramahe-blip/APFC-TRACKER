@@ -4,8 +4,6 @@ import { Link } from 'react-router-dom';
 import {
   LineChart,
   Line,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   Tooltip,
@@ -15,14 +13,25 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, ClipboardList, Brain, Gauge } from 'lucide-react';
+import { Award, Lock, Trophy, Gem, Star, ListChecks, ArrowUpRight, TrendingDown, TrendingUp, Minus, Repeat, ClipboardList, Brain, Gauge } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
 import { computeAggregateAccuracy } from '../lib/mockTestStats';
-import { computePyqPerformance } from '../lib/pyqPerformance';
+import {
+  computePyqPerformance,
+  computeRepeatedMistakes,
+  topTopicsByMistakes,
+  topSubjectsByMistakes,
+  computeRecentVsPreviousTrend,
+  selectRepeatedMistakePracticeIds,
+  type PyqPerformanceTrend,
+} from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressResult } from '../lib/studyPlanProgress';
 import type { PlanTaskType } from '../lib/studyPlan';
@@ -32,17 +41,6 @@ import { computeExamReadiness, type ExamReadinessReport, type ExamReadinessVerdi
 import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
 import { Card, Badge, Button, ProgressBar, PageHeader, fadeUp, WorkspaceComingSoon } from '../components/ui/Primitives';
-
-function lastNDays(n: number) {
-  const days: string[] = [];
-  const d = new Date();
-  for (let i = n - 1; i >= 0; i--) {
-    const dd = new Date(d);
-    dd.setDate(d.getDate() - i);
-    days.push(dd.toISOString().slice(0, 10));
-  }
-  return days;
-}
 
 export default function Analytics() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -62,6 +60,18 @@ export default function Analytics() {
   // Same computePyqPerformance helper PYQTest.tsx's own "Performance" view uses — one source of
   // truth for PYQ aggregation, so the two views can never disagree.
   const pyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, pyqAttempts), [pyqAttempts]);
+
+  // PYQ Weak Spots (Phase 6 Step 2) — re-sorts pyqPerf's own topics[]/subjects[] by raw mistake
+  // volume rather than rescanning attempts (see lib/pyqPerformance.ts's own header), plus the one
+  // genuinely new calculation this stage adds: a recent-vs-previous accuracy trend.
+  const repeatedMistakeTopics = useMemo(() => (pyqPerf ? topTopicsByMistakes(pyqPerf.topics, 4) : []), [pyqPerf]);
+  const repeatedMistakeSubjects = useMemo(() => (pyqPerf ? topSubjectsByMistakes(pyqPerf.subjects, 3) : []), [pyqPerf]);
+  const pyqTrend = useMemo(() => computeRecentVsPreviousTrend(pyqAttempts), [pyqAttempts]);
+
+  // "Revise My Repeated Mistakes" (Phase 6 Step 3) — the actual question-level candidate list for
+  // the action below, computed the same way pages/PYQTest.tsx computes it for its own auto-start
+  // deep link (?mode=repeated_mistakes); no scoring/session logic lives on this page.
+  const repeatedMistakePracticeIds = useMemo(() => selectRepeatedMistakePracticeIds(computeRepeatedMistakes(PYQ_BANK, pyqAttempts)), [pyqAttempts]);
 
   // Revision Queue summary (Stage 3) — reuses lib/revisionQueue's getQueueCounts and
   // lib/pyqFilters' computeEligibleRevisionIds verbatim; no second scheduling/eligibility engine.
@@ -99,14 +109,11 @@ export default function Analytics() {
     return { name: s.shortTitle, value: done, colorKey: s.colorKey };
   }).filter((d) => d.value > 0);
 
-  const focusData = useMemo(
-    () =>
-      lastNDays(14).map((date) => ({
-        date: date.slice(5),
-        minutes: studyLog[date]?.focusMinutes ?? 0,
-      })),
-    [studyLog],
-  );
+  // Study Activity Trend (Phase 4 Step 5) — reuses buildDailyActivityTrend (lib/studyProgressInsights.ts),
+  // the same canonical calculation the APFC/UPSC CSE/PhD Research dashboards already use, replacing
+  // this page's own former ad-hoc lastNDays/focusData (UTC-based, never reused elsewhere).
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, getLocalDateString(), 7), [studyLog]);
 
   const scoreTrend = useMemo(
     () =>
@@ -199,20 +206,7 @@ export default function Analytics() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <motion.div {...fadeUp}>
-          <Card className="p-5 sm:p-6 h-full">
-            <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Focus Minutes — Last 14 Days</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={focusData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" allowDecimals={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                  <Bar dataKey="minutes" fill="#3161ee" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
+          <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="h-full" />
         </motion.div>
 
         <motion.div {...fadeUp}>
@@ -389,6 +383,71 @@ export default function Analytics() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                </div>
+              )}
+
+              {(repeatedMistakeTopics.length > 0 || repeatedMistakeSubjects.length > 0 || pyqTrend.direction !== 'insufficient_data') && (
+                <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">PYQ Weak Spots</p>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div>
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <Repeat className="h-3.5 w-3.5 text-rose-500" /> Repeated Mistakes
+                      </div>
+                      {repeatedMistakeTopics.length === 0 ? (
+                        <p className="text-xs text-slate-400">No repeated mistakes yet.</p>
+                      ) : (
+                        <ul className="space-y-1.5">
+                          {repeatedMistakeTopics.map((t) => (
+                            <li key={t.topicId} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{t.topicTitle}</span>
+                              <Badge tone="danger">
+                                {t.wrong} mistake{t.wrong === 1 ? '' : 's'}
+                              </Badge>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {/* Revise My Repeated Mistakes (Phase 6 Step 3) — question-level, not topic-level:
+                          launches the EXISTING revision session (pages/PYQTest.tsx's startRevision) over
+                          topRepeatedMistakes' own ranking, via the ?mode=repeated_mistakes deep link. */}
+                      {repeatedMistakePracticeIds.length > 0 ? (
+                        <Link
+                          to="/pyq-test?mode=repeated_mistakes"
+                          className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        >
+                          <Repeat className="h-3 w-3" /> Revise My Repeated Mistakes ({repeatedMistakePracticeIds.length})
+                        </Link>
+                      ) : (
+                        <p className="mt-2 text-[11px] text-slate-400">Revise My Repeated Mistakes — nothing to revise yet.</p>
+                      )}
+                    </div>
+                    <div>
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <ListChecks className="h-3.5 w-3.5 text-brand-500" /> Revise Next
+                      </div>
+                      {repeatedMistakeSubjects.length === 0 ? (
+                        <p className="text-xs text-slate-400">Nothing flagged yet.</p>
+                      ) : (
+                        <ul className="space-y-1.5">
+                          {repeatedMistakeSubjects.map((s) => (
+                            <li key={s.subject} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{s.subjectTitle}</span>
+                              <Badge tone="warning">
+                                {s.wrong} mistake{s.wrong === 1 ? '' : 's'}
+                              </Badge>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <Gauge className="h-3.5 w-3.5 text-brand-500" /> Recent Performance
+                      </div>
+                      <PyqTrendBadge trend={pyqTrend} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -758,6 +817,32 @@ function PyqStat({
     <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
       <p className={cx('font-display font-bold leading-tight truncate', small ? 'text-sm' : 'text-lg', tones[tone])}>{value}</p>
       <p className="text-[11px] text-slate-400 mt-1">{label}</p>
+    </div>
+  );
+}
+
+// PYQ Weak Spots — Recent Performance (Phase 6 Step 2). A deterministic recent-vs-previous accuracy
+// comparison (lib/pyqPerformance.ts's computeRecentVsPreviousTrend) — never a subjective score, and
+// explicit about not having enough data yet rather than guessing a direction.
+function PyqTrendBadge({ trend }: { trend: PyqPerformanceTrend }) {
+  if (trend.direction === 'insufficient_data') {
+    return <p className="text-xs text-slate-400">Not enough recent tests yet to judge a trend.</p>;
+  }
+  const meta: Record<Exclude<PyqPerformanceTrend['direction'], 'insufficient_data'>, { label: string; tone: 'success' | 'danger' | 'neutral'; icon: typeof TrendingUp }> = {
+    improving: { label: 'Improving', tone: 'success', icon: TrendingUp },
+    declining: { label: 'Declining', tone: 'danger', icon: TrendingDown },
+    stable: { label: 'Stable', tone: 'neutral', icon: Minus },
+  };
+  const m = meta[trend.direction];
+  const Icon = m.icon;
+  return (
+    <div>
+      <Badge tone={m.tone}>
+        <Icon className="h-3 w-3" /> {m.label}
+      </Badge>
+      <p className="mt-1.5 text-[11px] text-slate-400">
+        Last {trend.recentAttemptCount} tests: {trend.recentAccuracy?.toFixed(0)}% vs previous {trend.previousAttemptCount}: {trend.previousAccuracy?.toFixed(0)}%
+      </p>
     </div>
   );
 }

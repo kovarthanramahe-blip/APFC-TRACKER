@@ -4,7 +4,16 @@ import type { UpscCseSyllabusTree, UpscCseExamStage } from './upscCseSyllabus';
 import { getSubjectsForPaper, getMicrosyllabusForSubject } from './upscCseSyllabus';
 import type { UpscCsePrelimsBatchPyq } from './upscCsePrelimsPyqBatchImport';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
-import { computeUpscCsePrelimsPerformance, type UpscCsePrelimsPerformanceSnapshot } from './upscCsePrelimsPyqPerformance';
+import {
+  computeUpscCsePrelimsPerformance,
+  topMicrosyllabusByMistakes,
+  topUpscCsePrelimsSubjectsByMistakes,
+  computeUpscCsePrelimsRecentVsPreviousTrend,
+  type UpscCsePrelimsPerformanceSnapshot,
+  type UpscCsePrelimsMicrosyllabusPerformance,
+  type UpscCsePrelimsSubjectPerformance,
+  type UpscCsePrelimsPerformanceTrend,
+} from './upscCsePrelimsPyqPerformance';
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from './upscCsePrelimsPyqFilters';
 import { getQueueCounts, type RevisionQueueCounts, type RevisionQueue } from './revisionQueue';
 import { countStudyTasksByStatus, overdueStudyTasks, type UpscCseStudyTask, type UpscCseStudyTaskCounts } from './upscCseStudyTask';
@@ -38,12 +47,23 @@ export interface UpscCseStudyTaskAnalytics {
   completionRatePct: number;
 }
 
+/** PYQ Weak Spots (Phase 6 Step 2) — re-sorts performance's own subjects[]/microsyllabus[] by raw
+ * mistake volume (never a second attempt scan) plus the one genuinely new calculation this stage
+ * adds, a recent-vs-previous accuracy trend. See lib/upscCsePrelimsPyqPerformance.ts's own header
+ * for the full design rationale, including how the "Needs Review / Unmapped" bucket is preserved. */
+export interface UpscCsePrelimsWeakSpots {
+  repeatedMistakeMicrosyllabus: UpscCsePrelimsMicrosyllabusPerformance[];
+  repeatedMistakeSubjects: UpscCsePrelimsSubjectPerformance[];
+  trend: UpscCsePrelimsPerformanceTrend;
+}
+
 export interface UpscCseAnalyticsSnapshot {
   overallCoverage: UpscCseCoverageSummary;
   prelimsCoverage: UpscCseCoverageSummary;
   mainsCoverage: UpscCseCoverageSummary;
   subjectCoverage: SubjectCoverageEntry[];
   performance: UpscCsePrelimsPerformanceSnapshot | null;
+  weakSpots: UpscCsePrelimsWeakSpots;
   totalQuestions: number;
   unattemptedCount: number;
   revision: RevisionQueueCounts;
@@ -90,6 +110,12 @@ export function computeUpscCseAnalytics(input: ComputeUpscCseAnalyticsInput): Up
   const totalQuestions = input.pyqBank.length;
   const unattemptedCount = performance ? performance.unattemptedCount : totalQuestions;
 
+  const weakSpots: UpscCsePrelimsWeakSpots = {
+    repeatedMistakeMicrosyllabus: performance ? topMicrosyllabusByMistakes(performance.microsyllabus) : [],
+    repeatedMistakeSubjects: performance ? topUpscCsePrelimsSubjectsByMistakes(performance.subjects) : [],
+    trend: computeUpscCsePrelimsRecentVsPreviousTrend(input.attempts),
+  };
+
   const revisionStatusMap = computeRevisionStatusMap(input.pyqBank, input.attempts);
   const eligibleRevisionIds = computeEligibleRevisionIds(input.pyqBank, revisionStatusMap, input.bookmarkedPyqIds);
   const revision = getQueueCounts(input.revisionQueue, eligibleRevisionIds, input.today);
@@ -107,6 +133,7 @@ export function computeUpscCseAnalytics(input: ComputeUpscCseAnalyticsInput): Up
     mainsCoverage,
     subjectCoverage,
     performance,
+    weakSpots,
     totalQuestions,
     unattemptedCount,
     revision,

@@ -234,6 +234,27 @@ export interface Note {
   pinned: boolean;
   /** Multi-Workspace OS, Stage 1 — see PYQAttempt.workspaceId above; same optionality/migration. */
   workspaceId?: WorkspaceKind;
+  /** Knowledge Workspace, Phase 3A — present only for a note created via file import
+   * (pages/Notes.tsx's handleImportFile), mirroring lib/contentImport.ts's
+   * ImportedContentProvenance.sourceHash/sourceFileSize/sourceFilename just enough for
+   * lib/importDuplicates.ts's findNoteDuplicates to warn on a re-import of the same file — never a
+   * full provenance/origin model like ImportedContent's, since Notes stay deliberately lightweight.
+   * Absent (never fabricated) for a manually created or edited note, and absent on every note saved
+   * before this field existed — every reader treats that exactly like "nothing to compare". */
+  sourceHash?: string;
+  sourceFileSize?: number;
+  sourceFilename?: string;
+  /** Premium Note Organisation, Phase 3B — mirrors ImportedContentMetadata.folderId/tags/isArchived
+   * (lib/contentImport.ts) just enough for lib/noteOrganization.ts to offer the same folder/tag/
+   * archive affordances Notes never had before, without adopting ImportedContent's nested
+   * `metadata`/`provenance` shape — Notes stay a flat, lightweight model on purpose (see this same
+   * reasoning on sourceHash/sourceFileSize/sourceFilename above). `pinned` (already existing, above)
+   * is reused as-is for "pin" — never a second, duplicate pinned flag. Absent (never fabricated) on
+   * every note created before this stage, and on a manually created/edited note with no folder/tags
+   * set — every reader treats that exactly like "unfiled, no tags, not archived". */
+  folderId?: string | null;
+  tags?: string[];
+  isArchived?: boolean;
 }
 
 export interface PomodoroSession {

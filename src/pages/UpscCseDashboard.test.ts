@@ -8,6 +8,11 @@ import { createRevisionQueue } from '../lib/revisionQueue';
 import { DEFAULT_WORKSPACE_ID } from '../lib/workspace';
 import { hasMeaningfulData } from '../lib/cloudSync';
 import type { UpscCseStudyTask } from '../lib/upscCseStudyTask';
+import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { computeCoverageSummary } from '../lib/upscCseSyllabusCoverage';
+import { getEncouragementMessage } from '../lib/gamification';
+import type { UpscCsePrelimsPyqAttempt } from '../lib/upscCsePrelimsPyqAttempt';
 
 function fullReset() {
   useAppStore.setState({
@@ -155,5 +160,253 @@ describe('UPSC CSE Study Dashboard — study task persistence (upscCseStudyTasks
       };
       expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.upscCseStudyTasks).toEqual([]);
     });
+  });
+});
+
+// Study Progress Insights integration (Phase 4 Step 2) — exercises the exact computation
+// pages/UpscCseDashboard.tsx performs: computeStudyProgressInsights over THIS workspace's own
+// studyLog, with the completion target reusing lib/upscCseSyllabusCoverage.ts's own
+// computeCoverageSummary (never a second UPSC completion calculation).
+describe('UPSC CSE Study Dashboard — Study Progress Insights integration', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('upsc_cse'));
+
+  it('normal activity: reflects this workspace\'s own studyLog and the existing coverage.weightedPct as the completion target', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 40, topicsCompleted: 0, testsCompleted: 1 } },
+    });
+    const overallCoverage = computeCoverageSummary(['m1', 'm2', 'm3', 'm4'], { m1: 'strong', m2: 'strong', m3: 'revised', m4: 'not_started' });
+    expect(overallCoverage.total).toBeGreaterThan(0);
+    const insights = computeStudyProgressInsights({
+      studyLog: useAppStore.getState().studyLog,
+      completionTarget: { completed: overallCoverage.weightedPct, total: 100 },
+      referenceDate: '2026-01-08',
+    });
+    expect(insights.currentPeriod.focusMinutes).toBe(40);
+    expect(insights.progressPercent).toBe(overallCoverage.weightedPct);
+  });
+
+  it('unavailable completion target: an empty coverage map (total 0) leaves progressPercent null, never invented', () => {
+    const overallCoverage = computeCoverageSummary([], {});
+    expect(overallCoverage.total).toBe(0);
+    const insights = computeStudyProgressInsights({
+      studyLog: useAppStore.getState().studyLog,
+      completionTarget: overallCoverage.total > 0 ? { completed: overallCoverage.weightedPct, total: 100 } : undefined,
+    });
+    expect(insights.progressPercent).toBeNull();
+  });
+
+  it('current vs previous period comparison uses computePeriodComparison, not a second date calculation', () => {
+    useAppStore.setState({
+      studyLog: {
+        '2026-01-02': { date: '2026-01-02', focusMinutes: 15, topicsCompleted: 0, testsCompleted: 0 },
+        '2026-01-09': { date: '2026-01-09', focusMinutes: 35, topicsCompleted: 0, testsCompleted: 0 },
+      },
+    });
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog, referenceDate: '2026-01-10', periodDays: 7 });
+    expect(insights.currentPeriod.focusMinutes).toBe(35);
+    expect(insights.previousPeriod.focusMinutes).toBe(15);
+  });
+
+  it('workspace accent: UPSC CSE resolves to the existing brand blue, not a new colour', () => {
+    const accent = getWorkspaceAccent(useAppStore.getState().activeWorkspaceId);
+    expect(accent.bg).toBe('bg-brand-600');
+  });
+
+  it('workspace isolation: studyLog logged while UPSC CSE is active is invisible after switching to APFC', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 25);
+    const upscStudyLog = useAppStore.getState().studyLog;
+    expect(Object.keys(upscStudyLog).length).toBeGreaterThan(0);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().studyLog).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().studyLog).toEqual(upscStudyLog);
+  });
+
+  it('empty study-log state produces a fully zeroed snapshot, never an error', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(() => computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog })).not.toThrow();
+    const insights = computeStudyProgressInsights({ studyLog: useAppStore.getState().studyLog });
+    expect(insights.totalActivity).toEqual({ focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0, activeDays: 0 });
+    expect(insights.streak).toEqual({ current: 0, best: 0 });
+  });
+});
+
+// Phase 4 Step 3 — the completion TARGET itself (upscCseSyllabusCoverage, and the weightedPct
+// derived from it) must never leak across workspaces, same discipline as studyLog above.
+describe('UPSC CSE Study Dashboard — Study Progress Insights: completion-target workspace isolation (Phase 4 Step 3)', () => {
+  it('upscCseSyllabusCoverage (and the weightedPct derived from it) is archived away while another workspace is active, and is restored exactly on switching back', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.setState({ upscCseSyllabusCoverage: { m1: 'strong', m2: 'revised' } });
+    const coverageBefore = computeCoverageSummary(['m1', 'm2', 'm3'], useAppStore.getState().upscCseSyllabusCoverage);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    // upscCseSyllabusCoverage now reflects APFC's own (unrelated, empty) slice, never a
+    // merged/leftover view of the UPSC CSE coverage set above.
+    expect(useAppStore.getState().upscCseSyllabusCoverage).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const coverageAfter = computeCoverageSummary(['m1', 'm2', 'm3'], useAppStore.getState().upscCseSyllabusCoverage);
+    expect(coverageAfter).toEqual(coverageBefore);
+  });
+
+  it('marking coverage in another workspace never changes UPSC CSE\'s own upscCseSyllabusCoverage or its derived weightedPct', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.setState({ upscCseSyllabusCoverage: { m1: 'strong' } });
+    const before = computeCoverageSummary(['m1'], useAppStore.getState().upscCseSyllabusCoverage);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    // No equivalent field exists for PhD Research at all — nothing to even set here; switching
+    // back is enough to prove UPSC CSE's own coverage was never touched.
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(computeCoverageSummary(['m1'], useAppStore.getState().upscCseSyllabusCoverage)).toEqual(before);
+  });
+});
+
+// Study Activity Trend integration (Phase 4 Step 4) — exercises the exact computation
+// pages/UpscCseDashboard.tsx performs: buildDailyActivityTrend(studyLog, today, 7).
+describe('UPSC CSE Study Dashboard — Study Activity Trend integration', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('upsc_cse'));
+
+  it('dashboard integration: 7 entries, real focus minutes on the matching day, zero elsewhere', () => {
+    useAppStore.setState({
+      studyLog: { '2026-01-09': { date: '2026-01-09', focusMinutes: 25, topicsCompleted: 0, testsCompleted: 1 } },
+    });
+    const trend = buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7);
+    expect(trend).toHaveLength(7);
+    expect(trend.find((d) => d.date === '2026-01-09')?.focusMinutes).toBe(25);
+    expect(trend.filter((d) => d.date !== '2026-01-09').every((d) => d.focusMinutes === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('empty study log: every day in the trend is safely zeroed, never throws', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(() => buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7)).not.toThrow();
+    expect(buildDailyActivityTrend(useAppStore.getState().studyLog, '2026-01-10', 7).every((d) => d.focusMinutes === 0 && !d.isActive)).toBe(true);
+  });
+
+  it('accent resolution: UPSC CSE\'s trend uses the existing brand blue', () => {
+    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-brand-600');
+  });
+
+  it('workspace isolation: a trend built from UPSC CSE studyLog never reflects activity logged under another workspace', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 25);
+    const upscStudyLog = useAppStore.getState().studyLog;
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 777);
+    const apfcStudyLog = useAppStore.getState().studyLog;
+
+    const upscTrend = buildDailyActivityTrend(upscStudyLog, '2026-01-10', 7);
+    const apfcTrend = buildDailyActivityTrend(apfcStudyLog, '2026-01-10', 7);
+    expect(upscTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(25);
+    expect(apfcTrend.find((d) => d.date === '2026-01-08')?.focusMinutes).toBe(777);
+  });
+});
+
+function attemptFixture(id: string, submittedAt: string): UpscCsePrelimsPyqAttempt {
+  return {
+    id,
+    submittedAt,
+    year: 'all',
+    paper: 'all',
+    subject: 'all',
+    microsyllabusId: 'all',
+    questionIds: [],
+    answers: {},
+    correctCount: 0,
+    wrongCount: 0,
+    unansweredCount: 0,
+    accuracy: 0,
+  };
+}
+
+// Context-aware encouragement integration (Phase 4 Step 6) — exercises the exact inputs
+// pages/UpscCseDashboard.tsx now feeds into the EXISTING getEncouragementMessage (lib/gamification.ts,
+// already shown on the APFC Dashboard): today's focus minutes from studyLog, the global
+// dailyGoalMinutes setting, the SAME streak already computed by Study Progress Insights above, the
+// SAME overallCoverage.weightedPct already used as the completion target above, and whether a UPSC
+// Prelims PYQ test was submitted today.
+describe('UPSC CSE Study Dashboard — Context-aware encouragement integration (Phase 4 Step 6)', () => {
+  beforeEach(() => useAppStore.getState().setActiveWorkspaceId('upsc_cse'));
+
+  it('normal activity: partial progress toward the daily goal reports the exact remaining minutes', () => {
+    useAppStore.setState({
+      dailyGoalMinutes: 60,
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 40, topicsCompleted: 0, testsCompleted: 0 } },
+    });
+    const state = useAppStore.getState();
+    const todayMinutes = state.studyLog['2026-01-08']?.focusMinutes ?? 0;
+    const streak = computeStudyProgressInsights({ studyLog: state.studyLog, referenceDate: '2026-01-08' }).streak.current;
+    const overallCoverage = computeCoverageSummary(['m1', 'm2'], { m1: 'strong', m2: 'not_started' });
+    const encouragement = getEncouragementMessage({
+      todayMinutes,
+      dailyGoalMinutes: state.dailyGoalMinutes,
+      streakCurrent: streak,
+      syllabusPct: overallCoverage.weightedPct,
+      tookTestToday: false,
+    });
+    expect(encouragement).toBe("You're 20 minutes away from today's target.");
+  });
+
+  it('a submitted UPSC Prelims PYQ test today takes priority over every other signal', () => {
+    useAppStore.setState({
+      upscCsePrelimsPyqAttempts: [attemptFixture('a1', '2026-01-08T10:00:00.000Z')],
+      studyLog: { '2026-01-08': { date: '2026-01-08', focusMinutes: 5, topicsCompleted: 0, testsCompleted: 1 } },
+    });
+    const attempts = useAppStore.getState().upscCsePrelimsPyqAttempts;
+    const tookTestToday = attempts.some((a) => a.submittedAt.slice(0, 10) === '2026-01-08');
+    expect(tookTestToday).toBe(true);
+    const encouragement = getEncouragementMessage({
+      todayMinutes: 5,
+      dailyGoalMinutes: 60,
+      streakCurrent: 3,
+      syllabusPct: 90,
+      tookTestToday,
+    });
+    expect(encouragement).toBe('Test completed. Now review the mistakes.');
+  });
+
+  it('uses this workspace\'s own overallCoverage.weightedPct as syllabusPct, never a second UPSC completion number', () => {
+    const overallCoverage = computeCoverageSummary(['m1', 'm2'], { m1: 'strong', m2: 'revised' });
+    expect(overallCoverage.weightedPct).toBeGreaterThanOrEqual(50);
+    expect(overallCoverage.weightedPct).toBeLessThan(100);
+    const encouragement = getEncouragementMessage({
+      todayMinutes: 0,
+      dailyGoalMinutes: 60,
+      streakCurrent: 0,
+      syllabusPct: overallCoverage.weightedPct,
+      tookTestToday: false,
+    });
+    expect(encouragement).toBe('Halfway is not the finish line. Keep moving.');
+  });
+
+  it('empty/zero-activity case: no minutes, no streak, no coverage, no test — the first-session message', () => {
+    expect(useAppStore.getState().studyLog).toEqual({});
+    expect(useAppStore.getState().upscCsePrelimsPyqAttempts).toEqual([]);
+    const overallCoverage = computeCoverageSummary([], {});
+    const encouragement = getEncouragementMessage({
+      todayMinutes: 0,
+      dailyGoalMinutes: useAppStore.getState().dailyGoalMinutes,
+      streakCurrent: 0,
+      syllabusPct: overallCoverage.total > 0 ? overallCoverage.weightedPct : 0,
+      tookTestToday: false,
+    });
+    expect(encouragement).toBe("Your first focused session starts today's progress.");
+  });
+
+  it('workspace isolation: today\'s minutes and test-taken status come only from this workspace\'s own studyLog/attempts', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-01-08', 60);
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(attemptFixture('cse-a1', '2026-01-08T09:00:00.000Z'));
+    const upscStudyLog = useAppStore.getState().studyLog;
+    const upscAttempts = useAppStore.getState().upscCsePrelimsPyqAttempts;
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().studyLog).toEqual({});
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().studyLog).toEqual(upscStudyLog);
+    expect(useAppStore.getState().upscCsePrelimsPyqAttempts).toEqual(upscAttempts);
   });
 });

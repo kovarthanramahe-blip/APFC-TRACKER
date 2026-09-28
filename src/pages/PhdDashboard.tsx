@@ -24,6 +24,11 @@ import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { computePhdDashboardSnapshot } from '../lib/phdDashboard';
 import { isValidTopicAreaTitle, searchPhdTopicAreas, getPhdTopicAreaById, type PhdTopicArea } from '../lib/phdTopicArea';
 import { isValidMicroTargetTitle, type MicroTarget, type MicroTargetPriority } from '../lib/microTarget';
+import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { getEncouragementMessage } from '../lib/gamification';
+import { StudyProgressInsightsCard } from '../components/ui/StudyProgressInsightsCard';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 
 // PhD Research Dashboard — the research-start/duration overview plus Topic Area and micro-target
 // management for the PhD Research workspace. Reuses the existing repository architecture for
@@ -106,6 +111,8 @@ export default function PhdDashboard() {
   const setMicroTargetStatus = useAppStore((s) => s.setPhdMicroTargetStatus);
   const deleteMicroTarget = useAppStore((s) => s.deletePhdMicroTarget);
   const importedContent = useAppStore((s) => s.importedContent);
+  const studyLog = useAppStore((s) => s.studyLog);
+  const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
 
   const today = useMemo(() => getLocalDateString(), []);
 
@@ -113,6 +120,32 @@ export default function PhdDashboard() {
     () => computePhdDashboardSnapshot({ researchStartDate, topicAreas, microTargets, importedContent, today }),
     [researchStartDate, topicAreas, microTargets, importedContent, today],
   );
+
+  // Study Progress Insights (Phase 4 Step 2) — reuses this workspace's own studyLog. No completion
+  // target: PhD Research has no syllabus/topic-count equivalent to derive one from honestly, so
+  // none is invented (progressPercent stays null/unavailable — see studyProgressInsights.ts).
+  const studyProgressInsights = useMemo(() => computeStudyProgressInsights({ studyLog }), [studyLog]);
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+
+  // Study Activity Trend (Phase 4 Step 4) — reuses buildDailyActivityTrend over the SAME
+  // studyLog/today used above; no second date/activity calculation.
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, today, 7), [studyLog, today]);
+
+  // Context-aware encouragement (Phase 4 Step 6) — reuses the EXISTING getEncouragementMessage
+  // (lib/gamification.ts, already shown on the APFC Dashboard) with this workspace's own data: today's
+  // focus minutes from studyLog, the global dailyGoalMinutes setting, and the SAME streak already
+  // computed above (studyProgressInsights.streak, never a second streak calculation). PhD Research has
+  // no syllabus/completion percentage (see studyProgressInsights.ts's own null-target precedent) and no
+  // test/quiz concept, so syllabusPct is a neutral sentinel (0) that never surfaces — it only gates one
+  // low-priority message branch, which simply never fires — and tookTestToday is honestly false.
+  const todayMinutes = studyLog[today]?.focusMinutes ?? 0;
+  const encouragement = getEncouragementMessage({
+    todayMinutes,
+    dailyGoalMinutes,
+    streakCurrent: studyProgressInsights.streak.current,
+    syllabusPct: 0,
+    tookTestToday: false,
+  });
 
   // Topic Areas
   const [areaQuery, setAreaQuery] = useState('');
@@ -221,6 +254,12 @@ export default function PhdDashboard() {
           )}
         </Card>
       </div>
+
+      <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} className="mt-6" />
+
+      <p className={cx('mt-3 text-sm font-medium', workspaceAccent.text)}>{encouragement}</p>
+
+      <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mt-6" />
 
       {/* Topic Areas */}
       <Card className="mt-6 p-5 sm:p-6">

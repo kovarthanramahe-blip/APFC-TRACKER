@@ -1,4 +1,4 @@
-import type { ImportedContent } from './contentImport';
+import type { ImportedContent, ImportedContentMetadata } from './contentImport';
 
 // Repository-organisation utilities over an ImportedContent[] collection — search, tag/category
 // filtering and deterministic sorting. Deliberately generic over `contentType`: every function
@@ -32,6 +32,24 @@ export function getContentDescription(item: ImportedContent): string | undefined
  * lives, so "last touched" always has a real answer without every caller re-deriving it. */
 export function getContentUpdatedAt(item: ImportedContent): string {
   return item.updatedAt ?? item.provenance.importedAt;
+}
+
+/** `item.metadata?.folderId`, defaulting to `null` ("unfiled", shown at the workspace root) for an
+ * item with no metadata or no folder assigned yet — see lib/folders.ts. */
+export function getContentFolderId(item: ImportedContent): string | null {
+  return item.metadata?.folderId ?? null;
+}
+
+/** `item.metadata?.isPinned`, defaulting to false — see ImportedContentMetadata's own doc comment:
+ * pinning never duplicates the item, it only changes how the organisation UI surfaces it. */
+export function isContentPinned(item: ImportedContent): boolean {
+  return item.metadata?.isPinned ?? false;
+}
+
+/** `item.metadata?.isArchived`, defaulting to false. An archived item is still real, persisted
+ * data — this predicate only decides whether the DEFAULT (non-Archived) view should show it. */
+export function isContentArchived(item: ImportedContent): boolean {
+  return item.metadata?.isArchived ?? false;
 }
 
 /**
@@ -81,6 +99,22 @@ export function filterImportedContentUncategorized(items: readonly ImportedConte
   return items.filter((item) => !getContentCategory(item)?.trim());
 }
 
+/** Items filed under exactly `folderId` — pass `null` for "unfiled, at the workspace root". */
+export function filterImportedContentByFolder(items: readonly ImportedContent[], folderId: string | null): ImportedContent[] {
+  return items.filter((item) => getContentFolderId(item) === folderId);
+}
+
+/** Items whose isPinned flag matches. Used for the Pinned sidebar view. */
+export function filterImportedContentPinned(items: readonly ImportedContent[]): ImportedContent[] {
+  return items.filter((item) => isContentPinned(item));
+}
+
+/** The one place "should this item show in the default (non-Archived) view" is decided — kept
+ * archived by default excludes; the Archived sidebar view calls this with `true` instead. */
+export function filterImportedContentByArchived(items: readonly ImportedContent[], archived: boolean): ImportedContent[] {
+  return items.filter((item) => isContentArchived(item) === archived);
+}
+
 /** 'updated' sorts by getContentUpdatedAt (falls back to createdAt for an item with no real edit
  * yet — see its own doc comment), most-recently-touched first; the other three orders are
  * unchanged from before this field existed. */
@@ -110,21 +144,30 @@ export interface ImportedContentQuery {
   category?: string;
   /** Filters to items with no category set — takes precedence over `category` if both are given. */
   uncategorized?: boolean;
+  /** Filters to exactly one folder (`null` = unfiled/root) — omitted means "every folder". */
+  folderId?: string | null;
+  /** Filters to pinned items only — omitted (or false) means "no pin filter". */
+  pinnedOnly?: boolean;
+  /** Whether to include archived items. Defaults to false — the default view never shows archived
+   * items unless the caller explicitly asks for the Archived view (`archived: true`). */
+  archived?: boolean;
   sort?: ImportedContentSortOrder;
 }
 
 /**
  * The single entry point the PhD Research page (and any future content-type repository view)
- * calls: search + tag filter + category filter + deterministic sort, applied in that order. Each
- * step is a no-op when its corresponding option is omitted, so passing `{}` returns every item,
- * deterministically sorted.
+ * calls: archive filter + search + tag filter + category filter + folder filter + pinned filter +
+ * deterministic sort, applied in that order. Each step is a no-op when its corresponding option is
+ * omitted, so passing `{}` returns every non-archived item, deterministically sorted.
  */
 export function queryImportedContent(items: readonly ImportedContent[], query: ImportedContentQuery): ImportedContent[] {
-  let results = items;
+  let results = filterImportedContentByArchived(items, query.archived ?? false);
   if (query.search) results = searchImportedContent(results, query.search);
   if (query.tags && query.tags.length > 0) results = filterImportedContentByTags(results, query.tags);
   if (query.uncategorized) results = filterImportedContentUncategorized(results);
   else if (query.category) results = filterImportedContentByCategory(results, query.category);
+  if (query.folderId !== undefined) results = filterImportedContentByFolder(results, query.folderId);
+  if (query.pinnedOnly) results = filterImportedContentPinned(results);
   return sortImportedContent(results, query.sort ?? 'newest');
 }
 
@@ -170,4 +213,49 @@ export function parseTagsInput(input: string): string[] {
     if (!seen.has(key)) seen.set(key, trimmed);
   }
   return [...seen.values()];
+}
+
+/** A single organisation change to apply to one or more items — the shape
+ * lib/store.ts's bulkUpdateImportedContent action takes, so one item and a hundred items go
+ * through the exact same logic. Every field is optional and means "leave unchanged" when omitted;
+ * `folderId` specifically distinguishes "not mentioned" (undefined) from "move to root" (null). */
+export interface ImportedContentOrganizationPatch {
+  folderId?: string | null;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  /** New tags, deduplicated case-insensitively against whatever the item already has (first-seen
+   * casing wins) — never replaces the whole tag list. */
+  addTags?: readonly string[];
+  /** Tags to remove, matched case-insensitively. */
+  removeTags?: readonly string[];
+}
+
+/** Pure — applied by lib/store.ts's bulkUpdateImportedContent, never called directly against the
+ * store. Only ever touches `metadata` (plus `updatedAt`) — rawContent/provenance are completely
+ * untouched, preserving source immutability. */
+export function applyImportedContentOrganizationPatch(item: ImportedContent, patch: ImportedContentOrganizationPatch, now: string = new Date().toISOString()): ImportedContent {
+  const currentTags = getContentTags(item);
+  let tags = currentTags;
+  if (patch.addTags && patch.addTags.length > 0) {
+    const seen = new Map(currentTags.map((t) => [t.toLowerCase(), t]));
+    for (const raw of patch.addTags) {
+      const trimmed = raw.trim();
+      if (trimmed && !seen.has(trimmed.toLowerCase())) seen.set(trimmed.toLowerCase(), trimmed);
+    }
+    tags = [...seen.values()];
+  }
+  if (patch.removeTags && patch.removeTags.length > 0) {
+    const toRemove = new Set(patch.removeTags.map((t) => t.trim().toLowerCase()));
+    tags = tags.filter((t) => !toRemove.has(t.toLowerCase()));
+  }
+  const tagsChanged = tags !== currentTags;
+
+  const metadata: ImportedContentMetadata = {
+    ...item.metadata,
+    ...(tagsChanged ? { tags } : {}),
+    ...(patch.folderId !== undefined ? { folderId: patch.folderId } : {}),
+    ...(patch.isPinned !== undefined ? { isPinned: patch.isPinned } : {}),
+    ...(patch.isArchived !== undefined ? { isArchived: patch.isArchived } : {}),
+  };
+  return { ...item, metadata, updatedAt: now };
 }

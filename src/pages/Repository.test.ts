@@ -253,7 +253,7 @@ describe('Repository page — workspace isolation', () => {
 describe('Repository page — navigation to existing content surfaces', () => {
   it('a note entry navigates to /notes', () => {
     expect(
-      navigationTargetFor({ entityId: 'n1', entityType: 'note', contentType: 'note', title: 'T', workspaceId: 'phd_research', origin: 'created', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'n1', entityType: 'note', contentType: 'note', title: 'T', workspaceId: 'phd_research', origin: 'created', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined, folderId: null, isPinned: false, isArchived: false }),
     ).toEqual({
       to: '/notes',
       label: 'Open in Notes',
@@ -262,19 +262,19 @@ describe('Repository page — navigation to existing content surfaces', () => {
 
   it('a research_document entry navigates to /phd-research', () => {
     expect(
-      navigationTargetFor({ entityId: 'd1', entityType: 'imported_content', contentType: 'research_document', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'd1', entityType: 'imported_content', contentType: 'research_document', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined, folderId: null, isPinned: false, isArchived: false }),
     ).toEqual({ to: '/phd-research', label: 'Open in PhD Research' });
   });
 
   it('a bibliography entry navigates to /phd-research/bibliography', () => {
     expect(
-      navigationTargetFor({ entityId: 'b1', entityType: 'imported_content', contentType: 'bibliography', title: 'T', workspaceId: 'phd_research', origin: 'manual', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'b1', entityType: 'imported_content', contentType: 'bibliography', title: 'T', workspaceId: 'phd_research', origin: 'manual', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined, folderId: null, isPinned: false, isArchived: false }),
     ).toEqual({ to: '/phd-research/bibliography', label: 'Open in Working Bibliography' });
   });
 
   it('a content type with no dedicated page yet (e.g. pyq) has no navigation target, never a fake one', () => {
     expect(
-      navigationTargetFor({ entityId: 'p1', entityType: 'imported_content', contentType: 'pyq', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined }),
+      navigationTargetFor({ entityId: 'p1', entityType: 'imported_content', contentType: 'pyq', title: 'T', workspaceId: 'phd_research', origin: 'import', createdAt: 'a', updatedAt: 'a', tags: [], category: undefined, folderId: null, isPinned: false, isArchived: false }),
     ).toBeUndefined();
   });
 });
@@ -687,5 +687,98 @@ describe('Repository Item Management — edits persist through export/import (th
 
     useAppStore.getState().setActiveWorkspaceId('apfc');
     expect(useAppStore.getState().importedContent.map((c) => c.title)).toEqual(['APFC Doc']);
+  });
+});
+
+// Phase 4 — pages/Repository.tsx now supports folder/pin/archive organisation and bulk actions
+// across BOTH notes and imported content in one selection. These tests mirror the page's own
+// runBulk/toggleEntryPin/toggleEntryArchive logic exactly: split selected entries by entityType,
+// call bulkUpdateNotes for notes and bulkUpdateImportedContent for imported content.
+describe('Repository page — Phase 4: organisation and bulk actions', () => {
+  beforeEach(fullReset);
+
+  it('a single-item pin toggle routes through the correct store action per entityType', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false, workspaceId: 'phd_research' });
+
+    const docEntry = repositoryEntryFromImportedContent(useAppStore.getState().importedContent[0]);
+    const noteEntry = repositoryEntryFromNote(useAppStore.getState().notes[0]);
+
+    useAppStore.getState().bulkUpdateImportedContent([docEntry.entityId], { isPinned: !docEntry.isPinned });
+    useAppStore.getState().bulkUpdateNotes([noteEntry.entityId], { pinned: !noteEntry.isPinned });
+
+    expect(useAppStore.getState().importedContent[0].metadata?.isPinned).toBe(true);
+    expect(useAppStore.getState().notes[0].pinned).toBe(true);
+  });
+
+  it('bulk-moves a mixed selection (a note and a document) into the same folder', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false, workspaceId: 'phd_research' });
+
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { folderId: 'f1' });
+    useAppStore.getState().bulkUpdateNotes(['n1'], { folderId: 'f1' });
+
+    const results = queryRepository(useAppStore.getState().importedContent, useAppStore.getState().notes, { workspaceId: 'phd_research', folderId: 'f1' });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['n1', doc.id].sort());
+  });
+
+  it('bulk-archiving a mixed selection hides both from the default query and both appear in the archived view', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false, workspaceId: 'phd_research' });
+
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { isArchived: true });
+    useAppStore.getState().bulkUpdateNotes(['n1'], { isArchived: true });
+
+    const defaultResults = queryRepository(useAppStore.getState().importedContent, useAppStore.getState().notes, { workspaceId: 'phd_research' });
+    expect(defaultResults).toEqual([]);
+
+    const archivedResults = queryRepository(useAppStore.getState().importedContent, useAppStore.getState().notes, { workspaceId: 'phd_research', archived: true });
+    expect(archivedResults.map((r) => r.entityId).sort()).toEqual(['n1', doc.id].sort());
+  });
+
+  it('bulk-tagging a document adds the tag without touching its title/rawContent', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc', content: 'Original body' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { addTags: ['Revision'] });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.tags).toEqual(['Revision']);
+    expect(stored.title).toBe('Doc');
+    expect(stored.rawContent).toBe('Original body');
+  });
+
+  it('editing a document\'s metadata (title/tags/category) preserves its folder/pin/archive — a metadata edit never silently wipes organisation state', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { folderId: 'f1', isPinned: true });
+
+    // Mirrors pages/Repository.tsx's handleEditSave exactly: EditMetadataModal builds `metadata`
+    // fresh from its own form (title/tags/category/description only, no idea folderId/isPinned
+    // exist), then handleEditSave merges the entry's CURRENT organisation state back in before
+    // calling updateImportedContent.
+    const editingEntry = repositoryEntryFromImportedContent(useAppStore.getState().importedContent[0]);
+    const formMetadata = { tags: ['x'] };
+    const mergedMetadata = {
+      ...formMetadata,
+      ...(editingEntry.folderId !== null ? { folderId: editingEntry.folderId } : {}),
+      ...(editingEntry.isPinned ? { isPinned: true } : {}),
+      ...(editingEntry.isArchived ? { isArchived: true } : {}),
+    };
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Renamed', metadata: mergedMetadata });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.title).toBe('Renamed');
+    expect(stored.metadata?.tags).toEqual(['x']);
+    expect(stored.metadata?.folderId).toBe('f1');
+    expect(stored.metadata?.isPinned).toBe(true);
   });
 });

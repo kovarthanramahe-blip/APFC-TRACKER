@@ -341,3 +341,32 @@ describe('queryBibliography — combined search + author/year/type + tag/categor
     expect(queryBibliography(items, {})).toHaveLength(2);
   });
 });
+
+// Phase 4D — queryBibliography now also accepts folderId/pinnedOnly/archived, layered onto the
+// shared queryImportedContent exactly like tags/category already are, composing with
+// bibliography-specific author/year/publicationType filters.
+describe('queryBibliography — Phase 4D: folder/pin/archive', () => {
+  it('excludes archived records by default and includes them with archived: true', () => {
+    const items = [item({ id: 'a', metadata: { isArchived: true } }), item({ id: 'b' })];
+    expect(queryBibliography(items, {}).map((i) => i.id)).toEqual(['b']);
+    expect(queryBibliography(items, { archived: true }).map((i) => i.id)).toEqual(['a']);
+  });
+
+  it('folderId filters to exactly one folder', () => {
+    const items = [item({ id: 'a', metadata: { folderId: 'f1' } }), item({ id: 'b', metadata: { folderId: 'f2' } })];
+    expect(queryBibliography(items, { folderId: 'f1' }).map((i) => i.id)).toEqual(['a']);
+  });
+
+  it('pinnedOnly filters to pinned records', () => {
+    const items = [item({ id: 'a', metadata: { isPinned: true } }), item({ id: 'b' })];
+    expect(queryBibliography(items, { pinnedOnly: true }).map((i) => i.id)).toEqual(['a']);
+  });
+
+  it('combines folderId with an author filter (AND across dimensions)', () => {
+    const items = [
+      item({ id: 'a', metadata: { folderId: 'f1', bibliography: { authors: ['Jane Smith'] } } }),
+      item({ id: 'b', metadata: { folderId: 'f2', bibliography: { authors: ['Jane Smith'] } } }),
+    ];
+    expect(queryBibliography(items, { folderId: 'f1', author: 'Jane Smith' }).map((i) => i.id)).toEqual(['a']);
+  });
+});

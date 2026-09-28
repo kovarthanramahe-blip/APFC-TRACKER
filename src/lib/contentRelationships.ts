@@ -26,13 +26,32 @@ import { uuid } from './utils';
 // rejected — this module itself never needs to know about workspaces beyond stamping the id it was
 // given onto the result.
 
-export const RELATIONSHIP_TYPES = ['cites', 'supports', 'related_to'] as const;
+// Premium Knowledge Editor, Phase 5F — 'links_to' is an ADDITIVE relationship type (no migration:
+// this is a new allowed string in an existing union, the exact same way ImportedContentType's own
+// union has grown before — see contentImport.ts's own header). It represents a wiki-link
+// (`[[Target]]`, lib/wikiLinks.ts) resolved at save time, kept structurally distinct from
+// 'cites'/'supports' (a scholarly claim about a source) and 'related_to' (a manual, undirected
+// pairing) — a wiki-link is a directed, structural navigation link the EDITOR itself created, not
+// something a user explicitly picked from the Linked Documents/Notes modals. lib/backlinks.ts is
+// the only module that creates/removes 'links_to' relationships, always in sync with a note's own
+// wiki-links, never by any other flow.
+export const RELATIONSHIP_TYPES = ['cites', 'supports', 'related_to', 'links_to'] as const;
 export type RelationshipType = (typeof RELATIONSHIP_TYPES)[number];
+
+/** RELATIONSHIP_TYPES minus 'links_to' — what a manual "Add link" picker (RepositoryDetail.tsx,
+ * LinkedNotesModal, …) should offer. 'links_to' is exclusively lib/backlinks.ts's to create/remove
+ * in lockstep with a note/document's own wiki-links (see the header above); a manually-created
+ * 'links_to' relationship would look identical to a real wiki-link but isn't backed by one, so the
+ * next Save of its source would silently delete it as a "stale" link. Offering it as a manual
+ * choice would produce exactly that confusing, self-deleting state — so it's excluded here instead
+ * of taught to createRelationship/addContentRelationship, which stay type-agnostic. */
+export const MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES = RELATIONSHIP_TYPES.filter((t) => t !== 'links_to') as Exclude<RelationshipType, 'links_to'>[];
 
 export const RELATIONSHIP_TYPE_LABELS: Record<RelationshipType, string> = {
   cites: 'Cites',
   supports: 'Supports',
   related_to: 'Related to',
+  links_to: 'Links to',
 };
 
 /** Which collection an endpoint's id belongs to — 'imported_content' for lib/contentImport.ts's

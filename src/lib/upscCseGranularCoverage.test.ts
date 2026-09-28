@@ -4,9 +4,13 @@ import { leafGranularIdsForMicrosyllabus } from './upscCseGranularSyllabus';
 import type { UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
+import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
 
 const CONSTITUTION_ID = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.title === 'Constitution')!.id;
-const ANCIENT_INDIA_ID = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.title === 'Ancient India')!.id;
+// Phase 6A gave nearly every Prelims/Mains microsyllabus item a real granular breakdown, so the
+// still-deliberately-unpopulated Optional Subject placeholder is now the "no granular children"
+// example instead.
+const NO_BREAKDOWN_ID = UPSC_CSE_MAINS_SYLLABUS.microsyllabus.find((m) => m.title === 'Optional Subject Not Yet Selected')!.id;
 
 describe('bucketWeightedPctToCoverageState', () => {
   it('buckets the four weighted-percentage boundaries correctly', () => {
@@ -19,8 +23,8 @@ describe('bucketWeightedPctToCoverageState', () => {
 
 describe('effectiveMicrosyllabusCoverageState', () => {
   it('falls back to the direct coverage entry for a microsyllabus item with no granular children (unchanged behaviour)', () => {
-    const coverage: UpscCseSyllabusCoverage = { [ANCIENT_INDIA_ID]: 'strong' };
-    expect(effectiveMicrosyllabusCoverageState(ANCIENT_INDIA_ID, coverage, UPSC_CSE_GRANULAR_NODES)).toBe('strong');
+    const coverage: UpscCseSyllabusCoverage = { [NO_BREAKDOWN_ID]: 'strong' };
+    expect(effectiveMicrosyllabusCoverageState(NO_BREAKDOWN_ID, coverage, UPSC_CSE_GRANULAR_NODES)).toBe('strong');
     expect(effectiveMicrosyllabusCoverageState('never-touched-id', {}, UPSC_CSE_GRANULAR_NODES)).toBe('not_started');
   });
 
@@ -33,6 +37,15 @@ describe('effectiveMicrosyllabusCoverageState', () => {
 
   it('reads as not_started for a granularized item whose leaves have never been touched', () => {
     expect(effectiveMicrosyllabusCoverageState(CONSTITUTION_ID, {}, UPSC_CSE_GRANULAR_NODES)).toBe('not_started');
+  });
+
+  it('Phase 6A: rolls up correctly for a newly covered Mains GS-IV item (Attitude), using the same generic aggregation — no subject-specific logic', () => {
+    const attitudeId = UPSC_CSE_MAINS_SYLLABUS.microsyllabus.find((m) => m.title === 'Attitude')!.id;
+    const leaves = leafGranularIdsForMicrosyllabus(UPSC_CSE_GRANULAR_NODES, attitudeId);
+    expect(leaves.length).toBeGreaterThan(0);
+    const coverage: UpscCseSyllabusCoverage = {};
+    for (const id of leaves) coverage[id] = 'strong';
+    expect(effectiveMicrosyllabusCoverageState(attitudeId, coverage, UPSC_CSE_GRANULAR_NODES)).toBe('strong');
   });
 
   it('reflects a mixed roll-up (some leaves strong, some not_started) as a partial state', () => {
@@ -70,9 +83,9 @@ describe('migrateGranularCoverageBackfill', () => {
   });
 
   it('leaves a non-granularized item untouched', () => {
-    const coverage: UpscCseSyllabusCoverage = { [ANCIENT_INDIA_ID]: 'revised' };
+    const coverage: UpscCseSyllabusCoverage = { [NO_BREAKDOWN_ID]: 'revised' };
     const migrated = migrateGranularCoverageBackfill(coverage, UPSC_CSE_GRANULAR_NODES);
-    expect(migrated).toEqual({ [ANCIENT_INDIA_ID]: 'revised' });
+    expect(migrated).toEqual({ [NO_BREAKDOWN_ID]: 'revised' });
   });
 
   it('is idempotent — running it twice produces the same result as running it once', () => {

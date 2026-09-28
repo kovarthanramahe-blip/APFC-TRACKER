@@ -3,7 +3,7 @@ import { X, Link2, Unlink } from 'lucide-react';
 import { Badge, Button } from '../ui/Primitives';
 import type { Note } from '../../lib/types';
 import {
-  RELATIONSHIP_TYPES,
+  MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES,
   RELATIONSHIP_TYPE_LABELS,
   getOutgoingRelationships,
   type ContentRelationship,
@@ -118,7 +118,7 @@ export function LinkedNotesModal({
                   onChange={(e) => setSelectedType(e.target.value as RelationshipType)}
                   className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
-                  {RELATIONSHIP_TYPES.map((t) => (
+                  {MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {RELATIONSHIP_TYPE_LABELS[t]}
                     </option>

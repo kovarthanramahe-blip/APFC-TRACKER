@@ -43,6 +43,8 @@ import {
 } from '../lib/pyqFilters';
 import {
   computePyqPerformance,
+  computeRepeatedMistakes,
+  selectRepeatedMistakePracticeIds,
   pyqQuestionStatus as statusOf,
   TOPIC_TITLES,
   MARKS_CORRECT,
@@ -120,9 +122,12 @@ export default function PYQTest() {
   // Deep-link support: Dashboard/Analytics/Exam Readiness link here as /pyq-test?mode=weak_topics
   // to open the existing Practice Weak Topics session directly (see the effect below, right after
   // weakTopicQuestions/practiceWeakTopics are defined) — reuses practiceWeakTopics() as-is, no
-  // second entry path.
+  // second entry path. /pyq-test?mode=repeated_mistakes (Phase 6 Step 3) works the same way for
+  // the "Revise My Repeated Mistakes" action added to Analytics.tsx — see the effect right after
+  // practiceRepeatedMistakes() is defined.
   const [searchParams] = useSearchParams();
   const autoStartWeakTopicsRef = useRef(false);
+  const autoStartRepeatedMistakesRef = useRef(false);
 
   const [year, setYear] = useState<number | 'all'>(AVAILABLE_YEARS[0]);
   const [subject, setSubject] = useState<SubjectColorKey | 'all'>('all');
@@ -346,6 +351,13 @@ export default function PYQTest() {
     [revisionQueue, eligibleRevisionIds],
   );
 
+  // Revise My Repeated Mistakes (Phase 6 Step 3) — reuses computeRepeatedMistakes/
+  // selectRepeatedMistakePracticeIds (lib/pyqPerformance.ts) as-is; this page only turns the
+  // resulting id list into a revision session via startRevision's idsOverride below. No second
+  // mistake-tallying pass happens here.
+  const repeatedMistakes = useMemo(() => computeRepeatedMistakes(PYQ_BANK, pyqAttempts), [pyqAttempts]);
+  const repeatedMistakePracticeIds = useMemo(() => selectRepeatedMistakePracticeIds(repeatedMistakes), [repeatedMistakes]);
+
   const [reviseQuestions, setReviseQuestions] = useState<PYQ[]>([]);
   const [reviseIndex, setReviseIndex] = useState(0);
   const [reviseAnswer, setReviseAnswer] = useState<string | null>(null);
@@ -358,10 +370,17 @@ export default function PYQTest() {
 
   // The due list is frozen at session start (a plain snapshot, not re-derived from live state as
   // answers come in) — so a question rescheduled by THIS session's own recordCorrect/Incorrect
-  // call can never reappear later in the SAME session.
-  function startRevision() {
-    if (dueRevisionItems.length === 0) return;
-    const qs = dueRevisionItems.map((item) => PYQ_BANK.find((p) => p.id === item.pyqId)).filter((q): q is PYQ => !!q);
+  // call can never reappear later in the SAME session. `idsOverride` (Phase 6 Step 3) is the
+  // smallest backward-compatible extension to this existing API: omitted, behavior is byte-for-
+  // byte the existing "Revise Now" flow (dueRevisionItems); passed, the SAME session/scheduling
+  // machinery (recordRevisionCorrect/recordRevisionIncorrect, lib/revisionQueue) runs over a
+  // caller-supplied id list instead — used by practiceRepeatedMistakes() below. Every existing
+  // call site (the "Revise Now" button, this page's own ?mode=weak_topics-style deep link) keeps
+  // calling startRevision() with no arguments and is completely unaffected.
+  function startRevision(idsOverride?: string[]) {
+    const ids = idsOverride ?? dueRevisionItems.map((item) => item.pyqId);
+    if (ids.length === 0) return;
+    const qs = ids.map((id) => PYQ_BANK.find((p) => p.id === id)).filter((q): q is PYQ => !!q);
     reviseRecordedRef.current = new Set();
     setReviseQuestions(qs);
     setReviseIndex(0);
@@ -371,6 +390,22 @@ export default function PYQTest() {
     setReviseComplete(false);
     setPhase('revise');
   }
+
+  // /pyq-test?mode=repeated_mistakes (Phase 6 Step 3) — mirrors ?mode=weak_topics's own auto-start
+  // effect above; launches the EXISTING revision session (startRevision) over the repeated-mistake
+  // id list instead of the due-today list. If there's nothing eligible, this does nothing and the
+  // user lands on the select screen.
+  function practiceRepeatedMistakes() {
+    startRevision(repeatedMistakePracticeIds);
+  }
+
+  useEffect(() => {
+    if (autoStartRepeatedMistakesRef.current) return;
+    if (searchParams.get('mode') !== 'repeated_mistakes') return;
+    autoStartRepeatedMistakesRef.current = true;
+    if (repeatedMistakePracticeIds.length > 0) practiceRepeatedMistakes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, repeatedMistakePracticeIds]);
 
   function checkRevisionAnswer() {
     const q = reviseQuestions[reviseIndex];
@@ -427,7 +462,7 @@ export default function PYQTest() {
               <Button variant="secondary" onClick={practiceWeakTopics} disabled={weakTopicQuestions.length === 0}>
                 <TrendingDown className="h-4 w-4" /> Practice Weak Topics{weakTopicQuestions.length > 0 ? ` (${weakTopicQuestions.length})` : ''}
               </Button>
-              <Button onClick={startRevision} disabled={dueRevisionItems.length === 0}>
+              <Button onClick={() => startRevision()} disabled={dueRevisionItems.length === 0}>
                 <Brain className="h-4 w-4" /> Revise Now{dueRevisionItems.length > 0 ? ` (${dueRevisionItems.length})` : ''}
               </Button>
             </div>

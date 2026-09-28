@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { computeXp, totalPyqQuestionsAttempted, XP_RULES, getLevelInfo, xpRequiredForLevel, type GamificationInputs } from './gamification';
-import type { PYQAttempt } from './types';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { computeXp, totalPyqQuestionsAttempted, XP_RULES, getLevelInfo, xpRequiredForLevel, computeStreaks, type GamificationInputs } from './gamification';
+import type { PYQAttempt, StudyLogEntry } from './types';
 
 function baseInputs(overrides: Partial<GamificationInputs> = {}): GamificationInputs {
   return {
@@ -157,5 +157,78 @@ describe('getLevelInfo — level calculation remains correct', () => {
     const info = getLevelInfo(150);
     expect(info.progressPct).toBeGreaterThanOrEqual(0);
     expect(info.progressPct).toBeLessThanOrEqual(100);
+  });
+});
+
+function entry(date: string, overrides: Partial<StudyLogEntry> = {}): StudyLogEntry {
+  return { date, focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0, ...overrides };
+}
+
+function log(...entries: StudyLogEntry[]): Record<string, StudyLogEntry> {
+  return Object.fromEntries(entries.map((e) => [e.date, e]));
+}
+
+// Phase 6 Step 1 — computeStreaks' "today" lookup previously used new Date().toISOString(), i.e.
+// UTC, while studyLog is keyed everywhere else by lib/utils.ts's getLocalDateString(). In a
+// positive-offset timezone (e.g. IST, UTC+5:30) that mismatch meant a day already active by local
+// wall-clock time could still read as inactive here until UTC caught up ~5.5 hours later. The fix
+// (this module) now reads the SAME getLocalDateString(cursor) the rest of the app already writes
+// under — these tests exercise both a normal date and the IST midnight-boundary case, and pin
+// process.env.TZ (a supported, standard way to control Date's local-time getters in Node/Vitest)
+// rather than relying on whatever timezone the test runner happens to be configured for.
+describe('computeStreaks — local-date "today" boundary (Phase 6 Step 1)', () => {
+  const originalTz = process.env.TZ;
+
+  afterEach(() => {
+    vi.useRealTimers();
+    process.env.TZ = originalTz;
+  });
+
+  it('a normal daytime instant: an active day logged under today\'s local date counts as the current streak', () => {
+    process.env.TZ = 'Asia/Kolkata';
+    // 2026-01-10 15:00 IST — a normal midday instant, well outside the midnight boundary window.
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 10, 9, 30, 0)));
+    const studyLog = log(entry('2026-01-10', { focusMinutes: 30 }));
+    expect(computeStreaks(studyLog).current).toBe(1);
+  });
+
+  it('the IST midnight-boundary case: an instant where UTC is still "yesterday" but IST local time is already "today"', () => {
+    process.env.TZ = 'Asia/Kolkata';
+    // 2026-01-09 20:00 UTC == 2026-01-10 01:30 IST (within the ~00:00-05:29 IST bug window).
+    const boundaryInstant = new Date(Date.UTC(2026, 0, 9, 20, 0, 0));
+    expect(boundaryInstant.toISOString().slice(0, 10)).toBe('2026-01-09'); // UTC still reads Jan 9
+    vi.setSystemTime(boundaryInstant);
+
+    // Study logged under the LOCAL (IST) date — the same key bumpFocusMinutes now writes via
+    // getLocalDateString() (see pages/Pomodoro.tsx's own fix).
+    const studyLog = log(entry('2026-01-10', { focusMinutes: 25 }));
+    expect(computeStreaks(studyLog).current).toBe(1); // correctly found under the local-date key
+
+    // Proves the old UTC-keyed lookup would have missed it entirely (the bug this fix corrects).
+    const wouldHaveLookedUpUnderUtcKey = studyLog[boundaryInstant.toISOString().slice(0, 10)];
+    expect(wouldHaveLookedUpUnderUtcKey).toBeUndefined();
+  });
+
+  it('existing behaviour is unchanged for an ordinary multi-day streak (no boundary involved)', () => {
+    process.env.TZ = 'Asia/Kolkata';
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 10, 9, 30, 0))); // 2026-01-10 15:00 IST
+    const studyLog = log(
+      entry('2026-01-08', { focusMinutes: 20 }),
+      entry('2026-01-09', { focusMinutes: 20 }),
+      entry('2026-01-10', { focusMinutes: 20 }),
+    );
+    expect(computeStreaks(studyLog)).toEqual({ current: 3, best: 3 });
+  });
+
+  it('existing behaviour is unchanged: a gap still resets the current streak to 0 while best is preserved', () => {
+    process.env.TZ = 'Asia/Kolkata';
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 10, 9, 30, 0))); // 2026-01-10 15:00 IST
+    const studyLog = log(
+      entry('2026-01-05', { focusMinutes: 20 }),
+      entry('2026-01-06', { focusMinutes: 20 }),
+      entry('2026-01-07', { focusMinutes: 20 }),
+      // gap: no entry for 2026-01-08, 2026-01-09, or 2026-01-10 (today)
+    );
+    expect(computeStreaks(studyLog)).toEqual({ current: 0, best: 3 });
   });
 });

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Compass, TrendingUp, TrendingDown, BarChart3, BookOpen, Brain, ListChecks, Clock, CheckCircle2 } from 'lucide-react';
+import { Compass, TrendingUp, TrendingDown, Minus, Repeat, Gauge, BarChart3, BookOpen, Brain, ListChecks, Clock, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, cx } from '../lib/utils';
@@ -11,6 +11,14 @@ import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
 import { computeUpscCseAnalytics } from '../lib/upscCseAnalytics';
 import { UNMAPPED_MICROSYLLABUS } from '../lib/upscCsePrelimsPyqFilters';
+import {
+  computeUpscCsePrelimsRepeatedMistakes,
+  selectUpscCsePrelimsRepeatedMistakePracticeIds,
+  type UpscCsePrelimsPerformanceTrend,
+} from '../lib/upscCsePrelimsPyqPerformance';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 
 function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
   const tones: Record<string, string> = {
@@ -33,6 +41,32 @@ function progressToneClass(pct: number): string {
   return 'bg-slate-400 dark:bg-slate-600';
 }
 
+// PYQ Weak Spots — Recent Performance (Phase 6 Step 2). A deterministic recent-vs-previous accuracy
+// comparison (lib/upscCsePrelimsPyqPerformance.ts's computeUpscCsePrelimsRecentVsPreviousTrend) —
+// never a subjective score, and explicit about not having enough data yet rather than guessing.
+function PyqTrendBadge({ trend }: { trend: UpscCsePrelimsPerformanceTrend }) {
+  if (trend.direction === 'insufficient_data') {
+    return <p className="text-xs text-slate-400">Not enough recent tests yet to judge a trend.</p>;
+  }
+  const meta: Record<Exclude<UpscCsePrelimsPerformanceTrend['direction'], 'insufficient_data'>, { label: string; tone: 'success' | 'danger' | 'neutral'; icon: typeof TrendingUp }> = {
+    improving: { label: 'Improving', tone: 'success', icon: TrendingUp },
+    declining: { label: 'Declining', tone: 'danger', icon: TrendingDown },
+    stable: { label: 'Stable', tone: 'neutral', icon: Minus },
+  };
+  const m = meta[trend.direction];
+  const Icon = m.icon;
+  return (
+    <div>
+      <Badge tone={m.tone}>
+        <Icon className="h-3 w-3" /> {m.label}
+      </Badge>
+      <p className="mt-1.5 text-[11px] text-slate-400">
+        Last {trend.recentAttemptCount} tests: {trend.recentAccuracy?.toFixed(0)}% vs previous {trend.previousAttemptCount}: {trend.previousAccuracy?.toFixed(0)}%
+      </p>
+    </div>
+  );
+}
+
 export default function UpscCseAnalytics() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const coverage = useAppStore((s) => s.upscCseSyllabusCoverage);
@@ -40,8 +74,13 @@ export default function UpscCseAnalytics() {
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const revisionQueue = useAppStore((s) => s.revisionQueue);
   const studyTasks = useAppStore((s) => s.upscCseStudyTasks);
+  const studyLog = useAppStore((s) => s.studyLog);
 
   const today = useMemo(() => getLocalDateString(), []);
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+  // Study Activity Trend (Phase 4 Step 5) — reuses buildDailyActivityTrend (lib/studyProgressInsights.ts),
+  // the same canonical calculation the dashboards already use; no second calculation.
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, today, 7), [studyLog, today]);
 
   const analytics = useMemo(
     () =>
@@ -60,6 +99,15 @@ export default function UpscCseAnalytics() {
     [coverage, attempts, bookmarkedPyqIds, revisionQueue, studyTasks, today],
   );
 
+  // "Revise My Repeated Mistakes" (Phase 6 Step 3) — the actual question-level candidate list for
+  // the action below, computed the same way pages/UpscCsePyqTest.tsx computes it for its own
+  // auto-start deep link (?view=revise_mistakes). computeUpscCsePrelimsRepeatedMistakes already
+  // excludes any 2024 question (no correctOptionId), so one can never appear here either.
+  const repeatedMistakePracticeIds = useMemo(
+    () => selectUpscCsePrelimsRepeatedMistakePracticeIds(computeUpscCsePrelimsRepeatedMistakes(UPSC_CSE_PRELIMS_PYQ_BANK, attempts)),
+    [attempts],
+  );
+
   if (activeWorkspaceId !== 'upsc_cse') {
     return (
       <div>
@@ -69,7 +117,7 @@ export default function UpscCseAnalytics() {
     );
   }
 
-  const { performance } = analytics;
+  const { performance, weakSpots } = analytics;
   const weakAreas = performance ? performance.weakMicrosyllabus.filter((m) => m.microsyllabusId !== UNMAPPED_MICROSYLLABUS && m.attempted >= 2) : [];
   const strongAreas = performance ? performance.strongestMicrosyllabus.filter((m) => m.microsyllabusId !== UNMAPPED_MICROSYLLABUS && m.attempted >= 2) : [];
 
@@ -116,6 +164,8 @@ export default function UpscCseAnalytics() {
           ))}
         </ul>
       </Card>
+
+      <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mb-6" />
 
       {/* PYQ performance */}
       <Card className="mb-6 p-5 sm:p-6">
@@ -181,6 +231,71 @@ export default function UpscCseAnalytics() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {(weakSpots.repeatedMistakeMicrosyllabus.length > 0 || weakSpots.repeatedMistakeSubjects.length > 0 || weakSpots.trend.direction !== 'insufficient_data') && (
+              <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">PYQ Weak Spots</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <Repeat className="h-3.5 w-3.5 text-rose-500" /> Repeated Mistakes
+                    </div>
+                    {weakSpots.repeatedMistakeMicrosyllabus.length === 0 ? (
+                      <p className="text-xs text-slate-400">No repeated mistakes yet.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {weakSpots.repeatedMistakeMicrosyllabus.slice(0, 4).map((m) => (
+                          <li key={m.microsyllabusId} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{m.title}</span>
+                            <Badge tone="danger">
+                              {m.wrong} mistake{m.wrong === 1 ? '' : 's'}
+                            </Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* Revise My Repeated Mistakes (Phase 6 Step 3) — question-level, not
+                        microsyllabus-level: launches the EXISTING revision session
+                        (pages/UpscCsePyqTest.tsx's startRevision) via the ?view=revise_mistakes deep link. */}
+                    {repeatedMistakePracticeIds.length > 0 ? (
+                      <Link
+                        to="/upsc-pyq-test?view=revise_mistakes"
+                        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                      >
+                        <Repeat className="h-3 w-3" /> Revise My Repeated Mistakes ({repeatedMistakePracticeIds.length})
+                      </Link>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-slate-400">Revise My Repeated Mistakes — nothing to revise yet.</p>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <ListChecks className="h-3.5 w-3.5 text-brand-500" /> Revise Next
+                    </div>
+                    {weakSpots.repeatedMistakeSubjects.length === 0 ? (
+                      <p className="text-xs text-slate-400">Nothing flagged yet.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {weakSpots.repeatedMistakeSubjects.slice(0, 3).map((s) => (
+                          <li key={s.subject} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{s.subject}</span>
+                            <Badge tone="warning">
+                              {s.wrong} mistake{s.wrong === 1 ? '' : 's'}
+                            </Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <Gauge className="h-3.5 w-3.5 text-brand-500" /> Recent Performance
+                    </div>
+                    <PyqTrendBadge trend={weakSpots.trend} />
+                  </div>
+                </div>
               </div>
             )}
           </>

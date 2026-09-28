@@ -46,6 +46,8 @@ import {
 } from '../lib/upscCsePrelimsPyqFilters';
 import {
   computeUpscCsePrelimsPerformance,
+  computeUpscCsePrelimsRepeatedMistakes,
+  selectUpscCsePrelimsRepeatedMistakePracticeIds,
   upscCsePrelimsQuestionStatus as statusOf,
   type UpscCsePrelimsQuestionStatus as QuestionStatus,
   type UpscCsePrelimsMicrosyllabusPerformance,
@@ -208,9 +210,12 @@ export default function UpscCsePyqTest() {
   // /upsc-pyq-test?microsyllabusId=...&revisionFilter=...&view=revision|revise — read once at
   // mount (useState's lazy initializer), same convention as pages/UpscCseSyllabus.tsx's own
   // ?microsyllabusId= deep link and pages/PYQTest.tsx's own ?mode=weak_topics auto-start below.
+  // ?view=revise_mistakes (Phase 6 Step 3) is the "Revise My Repeated Mistakes" counterpart, added
+  // from UpscCseAnalytics.tsx — see the effect right after practiceRepeatedMistakes() is defined.
   const [searchParams] = useSearchParams();
   const initialView = searchParams.get('view');
   const autoStartRevisionRef = useRef(false);
+  const autoStartRepeatedMistakesRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>(() => (initialView === 'revision' ? 'bookmarks' : 'select'));
 
@@ -373,6 +378,14 @@ export default function UpscCsePyqTest() {
   );
   const dueRevisionItems = useMemo(() => getDueItems(revisionQueue, eligibleRevisionIds, getLocalDateString()), [revisionQueue, eligibleRevisionIds]);
 
+  // Revise My Repeated Mistakes (Phase 6 Step 3) — reuses computeUpscCsePrelimsRepeatedMistakes/
+  // selectUpscCsePrelimsRepeatedMistakePracticeIds (lib/upscCsePrelimsPyqPerformance.ts) as-is; a
+  // 2024 question (no correctOptionId) can never appear here since that function already excludes
+  // it. This page only turns the resulting id list into a revision session via startRevision's
+  // idsOverride below.
+  const repeatedMistakes = useMemo(() => computeUpscCsePrelimsRepeatedMistakes(UPSC_CSE_PRELIMS_PYQ_BANK, attempts), [attempts]);
+  const repeatedMistakePracticeIds = useMemo(() => selectUpscCsePrelimsRepeatedMistakePracticeIds(repeatedMistakes), [repeatedMistakes]);
+
   const [reviseQuestions, setReviseQuestions] = useState<UpscCsePrelimsBatchPyq[]>([]);
   const [reviseIndex, setReviseIndex] = useState(0);
   const [reviseAnswer, setReviseAnswer] = useState<string | null>(null);
@@ -381,9 +394,14 @@ export default function UpscCsePyqTest() {
   const [reviseComplete, setReviseComplete] = useState(false);
   const reviseRecordedRef = useRef<Set<string>>(new Set());
 
-  function startRevision() {
-    if (dueRevisionItems.length === 0) return;
-    const qs = dueRevisionItems.map((item) => UPSC_CSE_PRELIMS_PYQ_BANK.find((p) => p.id === item.pyqId)).filter((q): q is UpscCsePrelimsBatchPyq => !!q);
+  // `idsOverride` (Phase 6 Step 3) — same smallest backward-compatible extension as
+  // pages/PYQTest.tsx's own startRevision: omitted, behavior is unchanged (dueRevisionItems);
+  // passed, the same session/scheduling machinery runs over a caller-supplied id list instead —
+  // used by practiceRepeatedMistakes() below.
+  function startRevision(idsOverride?: string[]) {
+    const ids = idsOverride ?? dueRevisionItems.map((item) => item.pyqId);
+    if (ids.length === 0) return;
+    const qs = ids.map((id) => UPSC_CSE_PRELIMS_PYQ_BANK.find((p) => p.id === id)).filter((q): q is UpscCsePrelimsBatchPyq => !!q);
     reviseRecordedRef.current = new Set();
     setReviseQuestions(qs);
     setReviseIndex(0);
@@ -392,6 +410,13 @@ export default function UpscCsePyqTest() {
     setReviseCorrectCount(0);
     setReviseComplete(false);
     setPhase('revise');
+  }
+
+  // /upsc-pyq-test?view=revise_mistakes (Phase 6 Step 3) — mirrors ?view=revise's own auto-start
+  // effect below; launches the EXISTING revision session (startRevision) over the repeated-mistake
+  // id list instead of the due-today list.
+  function practiceRepeatedMistakes() {
+    startRevision(repeatedMistakePracticeIds);
   }
 
   function checkRevisionAnswer() {
@@ -430,6 +455,16 @@ export default function UpscCsePyqTest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialView, dueRevisionItems]);
 
+  // Deep-link support: /upsc-pyq-test?view=revise_mistakes (Phase 6 Step 3) auto-starts the
+  // "Revise My Repeated Mistakes" session, same pattern as ?view=revise above.
+  useEffect(() => {
+    if (autoStartRepeatedMistakesRef.current) return;
+    if (initialView !== 'revise_mistakes') return;
+    autoStartRepeatedMistakesRef.current = true;
+    if (repeatedMistakePracticeIds.length > 0) practiceRepeatedMistakes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialView, repeatedMistakePracticeIds]);
+
   if (activeWorkspaceId !== 'upsc_cse') {
     return (
       <div>
@@ -455,7 +490,7 @@ export default function UpscCsePyqTest() {
                 <Star className={cx('h-4 w-4', bookmarkedQuestions.length > 0 && 'fill-gold-400 text-gold-500')} />
                 Revision Questions{bookmarkedQuestions.length > 0 ? ` (${bookmarkedQuestions.length})` : ''}
               </Button>
-              <Button onClick={startRevision} disabled={dueRevisionItems.length === 0}>
+              <Button onClick={() => startRevision()} disabled={dueRevisionItems.length === 0}>
                 <Brain className="h-4 w-4" /> Revise Now{dueRevisionItems.length > 0 ? ` (${dueRevisionItems.length})` : ''}
               </Button>
             </div>

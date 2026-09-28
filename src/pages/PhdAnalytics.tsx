@@ -8,6 +8,9 @@ import { Card, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitiv
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { computePhdAnalytics } from '../lib/phdAnalytics';
 import { listNotesForWorkspace } from '../lib/repository';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
+import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
+import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 
 function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
   const tones: Record<string, string> = {
@@ -31,9 +34,16 @@ export default function PhdAnalytics() {
   const microTargets = useAppStore((s) => s.phdMicroTargets);
   const importedContent = useAppStore((s) => s.importedContent);
   const notes = useAppStore((s) => s.notes);
+  const studyLog = useAppStore((s) => s.studyLog);
 
   const today = useMemo(() => getLocalDateString(), []);
   const notesCount = useMemo(() => listNotesForWorkspace(notes, activeWorkspaceId).length, [notes, activeWorkspaceId]);
+  const workspaceAccent = getWorkspaceAccent(activeWorkspaceId);
+  // Study Activity Trend (Phase 4 Step 5) — reuses buildDailyActivityTrend (lib/studyProgressInsights.ts),
+  // the same canonical calculation the dashboards already use; no second calculation, and no
+  // invented completion percentage/denominator (see this page's own "never a fabricated completion
+  // percentage" description above).
+  const activityTrend = useMemo(() => buildDailyActivityTrend(studyLog, today, 7), [studyLog, today]);
 
   const analytics = useMemo(
     () => computePhdAnalytics({ researchStartDate, topicAreas, microTargets, importedContent, notesCount, today }),
@@ -75,6 +85,8 @@ export default function PhdAnalytics() {
           <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{analytics.completionRatePct}%</p>
         </Card>
       </div>
+
+      <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mb-6" />
 
       {/* Topic Area analytics */}
       <Card className="mb-6 p-5 sm:p-6">

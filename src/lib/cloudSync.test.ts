@@ -114,3 +114,54 @@ describe('hasMeaningfulData — Multi-Workspace OS Stage 2 (inactiveWorkspaceOwn
     ).toBe(true);
   });
 });
+
+// Document Reading & Annotation (Phase 7) — same "one field's own activity is enough" discipline
+// as the pyqAttempts-only test above: a user whose only activity is annotating a document must
+// never be treated as having no meaningful data (which could let an empty cloud row silently
+// overwrite their strokes/notes/bookmark).
+describe('hasMeaningfulData — annotation-only activity', () => {
+  it('returns true when only annotations is non-empty', () => {
+    expect(hasMeaningfulData({ annotations: [{ id: 'a1', type: 'bookmark' }] })).toBe(true);
+  });
+
+  it('returns false when annotations is present but empty, alongside every other known empty field', () => {
+    expect(
+      hasMeaningfulData({
+        completedTopics: {},
+        notes: [],
+        attempts: [],
+        sessions: [],
+        studyLog: {},
+        starredQuestionIds: [],
+        pyqAttempts: [],
+        bookmarkedPyqIds: [],
+        annotations: [],
+      }),
+    ).toBe(false);
+  });
+});
+
+// Premium Note Organisation (Phase 3B) — same "one field's own activity is enough" discipline: a
+// user whose only activity is creating a folder must never be treated as having no meaningful data.
+describe('hasMeaningfulData — folder-only activity', () => {
+  it('returns true when only folders is non-empty', () => {
+    expect(hasMeaningfulData({ folders: [{ id: 'f1', name: 'UPSC' }] })).toBe(true);
+  });
+
+  it('returns false when folders is present but empty, alongside every other known empty field', () => {
+    expect(
+      hasMeaningfulData({
+        completedTopics: {},
+        notes: [],
+        attempts: [],
+        sessions: [],
+        studyLog: {},
+        starredQuestionIds: [],
+        pyqAttempts: [],
+        bookmarkedPyqIds: [],
+        annotations: [],
+        folders: [],
+      }),
+    ).toBe(false);
+  });
+});

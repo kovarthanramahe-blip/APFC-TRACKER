@@ -1,23 +1,23 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, X, AlertTriangle, CheckCircle2, ArrowRight, ShieldAlert } from 'lucide-react';
+import { Upload, X, AlertTriangle, CheckCircle2, ArrowRight, ShieldAlert, Copy } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
 import { getWorkspaceMeta } from '../../lib/workspace';
 import { Badge, Button } from '../ui/Primitives';
 import { uuid } from '../../lib/utils';
 import type { Note } from '../../lib/types';
 import {
-  extractContentFromFile,
-  buildImportPreview,
-  confirmImportedContent,
   isNearEmptyContent,
   formatFileSizeBytes,
   truncateForPreview,
   SUPPORTED_IMPORT_EXTENSIONS,
   IMPORT_FORMAT_LABELS,
+  confirmImportedContent,
   type ImportPreview,
   type ImportedContentMetadata,
 } from '../../lib/contentImport';
+import { runFileImport } from '../../lib/importPipeline';
+import type { DuplicateMatchResult } from '../../lib/importDuplicates';
 import {
   REPOSITORY_CONTENT_TYPE_REGISTRY,
   getRepositoryContentTypeMeta,
@@ -29,15 +29,19 @@ import {
 } from '../../lib/repository';
 import { parseTagsInput } from '../../lib/importedContentRepository';
 import { navigationTargetFor } from '../../lib/repositoryNavigation';
+import { FolderPicker } from '../organisation/FolderPicker';
 
 // Global Repository Import — one reusable modal, wired only into pages/Repository.tsx's own
 // "Import to Repository" action. It follows the exact pipeline lib/contentImport.ts already
-// defines (FILE -> EXTRACT -> SELECT CONTENT TYPE -> PREVIEW -> USER CONFIRMS -> SAVE) and adds
-// nothing new to it: extraction is extractContentFromFile/buildImportPreview, exactly what
-// pages/PhdResearch.tsx and pages/WorkingBibliography.tsx already call for their own hardcoded
-// content types. The one thing genuinely new here is an EXPLICIT, user-facing content-type
-// selector — those two existing pages hardcode their type (research_document / bibliography) and
-// are UNCHANGED by this component; this modal is the first place a user picks the type themselves.
+// defines (FILE -> EXTRACT -> SELECT CONTENT TYPE -> PREVIEW -> USER CONFIRMS -> SAVE), now run
+// through lib/importPipeline.ts's runFileImport — a thin composition of the SAME, unchanged
+// extractContentFromFile/buildImportPreview this modal always called, plus the Knowledge Workspace
+// foundation's file hashing (lib/fileHash.ts) and duplicate detection (lib/importDuplicates.ts).
+// pages/PhdResearch.tsx and pages/WorkingBibliography.tsx still call extractContentFromFile/
+// buildImportPreview directly for their own hardcoded content types and are UNCHANGED by this
+// stage. The one thing genuinely new here is an EXPLICIT, user-facing content-type selector — those
+// two existing pages hardcode their type (research_document / bibliography); this modal is the
+// first place a user picks the type themselves.
 //
 // Content-type selection is never silent: buildImportPreview's suggestedContentType (a filename
 // keyword guess — see contentImport.ts's suggestContentType) only pre-fills the dropdown's initial
@@ -47,7 +51,17 @@ import { navigationTargetFor } from '../../lib/repositoryNavigation';
 // SAVE destination depends on the selected type: 'note' goes through the existing Notes
 // persistence path (upsertNote — the same store action pages/Notes.tsx's own editor calls), never
 // a second Note storage mechanism. Every other type goes through confirmImportedContent + the
-// store's addImportedContent, exactly like PhdResearch.tsx/WorkingBibliography.tsx already do.
+// store's addImportedContent, exactly like PhdResearch.tsx/WorkingBibliography.tsx already do — now
+// also passing the file's sourceHash/sourceFileSize through to confirmImportedContent (Phase 1's
+// additive provenance fields), so a LATER import of the same file can be hash-matched against this
+// one. A 'note' save never carries this — Note has no provenance/sourceHash field, matching its
+// existing, separate persistence model.
+//
+// Duplicate detection is advisory only, never blocking: findDuplicates runs against the active
+// workspace's own existing importedContent as soon as a file is picked, and any match (exact or
+// possible) is shown as a dismissable-in-spirit informational banner in the preview stage — Confirm
+// stays enabled either way, and nothing is ever auto-merged, overwritten, or silently skipped (see
+// lib/importDuplicates.ts's own header for the exact/possible distinction).
 //
 // Question safety: question_bank / descriptive_questions / pyq are never parsed into structured
 // questions here (or anywhere in this codebase yet — see contentImport.ts's own header). The
@@ -59,15 +73,25 @@ import { navigationTargetFor } from '../../lib/repositoryNavigation';
 
 type Stage = 'pick' | 'extracting' | 'error' | 'preview' | 'success';
 
-function buildMetadata(tagsInput: string, categoryInput: string, descriptionInput: string): ImportedContentMetadata | undefined {
+function buildMetadata(
+  tagsInput: string,
+  categoryInput: string,
+  descriptionInput: string,
+  folderId: string | null,
+  isPinned: boolean,
+  isArchived: boolean,
+): ImportedContentMetadata | undefined {
   const tags = parseTagsInput(tagsInput);
   const category = categoryInput.trim();
   const description = descriptionInput.trim();
-  if (tags.length === 0 && !category && !description) return undefined;
+  if (tags.length === 0 && !category && !description && folderId === null && !isPinned && !isArchived) return undefined;
   const metadata: ImportedContentMetadata = {};
   if (tags.length > 0) metadata.tags = tags;
   if (category) metadata.category = category;
   if (description) metadata.description = description;
+  if (folderId !== null) metadata.folderId = folderId;
+  if (isPinned) metadata.isPinned = true;
+  if (isArchived) metadata.isArchived = true;
   return metadata;
 }
 
@@ -78,6 +102,8 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const addImportedContent = useAppStore((s) => s.addImportedContent);
   const upsertNote = useAppStore((s) => s.upsertNote);
+  const importedContent = useAppStore((s) => s.importedContent);
+  const folders = useAppStore((s) => s.folders);
   const workspaceLabel = getWorkspaceMeta(activeWorkspaceId).label;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,11 +117,23 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const [pendingFile, setPendingFile] = useState<{ name: string; sizeBytes: number } | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
+  // Both come from runFileImport alongside the preview — sourceHash is undefined only if hashing
+  // itself failed (never fabricated); duplicates is always computed, even when both fields inside
+  // it are empty (see lib/importDuplicates.ts).
+  const [sourceHash, setSourceHash] = useState<string | undefined>(undefined);
+  const [duplicates, setDuplicates] = useState<DuplicateMatchResult | null>(null);
   const [selectedType, setSelectedType] = useState<RepositoryContentType>('note');
   const [titleInput, setTitleInput] = useState('');
   const [descriptionInput, setDescriptionInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [categoryInput, setCategoryInput] = useState('');
+  // Premium Note Organisation (Phase 4B) — optional destination folder/pin/archive, assignable at
+  // import time so a newly imported item can land already-organised. Default behaviour (nothing
+  // touched here) is unchanged: folderId stays root/null, isPinned/isArchived stay false, exactly
+  // matching every import before this stage.
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [isPinned, setIsPinned] = useState(false);
+  const [isArchived, setIsArchived] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedEntry, setSavedEntry] = useState<RepositoryEntry | null>(null);
 
@@ -106,25 +144,32 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     setStage('extracting');
     setErrorMessage(null);
     setPendingFile({ name: file.name, sizeBytes: file.size });
-    const result = await extractContentFromFile(file);
-    if (result.status === 'error') {
-      setErrorMessage(result.message);
+    // Same extraction as before (extractContentFromFile/buildImportPreview, unchanged) plus the
+    // Knowledge Workspace foundation's hash + duplicate check, in one composed call.
+    const outcome = await runFileImport(file, importedContent, activeWorkspaceId);
+    if (outcome.status === 'error') {
+      setErrorMessage(outcome.error ?? 'This file could not be imported.');
       setStage('error');
       return;
     }
-    if (isNearEmptyContent(result.content.text)) {
+    const nextPreview = outcome.preview!;
+    if (isNearEmptyContent(nextPreview.content)) {
       setErrorMessage('This file appears to be empty or contains no extractable text — please choose a different file.');
       setStage('error');
       return;
     }
-    const nextPreview = buildImportPreview(file, result.content);
     setPreview(nextPreview);
     setFileSizeBytes(file.size);
+    setSourceHash(outcome.sourceHash);
+    setDuplicates(outcome.duplicates ?? null);
     setSelectedType(nextPreview.suggestedContentType);
     setTitleInput(nextPreview.title);
     setDescriptionInput('');
     setTagsInput('');
     setCategoryInput('');
+    setFolderId(null);
+    setIsPinned(false);
+    setIsArchived(false);
     setSaveError(null);
     setStage('preview');
   }
@@ -141,18 +186,22 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
           content: preview.content,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          pinned: false,
+          pinned: isPinned,
           workspaceId: activeWorkspaceId,
+          folderId,
+          isArchived,
         };
         upsertNote(newNote);
         setSavedEntry(repositoryEntryFromNote(newNote));
       } else {
-        const metadata = buildMetadata(tagsInput, categoryInput, descriptionInput);
+        const metadata = buildMetadata(tagsInput, categoryInput, descriptionInput, folderId, isPinned, isArchived);
         const savedItem = confirmImportedContent(preview, {
           workspaceId: activeWorkspaceId,
           contentType: selectedType,
           title: titleInput.trim() || preview.title,
           metadata,
+          sourceHash,
+          sourceFileSize: fileSizeBytes ?? undefined,
         });
         addImportedContent(savedItem);
         setSavedEntry(repositoryEntryFromImportedContent(savedItem));
@@ -171,6 +220,11 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     setPendingFile(null);
     setPreview(null);
     setFileSizeBytes(null);
+    setSourceHash(undefined);
+    setDuplicates(null);
+    setFolderId(null);
+    setIsPinned(false);
+    setIsArchived(false);
     setSaveError(null);
     setSavedEntry(null);
   }
@@ -263,6 +317,26 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
 
+              {duplicates?.exactMatch && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                  <Copy className="h-4 w-4 shrink-0 mt-0.5" />
+                  <p>
+                    <span className="font-medium">This exact file was already imported</span> as "{duplicates.exactMatch.title}". Saving will add a separate
+                    copy — nothing is overwritten or merged automatically.
+                  </p>
+                </div>
+              )}
+              {!duplicates?.exactMatch && duplicates && duplicates.possibleMatches.length > 0 && (
+                <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
+                  <Copy className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />
+                  <p>
+                    <span className="font-medium">Possible duplicate</span> — same filename and size as{' '}
+                    {duplicates.possibleMatches.map((m) => `"${m.title}"`).join(', ')}. This is a filename/size match only, not confirmed — saving is still
+                    fine if this is genuinely a different file.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label htmlFor="import-content-type" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
                   Content type
@@ -350,6 +424,20 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                   />
                 </div>
               )}
+
+              {folders.length > 0 && (
+                <FolderPicker id="import-folder" label="Folder (optional)" folders={folders} workspaceId={activeWorkspaceId} value={folderId} onChange={setFolderId} />
+              )}
+              <div className="flex items-center gap-4 text-xs font-medium text-slate-500 dark:text-slate-400">
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={isPinned} onChange={(e) => setIsPinned(e.target.checked)} className="rounded border-slate-300 dark:border-slate-700" />
+                  Pin
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={isArchived} onChange={(e) => setIsArchived(e.target.checked)} className="rounded border-slate-300 dark:border-slate-700" />
+                  Archive immediately
+                </label>
+              </div>
 
               <div>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Content preview</p>
