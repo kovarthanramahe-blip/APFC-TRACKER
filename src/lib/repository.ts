@@ -15,13 +15,17 @@ import {
   collectImportedContentTags,
   getContentCategory,
   getContentDescription,
+  getContentFolderId,
   getContentTags,
   getContentUpdatedAt,
+  isContentArchived,
+  isContentPinned,
   queryImportedContent,
   searchImportedContent,
   sortImportedContent,
   type ImportedContentSortOrder,
 } from './importedContentRepository';
+import { getNoteFolderId, isNoteArchived, queryNotes } from './noteOrganization';
 import type { Note } from './types';
 import type { ContentRelationship, RelationshipEntityType } from './contentRelationships';
 
@@ -186,6 +190,14 @@ export interface RepositoryEntry {
   /** A short, user-written summary — ImportedContent.metadata.description; always undefined for a
    * Note-backed entry (Note has no description field of its own). */
   description?: string;
+  /** Premium Note Organisation (Phase 3B/4) — folderId/isPinned/isArchived, read from whichever
+   * underlying model this entry was projected from (ImportedContent.metadata, or Note's own flat
+   * fields — see lib/importedContentRepository.ts / lib/noteOrganization.ts). A Note has no
+   * isPinned of its own; it reuses its existing `pinned` field, exactly as everywhere else in this
+   * app that touches Notes. */
+  folderId: string | null;
+  isPinned: boolean;
+  isArchived: boolean;
 }
 
 export function repositoryEntryFromImportedContent(item: ImportedContent): RepositoryEntry {
@@ -201,6 +213,9 @@ export function repositoryEntryFromImportedContent(item: ImportedContent): Repos
     tags: getContentTags(item),
     category: getContentCategory(item),
     description: getContentDescription(item),
+    folderId: getContentFolderId(item),
+    isPinned: isContentPinned(item),
+    isArchived: isContentArchived(item),
   };
 }
 
@@ -217,6 +232,9 @@ export function repositoryEntryFromNote(note: Note): RepositoryEntry {
     tags: [],
     category: undefined,
     description: undefined,
+    folderId: getNoteFolderId(note),
+    isPinned: note.pinned,
+    isArchived: isNoteArchived(note),
   };
 }
 
@@ -257,6 +275,12 @@ export interface RepositoryQuery {
   search?: string;
   tags?: readonly string[];
   category?: string;
+  /** Filters to exactly one folder (`null` = unfiled/root) — omitted means "every folder". */
+  folderId?: string | null;
+  pinnedOnly?: boolean;
+  /** Defaults to false — matches lib/importedContentRepository.ts's queryImportedContent /
+   * lib/noteOrganization.ts's queryNotes: the default view never shows archived entries. */
+  archived?: boolean;
   sort?: ImportedContentSortOrder;
 }
 
@@ -308,26 +332,19 @@ export function queryRepository(
     search: query.search,
     tags: query.tags,
     category: query.category,
+    folderId: query.folderId,
+    pinnedOnly: query.pinnedOnly,
+    archived: query.archived,
   });
 
-  // Tags/category filters never match a Note by construction (see doc comment above) — only a
+  // Tags/category filters never match a Note by construction (Note has neither) — only a
   // content-type filter for something OTHER than 'note' needs to explicitly drop notes here.
   const notesEligible = !query.contentType || query.contentType === 'note';
   const tagsOrCategoryActive = (query.tags && query.tags.length > 0) || !!query.category;
-  const matchedNotes = notesEligible && !tagsOrCategoryActive ? searchNotes(scopedNotes, query.search ?? '') : [];
+  const matchedNotes = notesEligible && !tagsOrCategoryActive ? queryNotes(scopedNotes, { search: query.search, folderId: query.folderId, pinnedOnly: query.pinnedOnly, archived: query.archived }) : [];
 
   const entries = [...matchedContent.map(repositoryEntryFromImportedContent), ...matchedNotes.map(repositoryEntryFromNote)];
   return sortRepositoryEntries(entries, query.sort ?? 'newest');
-}
-
-/** Case-insensitive substring search over a Note's title and content — the Note-side equivalent of
- * lib/importedContentRepository.ts's searchImportedContent, kept separate since Note has no
- * rawContent/sourceFilename field to search. An empty/whitespace-only query matches everything,
- * exactly like searchImportedContent. */
-export function searchNotes(notes: readonly Note[], query: string): Note[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [...notes];
-  return notes.filter((note) => note.title.toLowerCase().includes(q) || note.content.toLowerCase().includes(q));
 }
 
 // ============================================================================================

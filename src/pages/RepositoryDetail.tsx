@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import Markdown from 'markdown-to-jsx';
-import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, Plus, X } from 'lucide-react';
+import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
+import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -19,7 +19,7 @@ import {
 import {
   getRelatedContent,
   RELATIONSHIP_TYPE_LABELS,
-  RELATIONSHIP_TYPES,
+  MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES,
   type ContentRelationship,
   type RelationshipEntityType,
   type RelationshipType,
@@ -27,6 +27,9 @@ import {
 import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry, EditMetadataModal, DeleteConfirmModal } from './Repository';
 import type { ImportedContentMetadata } from '../lib/contentImport';
+import { DocumentAnnotator, type DocumentAnnotatorHandle } from '../components/annotations/DocumentAnnotator';
+import { AnnotationIndex } from '../components/annotations/AnnotationIndex';
+import type { Annotation } from '../lib/annotations';
 
 // Repository Detail / Preview View — a focused, read-only page for a single repository entity,
 // reached from pages/Repository.tsx's own "View" action on each result card. It reuses that same
@@ -58,64 +61,98 @@ function isRelationshipEntityType(value: string | undefined): value is Relations
  * Markdown safely via the same library/options pages/Notes.tsx's own note preview already uses
  * (markdown-to-jsx with disableParsingRawHTML — embedded HTML/script tags are never parsed as
  * markup, only shown as inert text). One generic renderer for every content type, including ones
- * with no dedicated page yet (question_bank, pyq, …) — never a specialised per-type renderer. */
-function ContentView({ content }: { content: string }) {
+ * with no dedicated page yet (question_bank, pyq, …) — never a specialised per-type renderer.
+ *
+ * Premium Study Reader (Phase 7) — this is the app's existing document reading surface, so the
+ * annotation layer (components/annotations/DocumentAnnotator) wraps the actual content block here,
+ * keyed by `documentId` (the same `${entityType}:${entityId}` compound key this page already uses
+ * elsewhere) plus an explicit `renderMode` ('raw' | 'preview'). Raw and Preview render the SAME
+ * underlying text very differently (monospace block vs. flowed Markdown), so freehand ink's pixel
+ * geometry is scoped per render mode (never shared) — see lib/annotations.ts's own header for why
+ * that's a `renderMode` field on each annotation rather than a suffix on `documentId` itself.
+ * Text-anchored annotations (highlight/underline/strikethrough/note — see lib/textAnchor.ts) and
+ * the Annotation Index (components/annotations/AnnotationIndex.tsx) are wired in here: this is the
+ * ONLY place that owns the Raw/Preview toggle both render modes live behind, so it's also the only
+ * place that can switch render mode on the Index's behalf before asking the (now newly-mounted)
+ * DocumentAnnotator to scroll to + pulse a clicked annotation (see handleIndexNavigate below). */
+function ContentView({ content, documentId }: { content: string; documentId: string }) {
   const [mode, setMode] = useState<'raw' | 'preview'>('raw');
+  const [showIndex, setShowIndex] = useState(false);
+  const annotatorRef = useRef<DocumentAnnotatorHandle>(null);
+
+  function handleIndexNavigate(annotation: Annotation) {
+    const needsModeSwitch = annotation.type !== 'bookmark' && annotation.renderMode !== mode;
+    if (needsModeSwitch) {
+      setMode(annotation.renderMode);
+      // The new render mode's DocumentAnnotator hasn't mounted yet on this same tick — two nested
+      // rAFs give React time to commit + lay out the new subtree before navigateToAnnotation reads
+      // its (freshly mounted) contentRef/scrollBoxRef.
+      requestAnimationFrame(() => requestAnimationFrame(() => annotatorRef.current?.navigateToAnnotation(annotation.id)));
+    } else {
+      annotatorRef.current?.navigateToAnnotation(annotation.id);
+    }
+  }
+
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Content</p>
-        <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 p-0.5 text-xs">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setMode('raw')}
-            aria-pressed={mode === 'raw'}
+            onClick={() => setShowIndex(true)}
+            aria-pressed={showIndex}
+            title="Annotation index"
             className={cx(
-              'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
-              mode === 'raw' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+              'inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-500 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800',
             )}
           >
-            <FileText className="h-3.5 w-3.5" /> Raw
+            <ListChecks className="h-3.5 w-3.5" /> Index
           </button>
-          <button
-            type="button"
-            onClick={() => setMode('preview')}
-            aria-pressed={mode === 'preview'}
-            className={cx(
-              'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
-              mode === 'preview' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
-            )}
-          >
-            <Eye className="h-3.5 w-3.5" /> Preview
-          </button>
+          <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setMode('raw')}
+              aria-pressed={mode === 'raw'}
+              className={cx(
+                'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
+                mode === 'raw' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+              )}
+            >
+              <FileText className="h-3.5 w-3.5" /> Raw
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('preview')}
+              aria-pressed={mode === 'preview'}
+              className={cx(
+                'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
+                mode === 'preview' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+              )}
+            >
+              <Eye className="h-3.5 w-3.5" /> Preview
+            </button>
+          </div>
         </div>
       </div>
       {mode === 'raw' ? (
-        <pre className="max-h-[32rem] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-4 text-sm font-sans text-slate-700 dark:text-slate-200">
-          {content || 'No content.'}
-        </pre>
+        <DocumentAnnotator ref={annotatorRef} documentId={documentId} renderMode="raw" scrollBoxClassName="max-h-[32rem] rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+          <pre className="whitespace-pre-wrap break-words p-4 text-sm font-sans text-slate-700 dark:text-slate-200">{content || 'No content.'}</pre>
+        </DocumentAnnotator>
       ) : (
-        <div
-          className={cx(
-            'max-h-[32rem] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 p-4 text-sm text-slate-700 dark:text-slate-200',
-            '[&_h1]:font-display [&_h1]:font-semibold [&_h1]:text-lg [&_h1]:mt-3 [&_h1]:mb-2',
-            '[&_h2]:font-display [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-3 [&_h2]:mb-1.5',
-            '[&_h3]:font-display [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1',
-            '[&_p]:mb-2 [&_p]:leading-relaxed',
-            '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-0.5',
-            '[&_strong]:font-semibold [&_em]:italic',
-            '[&_a]:text-brand-600 dark:[&_a]:text-brand-400 [&_a]:underline',
-            '[&_code]:rounded [&_code]:bg-slate-100 dark:[&_code]:bg-slate-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono',
-            '[&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-slate-100 dark:[&_pre]:bg-slate-800 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
-            '[&_blockquote]:border-l-2 [&_blockquote]:border-slate-200 dark:[&_blockquote]:border-slate-700 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-slate-500',
-          )}
-        >
-          {content.trim() ? (
-            <Markdown options={{ disableParsingRawHTML: true, forceBlock: true }}>{content}</Markdown>
-          ) : (
-            <p className="text-slate-400">Nothing to preview.</p>
-          )}
-        </div>
+        <DocumentAnnotator ref={annotatorRef} documentId={documentId} renderMode="preview" scrollBoxClassName="max-h-[32rem] rounded-lg border border-slate-200 dark:border-slate-800">
+          <MarkdownPreview content={content} className="p-4" emptyText="Nothing to preview." />
+        </DocumentAnnotator>
+      )}
+      {showIndex && (
+        <AnnotationIndex
+          documentId={documentId}
+          onNavigate={(annotation) => {
+            handleIndexNavigate(annotation);
+            setShowIndex(false);
+          }}
+          onClose={() => setShowIndex(false)}
+        />
       )}
     </div>
   );
@@ -322,7 +359,7 @@ export default function RepositoryDetail() {
       </Card>
 
       <Card className="mb-5 p-4">
-        <ContentView content={rawContent} />
+        <ContentView content={rawContent} documentId={`${entry.entityType}:${entry.entityId}`} />
       </Card>
 
       <Card className="p-4">
@@ -369,7 +406,7 @@ export default function RepositoryDetail() {
                     onChange={(e) => setLinkType(e.target.value as RelationshipType)}
                     className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                   >
-                    {RELATIONSHIP_TYPES.map((t) => (
+                    {MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES.map((t) => (
                       <option key={t} value={t}>
                         {RELATIONSHIP_TYPE_LABELS[t]}
                       </option>

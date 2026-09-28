@@ -341,16 +341,26 @@ export interface BibliographyQuery {
   author?: string;
   year?: string;
   publicationType?: BibliographyPublicationType;
+  /** Premium Note Organisation (Phase 4D) — same semantics as queryImportedContent's own options:
+   * `folderId` filters to exactly one folder (`null` = unfiled/root), `pinnedOnly` to pinned
+   * records, `archived` defaults to false (the default view never shows archived records). */
+  folderId?: string | null;
+  pinnedOnly?: boolean;
+  archived?: boolean;
   sort?: ImportedContentSortOrder;
 }
 
 /** The single entry point pages/WorkingBibliography.tsx calls: the generic search/tag/category/
- * sort query (queryImportedContent), then author/year/publicationType filters layered on top. */
+ * folder/pin/archive/sort query (queryImportedContent), then author/year/publicationType filters
+ * layered on top — bibliography-specific fields queryImportedContent has no idea about. */
 export function queryBibliography(items: readonly ImportedContent[], query: BibliographyQuery): ImportedContent[] {
   let results = queryImportedContent(items, {
     search: query.search,
     tags: query.tags,
     category: query.category,
+    folderId: query.folderId,
+    pinnedOnly: query.pinnedOnly,
+    archived: query.archived,
     sort: query.sort,
   });
   if (query.author) results = filterBibliographyByAuthor(results, query.author);

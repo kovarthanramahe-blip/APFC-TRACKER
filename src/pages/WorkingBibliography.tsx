@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, Plus, X, BookMarked, Trash2, Eye, Pencil, Search, Tag, SlidersHorizontal, ExternalLink, Link2, Unlink, NotebookPen } from 'lucide-react';
+import { GraduationCap, Upload, Plus, X, BookMarked, Trash2, Eye, Pencil, Search, Tag, SlidersHorizontal, ExternalLink, Link2, Unlink, NotebookPen, Copy, Archive } from 'lucide-react';
+import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -18,8 +19,16 @@ import {
   IMPORT_FORMAT_LABELS,
   type ImportPreview,
   type ImportedContent,
+  type ImportedContentMetadata,
 } from '../lib/contentImport';
-import { collectImportedContentTags, collectImportedContentCategories, getContentTags, getContentCategory, parseTagsInput } from '../lib/importedContentRepository';
+import { sha256Hex } from '../lib/fileHash';
+import { findDuplicates, type DuplicateMatchResult } from '../lib/importDuplicates';
+import { collectImportedContentTags, collectImportedContentCategories, getContentTags, getContentCategory, getContentFolderId, parseTagsInput } from '../lib/importedContentRepository';
+import { PinToggle } from '../components/organisation/PinToggle';
+import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
+import { BulkActionBar } from '../components/organisation/BulkActionBar';
+import { SelectionCheckbox } from '../components/organisation/SelectionCheckbox';
+import { buildFolderTree, flattenFolderTree } from '../lib/folders';
 import {
   BIBLIOGRAPHY_PUBLICATION_TYPES,
   BIBLIOGRAPHY_PUBLICATION_TYPE_LABELS,
@@ -39,7 +48,7 @@ import {
   type BibliographyRecordDraft,
 } from '../lib/bibliography';
 import {
-  RELATIONSHIP_TYPES,
+  MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES,
   RELATIONSHIP_TYPE_LABELS,
   getOutgoingRelationships,
   type RelationshipType,
@@ -54,6 +63,17 @@ import { countRelatedContent } from '../lib/relatedContentSummary';
 // No AI-generated citations, no automatic extraction from arbitrary PDFs: a file only becomes
 // structured records when it matches the documented format; anything else is preserved as a single
 // unstructured bibliography document instead (never a guessed record).
+//
+// Knowledge Workspace Phase 3A: this page still calls extractContentFromFile/buildImportPreview
+// directly (unchanged) rather than lib/importPipeline.ts's runFileImport, because ONE imported file
+// here can become MANY bibliography records (see parseBibliographyRecords/handleConfirmStructured
+// below) or ONE unstructured fallback document — a genuinely different shape than runFileImport's
+// single-preview result. What IS reused directly are the same underlying primitives runFileImport
+// itself composes: lib/fileHash.ts's sha256Hex and lib/importDuplicates.ts's findDuplicates, run
+// once per selected file (all records/the fallback document derived from one file share that
+// file's own hash/size — they really are the same source bytes). Duplicate detection is advisory
+// only, exactly like the Repository Import Centre and PhD Research: never blocking, never
+// auto-overwriting an existing source.
 
 interface BibliographyFormValues {
   title: string;
@@ -142,6 +162,8 @@ export default function WorkingBibliography() {
   const contentRelationships = useAppStore((s) => s.contentRelationships);
   const addContentRelationship = useAppStore((s) => s.addContentRelationship);
   const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
+  const folders = useAppStore((s) => s.folders);
+  const bulkUpdateImportedContent = useAppStore((s) => s.bulkUpdateImportedContent);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -154,6 +176,11 @@ export default function WorkingBibliography() {
   } | null>(null);
   const [fallbackPreview, setFallbackPreview] = useState<ImportPreview | null>(null);
   const [fallbackTitle, setFallbackTitle] = useState('');
+  // One hash/size/duplicate-check per SELECTED FILE, shared by every structured record (or the one
+  // fallback document) it produces — see this file's own header comment above.
+  const [importFileSizeBytes, setImportFileSizeBytes] = useState<number | null>(null);
+  const [importSourceHash, setImportSourceHash] = useState<string | undefined>(undefined);
+  const [importDuplicates, setImportDuplicates] = useState<DuplicateMatchResult | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formValues, setFormValues] = useState<BibliographyFormValues>(emptyFormValues());
@@ -170,6 +197,10 @@ export default function WorkingBibliography() {
   const [selectedAuthor, setSelectedAuthor] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedType, setSelectedType] = useState<BibliographyPublicationType | ''>('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null | undefined>(undefined);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const bibliographyRecords = useMemo(() => selectImportedContentByType(importedContent, 'bibliography'), [importedContent]);
   const researchDocuments = useMemo(() => selectImportedContentByType(importedContent, 'research_document'), [importedContent]);
@@ -178,6 +209,7 @@ export default function WorkingBibliography() {
   const availableAuthors = useMemo(() => collectBibliographyAuthors(bibliographyRecords), [bibliographyRecords]);
   const availableYears = useMemo(() => collectBibliographyYears(bibliographyRecords), [bibliographyRecords]);
   const availableTypes = useMemo(() => collectBibliographyPublicationTypes(bibliographyRecords), [bibliographyRecords]);
+  const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
 
   const filteredRecords = useMemo(
     () =>
@@ -188,12 +220,41 @@ export default function WorkingBibliography() {
         author: selectedAuthor || undefined,
         year: selectedYear || undefined,
         publicationType: selectedType || undefined,
+        folderId: selectedFolderId,
+        pinnedOnly,
+        archived: showArchived,
       }),
-    [bibliographyRecords, searchQuery, selectedTags, selectedCategory, selectedAuthor, selectedYear, selectedType],
+    [bibliographyRecords, searchQuery, selectedTags, selectedCategory, selectedAuthor, selectedYear, selectedType, selectedFolderId, pinnedOnly, showArchived],
   );
 
   const hasActiveFilters =
-    searchQuery.trim() !== '' || selectedTags.length > 0 || selectedCategory !== '' || selectedAuthor !== '' || selectedYear !== '' || selectedType !== '';
+    searchQuery.trim() !== '' ||
+    selectedTags.length > 0 ||
+    selectedCategory !== '' ||
+    selectedAuthor !== '' ||
+    selectedYear !== '' ||
+    selectedType !== '' ||
+    selectedFolderId !== undefined ||
+    pinnedOnly ||
+    showArchived;
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function runBulk(patch: Parameters<typeof bulkUpdateImportedContent>[1]) {
+    bulkUpdateImportedContent([...selectedIds], patch);
+    clearSelection();
+  }
 
   function clearFilters() {
     setSearchQuery('');
@@ -202,6 +263,9 @@ export default function WorkingBibliography() {
     setSelectedAuthor('');
     setSelectedYear('');
     setSelectedType('');
+    setSelectedFolderId(undefined);
+    setPinnedOnly(false);
+    setShowArchived(false);
   }
 
   function toggleTagFilter(tag: string) {
@@ -228,6 +292,19 @@ export default function WorkingBibliography() {
         setImportError(result.message);
         return;
       }
+
+      // Hash + duplicate check once per selected file — reused by every structured record (or the
+      // one fallback document) below, since they all come from these exact same source bytes.
+      let sourceHash: string | undefined;
+      try {
+        sourceHash = await sha256Hex(file);
+      } catch {
+        sourceHash = undefined;
+      }
+      setImportFileSizeBytes(file.size);
+      setImportSourceHash(sourceHash);
+      setImportDuplicates(findDuplicates(importedContent, 'phd_research', { sourceFilename: file.name, sourceHash, sourceFileSize: file.size }));
+
       const parsed = parseBibliographyRecords(result.content.text);
       if (parsed.records.length > 0) {
         setStructuredPreview({ ...parsed, sourceFilename: file.name, originalFormat: result.content.format });
@@ -255,10 +332,15 @@ export default function WorkingBibliography() {
         workspaceId: 'phd_research',
         contentType: 'bibliography',
         metadata: buildBibliographyMetadata({ fields: record.fields, tags: record.tags, category: record.category }),
+        sourceHash: importSourceHash,
+        sourceFileSize: importFileSizeBytes ?? undefined,
       });
       addImportedContent(content);
     }
     setStructuredPreview(null);
+    setImportFileSizeBytes(null);
+    setImportSourceHash(undefined);
+    setImportDuplicates(null);
   }
 
   function handleConfirmFallback() {
@@ -268,10 +350,15 @@ export default function WorkingBibliography() {
       contentType: 'bibliography',
       title: fallbackTitle.trim() || fallbackPreview.title,
       metadata: buildBibliographyMetadata({}),
+      sourceHash: importSourceHash,
+      sourceFileSize: importFileSizeBytes ?? undefined,
     });
     addImportedContent(content);
     setFallbackPreview(null);
     setFallbackTitle('');
+    setImportFileSizeBytes(null);
+    setImportSourceHash(undefined);
+    setImportDuplicates(null);
   }
 
   function openManualForm() {
@@ -300,7 +387,17 @@ export default function WorkingBibliography() {
     const metadata = buildBibliographyMetadata({ fields, tags, category });
 
     if (editingItem) {
-      const updates: Partial<Omit<ImportedContent, 'id' | 'workspaceId'>> = { title, metadata };
+      // buildBibliographyMetadata builds a FRESH metadata object from this form's own fields
+      // (citation fields/tags/category only) — it has no idea folderId/isPinned/isArchived exist,
+      // so saving an edit must never silently wipe them. Merged back in from the item's current
+      // metadata before this replaces `metadata` wholesale.
+      const organisationFields: ImportedContentMetadata = {
+        ...(editingItem.metadata?.folderId !== undefined ? { folderId: editingItem.metadata.folderId } : {}),
+        ...(editingItem.metadata?.isPinned ? { isPinned: true } : {}),
+        ...(editingItem.metadata?.isArchived ? { isArchived: true } : {}),
+      };
+      const mergedMetadata = metadata || Object.keys(organisationFields).length > 0 ? { ...metadata, ...organisationFields } : metadata;
+      const updates: Partial<Omit<ImportedContent, 'id' | 'workspaceId'>> = { title, metadata: mergedMetadata };
       // Never silently overwrite an IMPORTED record's original source text — only a manually
       // created record's own self-generated rawContent is kept in sync with its edited fields.
       if (isManuallyCreated(editingItem)) {
@@ -402,6 +499,24 @@ export default function WorkingBibliography() {
               {structuredPreview.skippedBlockCount === 1 ? 'was' : 'were'} skipped.
             </p>
           )}
+          {importDuplicates?.exactMatch && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              <Copy className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>
+                <span className="font-medium">This exact file was already imported</span> as "{importDuplicates.exactMatch.title}". Saving will add a
+                separate source — nothing is overwritten or merged automatically.
+              </p>
+            </div>
+          )}
+          {!importDuplicates?.exactMatch && importDuplicates && importDuplicates.possibleMatches.length > 0 && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
+              <Copy className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />
+              <p>
+                <span className="font-medium">Possible duplicate</span> — same filename and size as{' '}
+                {importDuplicates.possibleMatches.map((m) => `"${m.title}"`).join(', ')}. This is a filename/size match only, not confirmed.
+              </p>
+            </div>
+          )}
           <div className="mb-4 max-h-80 space-y-2 overflow-y-auto">
             {structuredPreview.records.map((record, i) => (
               <div key={i} className="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2">
@@ -415,7 +530,15 @@ export default function WorkingBibliography() {
             ))}
           </div>
           <div className="flex items-center justify-end gap-2">
-            <Button variant="secondary" onClick={() => setStructuredPreview(null)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setStructuredPreview(null);
+                setImportFileSizeBytes(null);
+                setImportSourceHash(undefined);
+                setImportDuplicates(null);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleConfirmStructured}>Confirm &amp; Save {structuredPreview.records.length} Record{structuredPreview.records.length === 1 ? '' : 's'}</Button>
@@ -430,6 +553,24 @@ export default function WorkingBibliography() {
             No structured records were detected in this file, so it will be saved as a single unstructured bibliography document — its content is
             preserved exactly as extracted.
           </p>
+          {importDuplicates?.exactMatch && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              <Copy className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>
+                <span className="font-medium">This exact file was already imported</span> as "{importDuplicates.exactMatch.title}". Saving will add a
+                separate source — nothing is overwritten or merged automatically.
+              </p>
+            </div>
+          )}
+          {!importDuplicates?.exactMatch && importDuplicates && importDuplicates.possibleMatches.length > 0 && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
+              <Copy className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />
+              <p>
+                <span className="font-medium">Possible duplicate</span> — same filename and size as{' '}
+                {importDuplicates.possibleMatches.map((m) => `"${m.title}"`).join(', ')}. This is a filename/size match only, not confirmed.
+              </p>
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-2 mb-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Source file</p>
@@ -460,6 +601,9 @@ export default function WorkingBibliography() {
               onClick={() => {
                 setFallbackPreview(null);
                 setFallbackTitle('');
+                setImportFileSizeBytes(null);
+                setImportSourceHash(undefined);
+                setImportDuplicates(null);
               }}
             >
               Cancel
@@ -529,6 +673,28 @@ export default function WorkingBibliography() {
                 </option>
               ))}
             </select>
+            {folders.length > 0 && (
+              <select
+                value={selectedFolderId === undefined ? '' : (selectedFolderId ?? '__root__')}
+                onChange={(e) => setSelectedFolderId(e.target.value === '' ? undefined : e.target.value === '__root__' ? null : e.target.value)}
+                aria-label="Filter by folder"
+                className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              >
+                <option value="">All folders</option>
+                <option value="__root__">Unfiled (Root)</option>
+                {flattenFolderTree(buildFolderTree(folders, 'phd_research')).map(({ folder, depth }) => (
+                  <option key={folder.id} value={folder.id}>
+                    {'—'.repeat(depth)} {folder.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button variant={pinnedOnly ? 'primary' : 'ghost'} size="sm" onClick={() => setPinnedOnly((v) => !v)} aria-pressed={pinnedOnly}>
+              Pinned
+            </Button>
+            <Button variant={showArchived ? 'primary' : 'ghost'} size="sm" onClick={() => setShowArchived((v) => !v)} aria-pressed={showArchived}>
+              <Archive className="h-3.5 w-3.5" /> Archived
+            </Button>
             {hasActiveFilters && (
               <Button variant="ghost" size="sm" onClick={clearFilters}>
                 <X className="h-3.5 w-3.5" /> Clear filters
@@ -565,6 +731,22 @@ export default function WorkingBibliography() {
         </Card>
       )}
 
+      {selectedIds.size > 0 && (
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          folders={folders}
+          workspaceId="phd_research"
+          onMoveToFolder={(folderId) => runBulk({ folderId })}
+          onAddTag={(tag) => runBulk({ addTags: [tag] })}
+          onRemoveTag={(tag) => runBulk({ removeTags: [tag] })}
+          onPin={() => runBulk({ isPinned: true })}
+          onUnpin={() => runBulk({ isPinned: false })}
+          onArchive={() => runBulk({ isArchived: true })}
+          onUnarchive={() => runBulk({ isArchived: false })}
+          onCancel={clearSelection}
+        />
+      )}
+
       {bibliographyRecords.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <BookMarked className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
@@ -583,8 +765,8 @@ export default function WorkingBibliography() {
           <table className="w-full min-w-[64rem] border-collapse text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/80">
-                {['Title', 'Author(s)', 'Year', 'Type', 'Journal / Book / Publisher', 'DOI / URL', 'Tags / Category', 'Notes', 'Actions'].map((h) => (
-                  <th key={h} className="whitespace-normal break-words border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-200">
+                {['', 'Title', 'Author(s)', 'Year', 'Type', 'Journal / Book / Publisher', 'DOI / URL', 'Tags / Category', 'Notes', 'Actions'].map((h, i) => (
+                  <th key={h || `col-${i}`} className="whitespace-normal break-words border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-200">
                     {h}
                   </th>
                 ))}
@@ -595,14 +777,24 @@ export default function WorkingBibliography() {
                 const fields = getBibliographyFields(record);
                 const tags = getContentTags(record);
                 const category = getContentCategory(record);
+                const folderName = getContentFolderId(record) ? (folderNameById.get(getContentFolderId(record)!) ?? null) : null;
+                const isPinned = record.metadata?.isPinned ?? false;
+                const isArchived = record.metadata?.isArchived ?? false;
                 const related = countRelatedContent(contentRelationships, record.id, 'imported_content', importedContent, notes);
                 return (
                   <tr key={record.id} className={cx(ri % 2 === 1 && 'bg-slate-50/60 dark:bg-slate-800/30')}>
                     <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top">
+                      <SelectionCheckbox selected={selectedIds.has(record.id)} title={record.title} onToggleSelected={() => toggleSelected(record.id)} />
+                    </td>
+                    <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top">
                       <p className="font-medium text-slate-800 dark:text-slate-100">{record.title}</p>
-                      <Badge tone={isManuallyCreated(record) ? 'neutral' : 'success'} className="mt-1">
-                        {isManuallyCreated(record) ? 'Manually added' : (record.provenance.sourceFilename ?? 'Imported')}
-                      </Badge>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <Badge tone={isManuallyCreated(record) ? 'neutral' : 'success'}>
+                          {isManuallyCreated(record) ? 'Manually added' : (record.provenance.sourceFilename ?? 'Imported')}
+                        </Badge>
+                        {folderName && <Badge tone="neutral">{folderName}</Badge>}
+                        {isArchived && <Badge tone="neutral">Archived</Badge>}
+                      </div>
                       <RelatedContentSummary
                         className="mt-1"
                         segments={[
@@ -658,6 +850,8 @@ export default function WorkingBibliography() {
                     </td>
                     <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top">
                       <div className="flex items-center gap-1.5">
+                        <ArchiveToggle archived={isArchived} onToggle={() => bulkUpdateImportedContent([record.id], { isArchived: !isArchived })} size="sm" />
+                        <PinToggle pinned={isPinned} onToggle={() => bulkUpdateImportedContent([record.id], { isPinned: !isPinned })} size="sm" />
                         <button
                           onClick={() => setLinkingRecord(record)}
                           aria-label="Linked research documents"
@@ -757,7 +951,15 @@ export default function WorkingBibliography() {
   );
 }
 
+// Phase 5O — was a plain <pre> (rawContent as literal text, so an imported .md file's own
+// #/**bold**/lists/etc. showed as raw syntax instead of rendering). Now mirrors
+// pages/RepositoryDetail.tsx's ContentView raw/preview toggle exactly: same markdown-to-jsx
+// options (disableParsingRawHTML — untrusted imported content is never parsed as HTML), same
+// Markdown/monospace class conventions. Defaults to Preview (RepositoryDetail defaults to Raw for
+// its own annotation-positioning reasons, which don't apply here — there's no annotation layer on
+// this modal). rawContent itself is never touched either way — this is display-only.
 function ViewSourceModal({ record, onClose }: { record: ImportedContent; onClose: () => void }) {
+  const [mode, setMode] = useState<'raw' | 'preview'>('preview');
   return (
     <>
       <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
@@ -769,12 +971,44 @@ function ViewSourceModal({ record, onClose }: { record: ImportedContent; onClose
               {isManuallyCreated(record) ? 'Manually added' : (record.provenance.sourceFilename ?? 'Imported')}
             </p>
           </div>
-          <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-800 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setMode('preview')}
+                aria-pressed={mode === 'preview'}
+                className={cx(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
+                  mode === 'preview' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                )}
+              >
+                <Eye className="h-3.5 w-3.5" /> Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('raw')}
+                aria-pressed={mode === 'raw'}
+                className={cx(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
+                  mode === 'raw' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                )}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Raw
+              </button>
+            </div>
+            <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
-          <pre className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200 font-sans">{record.rawContent || 'No source content.'}</pre>
+          {!record.rawContent ? (
+            <p className="text-sm text-slate-400">No source content.</p>
+          ) : mode === 'raw' ? (
+            <pre className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200 font-sans">{record.rawContent}</pre>
+          ) : (
+            <MarkdownPreview content={record.rawContent} />
+          )}
         </div>
       </div>
     </>
@@ -1006,7 +1240,7 @@ function LinkedDocumentsModal({
                   onChange={(e) => setSelectedType(e.target.value as RelationshipType)}
                   className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
-                  {RELATIONSHIP_TYPES.map((t) => (
+                  {MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {RELATIONSHIP_TYPE_LABELS[t]}
                     </option>

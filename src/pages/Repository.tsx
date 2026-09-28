@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
@@ -25,6 +25,11 @@ import { ImportToRepositoryModal } from '../components/repository/ImportToReposi
 import { ExportRepositoryModal } from '../components/repository/ExportRepositoryModal';
 import { ImportRepositoryBackupModal } from '../components/repository/ImportRepositoryBackupModal';
 import { UpscCsePyqImportModal } from '../components/upscCse/UpscCsePyqImportModal';
+import { PinToggle } from '../components/organisation/PinToggle';
+import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
+import { BulkActionBar } from '../components/organisation/BulkActionBar';
+import { SelectionCheckbox } from '../components/organisation/SelectionCheckbox';
+import { buildFolderTree, flattenFolderTree } from '../lib/folders';
 
 // Global Repository UI — a single, read-only browse/search surface across everything
 // lib/repository.ts's foundation already knows how to discover (Notes + every registered
@@ -74,10 +79,20 @@ export function canDeleteEntry(entry: RepositoryEntry): boolean {
 
 function ResultCard({
   entry,
+  folderName,
+  selected,
+  onToggleSelected,
+  onTogglePin,
+  onToggleArchive,
   onEdit,
   onDelete,
 }: {
   entry: RepositoryEntry;
+  folderName: string | null;
+  selected: boolean;
+  onToggleSelected: () => void;
+  onTogglePin: () => void;
+  onToggleArchive: () => void;
   onEdit: (entry: RepositoryEntry) => void;
   onDelete: (entry: RepositoryEntry) => void;
 }) {
@@ -90,10 +105,19 @@ function ResultCard({
 
   return (
     <Card className="h-full p-4 flex flex-col">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <SelectionCheckbox selected={selected} title={title} onToggleSelected={onToggleSelected} />
+        <div className="flex items-center gap-0.5">
+          <ArchiveToggle archived={entry.isArchived} onToggle={onToggleArchive} size="sm" />
+          <PinToggle pinned={entry.isPinned} onToggle={onTogglePin} size="sm" />
+        </div>
+      </div>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <Badge tone="brand">{meta.label}</Badge>
         <Badge tone="neutral">{workspaceLabel}</Badge>
         {entry.category && <Badge tone="gold">{entry.category}</Badge>}
+        {folderName && <Badge tone="neutral">{folderName}</Badge>}
+        {entry.isArchived && <Badge tone="neutral">Archived</Badge>}
       </div>
       <Link
         to={repositoryDetailPathFor(entry.entityType, entry.entityId)}
@@ -361,11 +385,17 @@ export default function Repository() {
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
   const deleteNote = useAppStore((s) => s.deleteNote);
+  const folders = useAppStore((s) => s.folders);
+  const bulkUpdateNotes = useAppStore((s) => s.bulkUpdateNotes);
+  const bulkUpdateImportedContent = useAppStore((s) => s.bulkUpdateImportedContent);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContentType, setSelectedContentType] = useState<RepositoryContentType | ''>('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null | undefined>(undefined);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [sortOrder, setSortOrder] = useState<ImportedContentSortOrder>('newest');
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -373,6 +403,9 @@ export default function Repository() {
   const [showUpscPyqImportModal, setShowUpscPyqImportModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<RepositoryEntry | null>(null);
   const [deletingEntry, setDeletingEntry] = useState<RepositoryEntry | null>(null);
+  // Keyed by `${entityType}:${entityId}` — a note and an ImportedContent item can share the same
+  // raw id space, so entityType disambiguates which store action a bulk change routes through.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   // The store's importedContent/notes fields already only ever hold the ACTIVE workspace's own
   // data (see lib/store.ts's setActiveWorkspaceId swap) — queryRepository/listRepositoryEntries
@@ -394,22 +427,81 @@ export default function Repository() {
         search: searchQuery,
         tags: selectedTags,
         category: selectedCategory || undefined,
+        folderId: selectedFolderId,
+        pinnedOnly,
+        archived: showArchived,
         sort: sortOrder,
       }),
-    [importedContent, notes, activeWorkspaceId, selectedContentType, searchQuery, selectedTags, selectedCategory, sortOrder],
+    [importedContent, notes, activeWorkspaceId, selectedContentType, searchQuery, selectedTags, selectedCategory, selectedFolderId, pinnedOnly, showArchived, sortOrder],
   );
 
-  const hasActiveFilters = searchQuery.trim() !== '' || selectedContentType !== '' || selectedCategory !== '' || selectedTags.length > 0;
+  const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    selectedContentType !== '' ||
+    selectedCategory !== '' ||
+    selectedTags.length > 0 ||
+    selectedFolderId !== undefined ||
+    pinnedOnly ||
+    showArchived;
 
   function clearFilters() {
     setSearchQuery('');
     setSelectedContentType('');
     setSelectedCategory('');
     setSelectedTags([]);
+    setSelectedFolderId(undefined);
+    setPinnedOnly(false);
+    setShowArchived(false);
   }
 
   function toggleTagFilter(tag: string) {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+  }
+
+  function entryKey(entry: RepositoryEntry) {
+    return `${entry.entityType}:${entry.entityId}`;
+  }
+
+  function toggleSelected(entry: RepositoryEntry) {
+    const key = entryKey(entry);
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedKeys(new Set());
+  }
+
+  // Bulk changes are routed per entityType — a note and an ImportedContent item go through their
+  // own store action (bulkUpdateNotes / bulkUpdateImportedContent), never a shared one, since the
+  // two collections are genuinely separate (see lib/store.ts's own header on why).
+  function runBulk(notePatch: Parameters<typeof bulkUpdateNotes>[1], contentPatch: Parameters<typeof bulkUpdateImportedContent>[1]) {
+    const noteIds: string[] = [];
+    const contentIds: string[] = [];
+    for (const key of selectedKeys) {
+      const [entityType, entityId] = key.split(':');
+      if (entityType === 'note') noteIds.push(entityId);
+      else contentIds.push(entityId);
+    }
+    if (noteIds.length > 0) bulkUpdateNotes(noteIds, notePatch);
+    if (contentIds.length > 0) bulkUpdateImportedContent(contentIds, contentPatch);
+    clearSelection();
+  }
+
+  function toggleEntryPin(entry: RepositoryEntry) {
+    if (entry.entityType === 'note') bulkUpdateNotes([entry.entityId], { pinned: !entry.isPinned });
+    else bulkUpdateImportedContent([entry.entityId], { isPinned: !entry.isPinned });
+  }
+
+  function toggleEntryArchive(entry: RepositoryEntry) {
+    if (entry.entityType === 'note') bulkUpdateNotes([entry.entityId], { isArchived: !entry.isArchived });
+    else bulkUpdateImportedContent([entry.entityId], { isArchived: !entry.isArchived });
   }
 
   // Edit on a Note never opens a second Note editor here — the existing Notes page is the only
@@ -425,7 +517,18 @@ export default function Repository() {
 
   function handleEditSave(title: string, contentType: RepositoryContentType, metadata: ImportedContentMetadata | undefined) {
     if (!editingEntry) return;
-    updateImportedContent(editingEntry.entityId, { title, contentType, metadata });
+    // EditMetadataModal's form only has fields for title/contentType/tags/category/description —
+    // it builds `metadata` fresh from those, with no idea folderId/isPinned/isArchived exist. A
+    // plain metadata edit must never silently wipe them, so they're carried over from the entry's
+    // own current organisation state before this replaces `metadata` wholesale (the same discipline
+    // updateImportedContent already applies to id/workspaceId, just at this call site instead).
+    const mergedMetadata: ImportedContentMetadata = {
+      ...metadata,
+      ...(editingEntry.folderId !== null ? { folderId: editingEntry.folderId } : {}),
+      ...(editingEntry.isPinned ? { isPinned: true } : {}),
+      ...(editingEntry.isArchived ? { isArchived: true } : {}),
+    };
+    updateImportedContent(editingEntry.entityId, { title, contentType, metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : undefined });
     setEditingEntry(null);
   }
 
@@ -572,6 +675,46 @@ export default function Repository() {
                 ))}
               </select>
 
+              {folders.length > 0 && (
+                <>
+                  <label htmlFor="repository-folder" className="sr-only">
+                    Filter by folder
+                  </label>
+                  <select
+                    id="repository-folder"
+                    value={selectedFolderId === undefined ? '' : (selectedFolderId ?? '__root__')}
+                    onChange={(e) => setSelectedFolderId(e.target.value === '' ? undefined : e.target.value === '__root__' ? null : e.target.value)}
+                    aria-label="Filter by folder"
+                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  >
+                    <option value="">All folders</option>
+                    <option value="__root__">Unfiled (Root)</option>
+                    {flattenFolderTree(buildFolderTree(folders, activeWorkspaceId)).map(({ folder, depth }) => (
+                      <option key={folder.id} value={folder.id}>
+                        {'—'.repeat(depth)} {folder.name}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              <Button
+                variant={pinnedOnly ? 'primary' : 'ghost'}
+                size="sm"
+                onClick={() => setPinnedOnly((v) => !v)}
+                aria-pressed={pinnedOnly}
+              >
+                Pinned
+              </Button>
+              <Button
+                variant={showArchived ? 'primary' : 'ghost'}
+                size="sm"
+                onClick={() => setShowArchived((v) => !v)}
+                aria-pressed={showArchived}
+              >
+                <Archive className="h-3.5 w-3.5" /> Archived
+              </Button>
+
               {hasActiveFilters && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
                   <X className="h-3.5 w-3.5" /> Clear filters
@@ -607,6 +750,22 @@ export default function Repository() {
             </p>
           </Card>
 
+          {selectedKeys.size > 0 && (
+            <BulkActionBar
+              selectedCount={selectedKeys.size}
+              folders={folders}
+              workspaceId={activeWorkspaceId}
+              onMoveToFolder={(folderId) => runBulk({ folderId }, { folderId })}
+              onAddTag={(tag) => runBulk({ addTags: [tag] }, { addTags: [tag] })}
+              onRemoveTag={(tag) => runBulk({ removeTags: [tag] }, { removeTags: [tag] })}
+              onPin={() => runBulk({ pinned: true }, { isPinned: true })}
+              onUnpin={() => runBulk({ pinned: false }, { isPinned: false })}
+              onArchive={() => runBulk({ isArchived: true }, { isArchived: true })}
+              onUnarchive={() => runBulk({ isArchived: false }, { isArchived: false })}
+              onCancel={clearSelection}
+            />
+          )}
+
           {results.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <Search className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
@@ -622,7 +781,17 @@ export default function Repository() {
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {results.map((entry) => (
-                <ResultCard key={`${entry.entityType}:${entry.entityId}`} entry={entry} onEdit={handleEditRequest} onDelete={setDeletingEntry} />
+                <ResultCard
+                  key={entryKey(entry)}
+                  entry={entry}
+                  folderName={entry.folderId ? (folderNameById.get(entry.folderId) ?? null) : null}
+                  selected={selectedKeys.has(entryKey(entry))}
+                  onToggleSelected={() => toggleSelected(entry)}
+                  onTogglePin={() => toggleEntryPin(entry)}
+                  onToggleArchive={() => toggleEntryArchive(entry)}
+                  onEdit={handleEditRequest}
+                  onDelete={setDeletingEntry}
+                />
               ))}
             </div>
           )}

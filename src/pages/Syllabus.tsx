@@ -6,6 +6,7 @@ import { PYQ_BANK } from '../data/pyq';
 import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
+import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
@@ -28,6 +29,11 @@ const PAGE_COPY: Record<string, { eyebrow: string; description: string }> = {
 
 export default function Syllabus() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  // Phase 6 — this page is shared between APFC and UPSC CSE (see PAGE_COPY above), so its accent
+  // colour must come from the same per-workspace token every other shared surface reads
+  // (lib/workspaceAccent.ts) rather than a hard-coded "brand" blue that was only ever correct for
+  // one of the two workspaces that render this component.
+  const accent = getWorkspaceAccent(activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const toggleTopic = useAppStore((s) => s.toggleTopic);
@@ -114,7 +120,7 @@ export default function Syllabus() {
               </p>
             </div>
             <div className="h-10 w-10">
-              <RadialProgress pct={overallPct} />
+              <RadialProgress pct={overallPct} strokeClassName={accent.solidText} />
             </div>
           </div>
         }
@@ -126,7 +132,10 @@ export default function Syllabus() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search topics or subjects…"
-          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          className={cx(
+            'w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2',
+            accent.focusRing,
+          )}
         />
       </div>
 
@@ -172,7 +181,7 @@ export default function Syllabus() {
                     <div className="border-t border-slate-200/70 dark:border-slate-800 px-4 sm:px-5 py-3">
                       <div className="mb-2 flex justify-end gap-2">
                         <button
-                          className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          className={cx('text-xs font-medium hover:underline', accent.text)}
                           onClick={() => markSubjectTopics(subj.topics.map((t) => t.id), true)}
                         >
                           Mark all done
@@ -192,10 +201,7 @@ export default function Syllabus() {
                             <li
                               key={topic.id}
                               ref={isDeepLinked ? highlightedRef : undefined}
-                              className={cx(
-                                'flex items-center gap-1 rounded-lg transition-colors',
-                                isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60',
-                              )}
+                              className={cx('flex items-center gap-1 rounded-lg transition-colors', isDeepLinked && cx('ring-2', accent.ring))}
                             >
                               <button
                                 onClick={() => toggleTopic(topic.id)}
@@ -224,7 +230,7 @@ export default function Syllabus() {
                               <Link
                                 to={`/notes?topicId=${encodeURIComponent(topic.id)}`}
                                 title="Notes for this topic"
-                                className="shrink-0 rounded-lg p-2 text-slate-300 hover:text-brand-600 dark:text-slate-600 dark:hover:text-brand-400"
+                                className={cx('shrink-0 rounded-lg p-2 text-slate-300 dark:text-slate-600', accent.hoverText)}
                               >
                                 <NotebookPen className="h-4 w-4" />
                               </Link>
@@ -263,7 +269,7 @@ export default function Syllabus() {
   );
 }
 
-function RadialProgress({ pct }: { pct: number }) {
+function RadialProgress({ pct, strokeClassName }: { pct: number; strokeClassName: string }) {
   const r = 16;
   const c = 2 * Math.PI * r;
   const offset = c - (pct / 100) * c;
@@ -278,7 +284,7 @@ function RadialProgress({ pct }: { pct: number }) {
         stroke="currentColor"
         strokeWidth="4"
         strokeLinecap="round"
-        className="text-brand-500"
+        className={strokeClassName}
         strokeDasharray={c}
         initial={{ strokeDashoffset: c }}
         animate={{ strokeDashoffset: offset }}

@@ -7,7 +7,6 @@ import {
   listImportedContentForWorkspace,
   listNotesForWorkspace,
   queryRepository,
-  searchNotes,
   sortRepositoryEntries,
   listRepositoryEntries,
   repositoryEntryFromImportedContent,
@@ -49,6 +48,9 @@ function note(overrides: Partial<Note> = {}): Note {
     pinned: overrides.pinned ?? false,
     workspaceId: overrides.workspaceId,
     topicId: overrides.topicId,
+    folderId: overrides.folderId,
+    tags: overrides.tags,
+    isArchived: overrides.isArchived,
   };
 }
 
@@ -172,6 +174,9 @@ describe('repository — imported-content discovery', () => {
       tags: ['fieldwork', 'chapter-1'],
       category: 'Literature Review',
       description: undefined,
+      folderId: null,
+      isPinned: false,
+      isArchived: false,
     });
   });
 
@@ -222,6 +227,9 @@ describe('repository — Notes discovery', () => {
       tags: [],
       category: undefined,
       description: undefined,
+      folderId: null,
+      isPinned: false,
+      isArchived: false,
     });
   });
 
@@ -283,11 +291,6 @@ describe('repository — search', () => {
     const items = [content({ id: 'c1' })];
     const notes = [note({ id: 'n1', workspaceId: 'phd_research' })];
     expect(queryRepository(items, notes, { workspaceId: 'phd_research', search: '' })).toHaveLength(2);
-  });
-
-  it('searchNotes is case-insensitive and matches title or content', () => {
-    const notes = [note({ id: 'n1', title: 'Literature Review' }), note({ id: 'n2', content: 'a LITERATURE survey' }), note({ id: 'n3', title: 'unrelated' })];
-    expect(searchNotes(notes, 'literature').map((n) => n.id).sort()).toEqual(['n1', 'n2']);
   });
 });
 
@@ -564,5 +567,65 @@ describe('repository — existing APFC functionality regression', () => {
     const notes = [note({ id: 'legacy-n1', workspaceId: undefined })];
     const results = queryRepository([], notes, { workspaceId: 'apfc' });
     expect(results.map((r) => r.entityId)).toEqual(['legacy-n1']);
+  });
+});
+
+// Phase 4 — RepositoryEntry now carries folderId/isPinned/isArchived (projected from
+// ImportedContent.metadata / Note's own fields), and queryRepository filters by them across BOTH
+// collections uniformly.
+describe('repository — Phase 4: folder/pin/archive projection and filtering', () => {
+  it('projects folderId/isPinned/isArchived from ImportedContent.metadata', () => {
+    const item = content({ metadata: { folderId: 'f1', isPinned: true, isArchived: true } });
+    const entry = repositoryEntryFromImportedContent(item);
+    expect(entry.folderId).toBe('f1');
+    expect(entry.isPinned).toBe(true);
+    expect(entry.isArchived).toBe(true);
+  });
+
+  it('projects folderId/isPinned/isArchived from a Note, reusing its existing pinned field', () => {
+    const n = note({ folderId: 'f1', pinned: true, isArchived: true });
+    const entry = repositoryEntryFromNote(n);
+    expect(entry.folderId).toBe('f1');
+    expect(entry.isPinned).toBe(true);
+    expect(entry.isArchived).toBe(true);
+  });
+
+  it('defaults to unfiled/root, not pinned, not archived for items/notes with none set', () => {
+    expect(repositoryEntryFromImportedContent(content({ metadata: undefined }))).toMatchObject({ folderId: null, isPinned: false, isArchived: false });
+    expect(repositoryEntryFromNote(note({}))).toMatchObject({ folderId: null, isPinned: false, isArchived: false });
+  });
+
+  it('queryRepository excludes archived entries from BOTH collections by default', () => {
+    const items = [content({ id: 'archived-doc', metadata: { isArchived: true } }), content({ id: 'active-doc' })];
+    const notes = [note({ id: 'archived-note', isArchived: true, workspaceId: 'phd_research' }), note({ id: 'active-note', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research' });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['active-doc', 'active-note'].sort());
+  });
+
+  it('queryRepository archived: true returns only archived entries from both collections', () => {
+    const items = [content({ id: 'archived-doc', metadata: { isArchived: true } }), content({ id: 'active-doc' })];
+    const notes = [note({ id: 'archived-note', isArchived: true, workspaceId: 'phd_research' }), note({ id: 'active-note', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', archived: true });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['archived-doc', 'archived-note'].sort());
+  });
+
+  it('queryRepository folderId filters both collections to exactly one folder', () => {
+    const items = [content({ id: 'in-folder', metadata: { folderId: 'f1' } }), content({ id: 'elsewhere', metadata: { folderId: 'f2' } })];
+    const notes = [note({ id: 'note-in-folder', folderId: 'f1', workspaceId: 'phd_research' }), note({ id: 'note-elsewhere', folderId: 'f2', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', folderId: 'f1' });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['in-folder', 'note-in-folder'].sort());
+  });
+
+  it('queryRepository pinnedOnly filters both collections to pinned entries', () => {
+    const items = [content({ id: 'pinned-doc', metadata: { isPinned: true } }), content({ id: 'unpinned-doc' })];
+    const notes = [note({ id: 'pinned-note', pinned: true, workspaceId: 'phd_research' }), note({ id: 'unpinned-note', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', pinnedOnly: true });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['pinned-doc', 'pinned-note'].sort());
+  });
+
+  it('folder/archive filters never cross workspaces', () => {
+    const items = [content({ id: 'other-ws', workspaceId: 'apfc', metadata: { folderId: 'f1' } })];
+    const results = queryRepository(items, [], { workspaceId: 'phd_research', folderId: 'f1' });
+    expect(results).toEqual([]);
   });
 });

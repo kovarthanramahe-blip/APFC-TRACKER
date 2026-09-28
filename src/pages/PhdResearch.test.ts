@@ -9,6 +9,7 @@ import {
   selectImportedContentByType,
   type ImportPreview,
 } from '../lib/contentImport';
+import { runFileImport } from '../lib/importPipeline';
 import {
   queryImportedContent,
   getContentTags,
@@ -529,5 +530,185 @@ describe('research document card — related content summary segment composition
     const state = useAppStore.getState();
     const related = countRelatedContent(state.contentRelationships, doc.id, 'imported_content', state.importedContent, state.notes);
     expect(related.total).toBe(0);
+  });
+});
+
+// Phase 3A — pages/PhdResearch.tsx's file selection now runs through lib/importPipeline.ts's
+// runFileImport (extractContentFromFile/buildImportPreview, unchanged, plus hashing + duplicate
+// detection) instead of calling extractContentFromFile/buildImportPreview separately, mirroring
+// components/repository/ImportToRepositoryModal.tsx's own Phase 2 wiring.
+describe('PhD Research — Phase 3A: file selection runs through runFileImport', () => {
+  beforeEach(fullReset);
+
+  it('a supported file still produces an identical preview to the pre-Phase-3A extract+preview calls', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const outcome = await runFileImport(new File(['# Chapter\n\nBody text.'], 'chapter.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(outcome.status).toBe('ok');
+    expect(outcome.preview?.content).toBe('# Chapter\n\nBody text.');
+    expect(outcome.preview?.sourceFilename).toBe('chapter.md');
+  });
+
+  it('an unsupported file still produces the same user-facing error as before', async () => {
+    const outcome = await runFileImport(new File(['irrelevant'], 'photo.jpg'), [], 'phd_research');
+    expect(outcome.status).toBe('error');
+    expect(outcome.error).toMatch(/Unsupported file type/i);
+  });
+
+  it('confirming stamps provenance.sourceHash/sourceFileSize exactly as runFileImport computed them', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const file = new File(['Fieldwork observations.'], 'fieldwork.md');
+    const outcome = await runFileImport(file, useAppStore.getState().importedContent, 'phd_research');
+    expect(outcome.status).toBe('ok');
+
+    const saved = confirmImportedContent(outcome.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: outcome.sourceHash,
+      sourceFileSize: file.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.provenance.sourceHash).toBe(outcome.sourceHash);
+    expect(stored.provenance.sourceFileSize).toBe(file.size);
+  });
+
+  it('re-importing the exact same file surfaces an exactMatch against the previously saved document', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const bytes = 'Identical chapter bytes.';
+    const first = await runFileImport(new File([bytes], 'chapter.md'), useAppStore.getState().importedContent, 'phd_research');
+    const saved = confirmImportedContent(first.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    const second = await runFileImport(new File([bytes], 'chapter.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(second.duplicates?.exactMatch?.id).toBe(saved.id);
+  });
+
+  it('an exact duplicate never blocks saving a second copy — nothing is auto-overwritten', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const bytes = 'Duplicate-tolerant chapter.';
+    const first = await runFileImport(new File([bytes], 'again.md'), useAppStore.getState().importedContent, 'phd_research');
+    const firstSaved = confirmImportedContent(first.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(firstSaved);
+
+    const second = await runFileImport(new File([bytes], 'again.md'), useAppStore.getState().importedContent, 'phd_research');
+    const secondSaved = confirmImportedContent(second.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: second.sourceHash,
+      sourceFileSize: second.size,
+    });
+    useAppStore.getState().addImportedContent(secondSaved);
+
+    expect(useAppStore.getState().importedContent).toHaveLength(2);
+  });
+
+  it('an existing document in a different workspace is never reported as a duplicate', async () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const bytes = 'Cross-workspace bytes.';
+    const first = await runFileImport(new File([bytes], 'shared.md'), useAppStore.getState().importedContent, 'upsc_cse');
+    const saved = confirmImportedContent(first.preview!, {
+      workspaceId: 'upsc_cse',
+      contentType: 'note',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const second = await runFileImport(new File([bytes], 'shared.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(second.duplicates?.exactMatch).toBeNull();
+    expect(second.duplicates?.possibleMatches).toEqual([]);
+  });
+});
+
+// Phase 4C — pages/PhdResearch.tsx now supports folder/pin/archive organisation for research
+// documents, plus bulk actions and folder/pinned/archived filtering via queryImportedContent.
+describe('PhD Research — Phase 4C: organisation (folder/pin/archive/bulk)', () => {
+  beforeEach(fullReset);
+
+  function addDoc(title: string) {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const content = confirmImportedContent(researchPreview({ title }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(content);
+    return content;
+  }
+
+  it('pin/archive toggle mirrors the page\'s own single-item action', () => {
+    const doc = addDoc('Chapter One');
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { isPinned: true });
+    expect(useAppStore.getState().importedContent[0].metadata?.isPinned).toBe(true);
+
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { isArchived: true });
+    expect(useAppStore.getState().importedContent[0].metadata?.isArchived).toBe(true);
+  });
+
+  it('folder-filtering via queryImportedContent finds exactly the documents filed there', () => {
+    const inFolder = addDoc('In Folder');
+    const elsewhere = addDoc('Elsewhere');
+    useAppStore.getState().bulkUpdateImportedContent([inFolder.id], { folderId: 'f1' });
+
+    const results = queryImportedContent(useAppStore.getState().importedContent, { folderId: 'f1' });
+    expect(results.map((r) => r.id)).toEqual([inFolder.id]);
+    expect(results.map((r) => r.id)).not.toContain(elsewhere.id);
+  });
+
+  it('archived documents are excluded from the default query and included in the archived view', () => {
+    const doc = addDoc('Archived Doc');
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { isArchived: true });
+
+    expect(queryImportedContent(useAppStore.getState().importedContent, {})).toEqual([]);
+    expect(queryImportedContent(useAppStore.getState().importedContent, { archived: true }).map((r) => r.id)).toEqual([doc.id]);
+  });
+
+  it('bulk actions apply to multiple documents in one call, never touching unselected ones', () => {
+    const a = addDoc('A');
+    const b = addDoc('B');
+    const c = addDoc('C');
+    useAppStore.getState().bulkUpdateImportedContent([a.id, b.id], { addTags: ['Revision'] });
+
+    const state = useAppStore.getState();
+    expect(state.importedContent.find((d) => d.id === a.id)?.metadata?.tags).toEqual(['Revision']);
+    expect(state.importedContent.find((d) => d.id === b.id)?.metadata?.tags).toEqual(['Revision']);
+    expect(state.importedContent.find((d) => d.id === c.id)?.metadata?.tags).toBeUndefined();
+  });
+
+  it('editing metadata (tags/category) via handleSaveMetadata\'s merge logic preserves folder/pin/archive', () => {
+    const doc = addDoc('Doc');
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { folderId: 'f1', isPinned: true });
+
+    // Mirrors pages/PhdResearch.tsx's handleSaveMetadata exactly: merge onto existing metadata,
+    // only touching tags/category.
+    const editing = useAppStore.getState().importedContent[0];
+    const metadata = { ...editing.metadata };
+    metadata.tags = ['NewTag'];
+    useAppStore.getState().updateImportedContent(doc.id, { metadata });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.tags).toEqual(['NewTag']);
+    expect(stored.metadata?.folderId).toBe('f1');
+    expect(stored.metadata?.isPinned).toBe(true);
+  });
+
+  it('workspace isolation: a document\'s folder/archive state is invisible from another workspace', () => {
+    const doc = addDoc('Isolated Doc');
+    useAppStore.getState().bulkUpdateImportedContent([doc.id], { folderId: 'f1', isArchived: true });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().importedContent).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().importedContent[0].metadata?.folderId).toBe('f1');
+    expect(useAppStore.getState().importedContent[0].metadata?.isArchived).toBe(true);
   });
 });

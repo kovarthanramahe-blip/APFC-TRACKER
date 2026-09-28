@@ -1,12 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink, NotebookPen } from 'lucide-react';
+import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink, NotebookPen, Copy, Archive } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
 import {
-  extractContentFromFile,
-  buildImportPreview,
   confirmImportedContent,
   selectImportedContentByType,
   getImportedContentById,
@@ -16,6 +14,8 @@ import {
   type ImportedContent,
   type ImportedContentMetadata,
 } from '../lib/contentImport';
+import { runFileImport } from '../lib/importPipeline';
+import type { DuplicateMatchResult } from '../lib/importDuplicates';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { LinkedNotesModal } from '../components/phdResearch/LinkedNotesModal';
 import { RelatedContentSummary } from '../components/phdResearch/RelatedContentSummary';
@@ -25,15 +25,23 @@ import {
   collectImportedContentCategories,
   getContentTags,
   getContentCategory,
+  getContentFolderId,
   parseTagsInput,
 } from '../lib/importedContentRepository';
 import { RELATIONSHIP_TYPE_LABELS, getIncomingRelationships, getOutgoingRelationships, type ContentRelationship } from '../lib/contentRelationships';
 import { countRelatedContent } from '../lib/relatedContentSummary';
+import { PinToggle } from '../components/organisation/PinToggle';
+import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
+import { BulkActionBar } from '../components/organisation/BulkActionBar';
+import { SelectionCheckbox } from '../components/organisation/SelectionCheckbox';
+import { buildFolderTree, flattenFolderTree } from '../lib/folders';
 
 // PhD Research workspace repository — the import-first FILE -> EXTRACT -> PREVIEW -> CONFIRM ->
-// SAVE -> DISPLAY pipeline (lib/contentImport.ts), plus repository organisation (search, tags,
-// category — lib/importedContentRepository.ts) so imported documents stay findable as the
-// collection grows. Content type is still hardcoded to 'research_document' (no picker), and raw
+// SAVE -> DISPLAY pipeline, now run through lib/importPipeline.ts's runFileImport (Knowledge
+// Workspace Phase 3A) — a thin composition of the SAME, unchanged extractContentFromFile/
+// buildImportPreview this page always called, plus file hashing (lib/fileHash.ts) and duplicate
+// detection (lib/importDuplicates.ts), matching components/repository/ImportToRepositoryModal.tsx's
+// own Phase 2 wiring. Content type is still hardcoded to 'research_document' (no picker), and raw
 // imported content is still not editable — only organisation metadata (tags/category) is. No AI
 // features. A separate, structured Working Bibliography repository (source records with
 // author/year/DOI/etc.) lives at pages/WorkingBibliography.tsx — see the tab switcher below.
@@ -57,11 +65,16 @@ export default function PhdResearch() {
   const contentRelationships = useAppStore((s) => s.contentRelationships);
   const addContentRelationship = useAppStore((s) => s.addContentRelationship);
   const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
+  const folders = useAppStore((s) => s.folders);
+  const bulkUpdateImportedContent = useAppStore((s) => s.bulkUpdateImportedContent);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [previewFileSizeBytes, setPreviewFileSizeBytes] = useState<number | null>(null);
+  const [previewSourceHash, setPreviewSourceHash] = useState<string | undefined>(undefined);
+  const [previewDuplicates, setPreviewDuplicates] = useState<DuplicateMatchResult | null>(null);
   const [previewTitle, setPreviewTitle] = useState('');
   const [previewTags, setPreviewTags] = useState('');
   const [previewCategory, setPreviewCategory] = useState('');
@@ -73,21 +86,56 @@ export default function PhdResearch() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null | undefined>(undefined);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const researchDocuments = useMemo(() => selectImportedContentByType(importedContent, 'research_document'), [importedContent]);
   const bibliographyRecords = useMemo(() => selectImportedContentByType(importedContent, 'bibliography'), [importedContent]);
   const availableTags = useMemo(() => collectImportedContentTags(researchDocuments), [researchDocuments]);
   const availableCategories = useMemo(() => collectImportedContentCategories(researchDocuments), [researchDocuments]);
+  const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
   const filteredDocuments = useMemo(
-    () => queryImportedContent(researchDocuments, { search: searchQuery, tags: selectedTags, category: selectedCategory || undefined }),
-    [researchDocuments, searchQuery, selectedTags, selectedCategory],
+    () =>
+      queryImportedContent(researchDocuments, {
+        search: searchQuery,
+        tags: selectedTags,
+        category: selectedCategory || undefined,
+        folderId: selectedFolderId,
+        pinnedOnly,
+        archived: showArchived,
+      }),
+    [researchDocuments, searchQuery, selectedTags, selectedCategory, selectedFolderId, pinnedOnly, showArchived],
   );
-  const hasActiveFilters = searchQuery.trim() !== '' || selectedTags.length > 0 || selectedCategory !== '';
+  const hasActiveFilters =
+    searchQuery.trim() !== '' || selectedTags.length > 0 || selectedCategory !== '' || selectedFolderId !== undefined || pinnedOnly || showArchived;
 
   function clearFilters() {
     setSearchQuery('');
     setSelectedTags([]);
     setSelectedCategory('');
+    setSelectedFolderId(undefined);
+    setPinnedOnly(false);
+    setShowArchived(false);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function runBulk(patch: Parameters<typeof bulkUpdateImportedContent>[1]) {
+    bulkUpdateImportedContent([...selectedIds], patch);
+    clearSelection();
   }
 
   function toggleTagFilter(tag: string) {
@@ -114,13 +162,18 @@ export default function PhdResearch() {
     setImportError(null);
     setExtracting(true);
     try {
-      const result = await extractContentFromFile(file);
-      if (result.status === 'error') {
-        setImportError(result.message);
+      // Same extraction as before (extractContentFromFile/buildImportPreview, unchanged) plus the
+      // Knowledge Workspace foundation's hash + duplicate check, in one composed call.
+      const outcome = await runFileImport(file, importedContent, 'phd_research');
+      if (outcome.status === 'error') {
+        setImportError(outcome.error ?? 'This file could not be imported.');
         return;
       }
-      const nextPreview = buildImportPreview(file, result.content);
+      const nextPreview = outcome.preview!;
       setPreview(nextPreview);
+      setPreviewFileSizeBytes(file.size);
+      setPreviewSourceHash(outcome.sourceHash);
+      setPreviewDuplicates(outcome.duplicates ?? null);
       setPreviewTitle(nextPreview.title);
       setPreviewTags('');
       setPreviewCategory('');
@@ -136,9 +189,14 @@ export default function PhdResearch() {
       contentType: 'research_document',
       title: previewTitle.trim() || preview.title,
       metadata: buildMetadata(previewTags, previewCategory),
+      sourceHash: previewSourceHash,
+      sourceFileSize: previewFileSizeBytes ?? undefined,
     });
     addImportedContent(content);
     setPreview(null);
+    setPreviewFileSizeBytes(null);
+    setPreviewSourceHash(undefined);
+    setPreviewDuplicates(null);
     setPreviewTitle('');
     setPreviewTags('');
     setPreviewCategory('');
@@ -146,6 +204,9 @@ export default function PhdResearch() {
 
   function handleCancel() {
     setPreview(null);
+    setPreviewFileSizeBytes(null);
+    setPreviewSourceHash(undefined);
+    setPreviewDuplicates(null);
     setPreviewTitle('');
     setPreviewTags('');
     setPreviewCategory('');
@@ -153,7 +214,17 @@ export default function PhdResearch() {
 
   function handleSaveMetadata(tagsInput: string, categoryInput: string) {
     if (!editing) return;
-    updateImportedContent(editing.id, { metadata: buildMetadata(tagsInput, categoryInput) });
+    // Merges onto the item's EXISTING metadata rather than replacing it wholesale — this form only
+    // has fields for tags/category, so a save here must never silently wipe folderId/isPinned/
+    // isArchived (Phase 4 organisation state) that already exists on `editing.metadata`.
+    const tags = parseTagsInput(tagsInput);
+    const category = categoryInput.trim();
+    const metadata: ImportedContentMetadata = { ...editing.metadata };
+    if (tags.length > 0) metadata.tags = tags;
+    else delete metadata.tags;
+    if (category) metadata.category = category;
+    else delete metadata.category;
+    updateImportedContent(editing.id, { metadata });
     setEditing(null);
   }
 
@@ -212,6 +283,7 @@ export default function PhdResearch() {
           tagsInput={previewTags}
           categoryInput={previewCategory}
           existingCategories={availableCategories}
+          duplicates={previewDuplicates}
           onTitleChange={setPreviewTitle}
           onTagsInputChange={setPreviewTags}
           onCategoryInputChange={setPreviewCategory}
@@ -244,6 +316,28 @@ export default function PhdResearch() {
                 </option>
               ))}
             </select>
+            {folders.length > 0 && (
+              <select
+                value={selectedFolderId === undefined ? '' : (selectedFolderId ?? '__root__')}
+                onChange={(e) => setSelectedFolderId(e.target.value === '' ? undefined : e.target.value === '__root__' ? null : e.target.value)}
+                aria-label="Filter by folder"
+                className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              >
+                <option value="">All folders</option>
+                <option value="__root__">Unfiled (Root)</option>
+                {flattenFolderTree(buildFolderTree(folders, activeWorkspaceId)).map(({ folder, depth }) => (
+                  <option key={folder.id} value={folder.id}>
+                    {'—'.repeat(depth)} {folder.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button variant={pinnedOnly ? 'primary' : 'ghost'} size="sm" onClick={() => setPinnedOnly((v) => !v)} aria-pressed={pinnedOnly}>
+              Pinned
+            </Button>
+            <Button variant={showArchived ? 'primary' : 'ghost'} size="sm" onClick={() => setShowArchived((v) => !v)} aria-pressed={showArchived}>
+              <Archive className="h-3.5 w-3.5" /> Archived
+            </Button>
             {hasActiveFilters && (
               <Button variant="ghost" size="sm" onClick={clearFilters}>
                 <X className="h-3.5 w-3.5" /> Clear filters
@@ -280,6 +374,22 @@ export default function PhdResearch() {
         </Card>
       )}
 
+      {selectedIds.size > 0 && (
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          folders={folders}
+          workspaceId={activeWorkspaceId}
+          onMoveToFolder={(folderId) => runBulk({ folderId })}
+          onAddTag={(tag) => runBulk({ addTags: [tag] })}
+          onRemoveTag={(tag) => runBulk({ removeTags: [tag] })}
+          onPin={() => runBulk({ isPinned: true })}
+          onUnpin={() => runBulk({ isPinned: false })}
+          onArchive={() => runBulk({ isArchived: true })}
+          onUnarchive={() => runBulk({ isArchived: false })}
+          onCancel={clearSelection}
+        />
+      )}
+
       {researchDocuments.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FileText className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
@@ -298,11 +408,21 @@ export default function PhdResearch() {
           {filteredDocuments.map((doc) => {
             const tags = getContentTags(doc);
             const category = getContentCategory(doc);
+            const folderName = getContentFolderId(doc) ? (folderNameById.get(getContentFolderId(doc)!) ?? null) : null;
             const related = countRelatedContent(contentRelationships, doc.id, 'imported_content', importedContent, notes);
             return (
               <Card key={doc.id} className="flex h-full flex-col p-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <SelectionCheckbox selected={selectedIds.has(doc.id)} title={doc.title} onToggleSelected={() => toggleSelected(doc.id)} />
+                  <div className="flex items-center gap-0.5">
+                    <ArchiveToggle archived={doc.metadata?.isArchived ?? false} onToggle={() => bulkUpdateImportedContent([doc.id], { isArchived: !(doc.metadata?.isArchived ?? false) })} size="sm" />
+                    <PinToggle pinned={doc.metadata?.isPinned ?? false} onToggle={() => bulkUpdateImportedContent([doc.id], { isPinned: !(doc.metadata?.isPinned ?? false) })} size="sm" />
+                  </div>
+                </div>
                 <div className="mb-2 flex flex-wrap items-center gap-1.5">
                   <Badge tone="brand">Research Document</Badge>
+                  {folderName && <Badge tone="neutral">{folderName}</Badge>}
+                  {doc.metadata?.isArchived && <Badge tone="neutral">Archived</Badge>}
                   {category && <Badge tone="gold">{category}</Badge>}
                 </div>
                 <h4 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{doc.title}</h4>
@@ -411,6 +531,7 @@ function ImportPreviewPanel({
   tagsInput,
   categoryInput,
   existingCategories,
+  duplicates,
   onTitleChange,
   onTagsInputChange,
   onCategoryInputChange,
@@ -422,6 +543,7 @@ function ImportPreviewPanel({
   tagsInput: string;
   categoryInput: string;
   existingCategories: string[];
+  duplicates?: DuplicateMatchResult | null;
   onTitleChange: (title: string) => void;
   onTagsInputChange: (tags: string) => void;
   onCategoryInputChange: (category: string) => void;
@@ -433,6 +555,25 @@ function ImportPreviewPanel({
   return (
     <Card className="mb-6 p-5">
       <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 mb-4">Review before saving</h3>
+
+      {duplicates?.exactMatch && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <Copy className="h-4 w-4 shrink-0 mt-0.5" />
+          <p>
+            <span className="font-medium">This exact file was already imported</span> as "{duplicates.exactMatch.title}". Saving will add a separate copy —
+            nothing is overwritten or merged automatically.
+          </p>
+        </div>
+      )}
+      {!duplicates?.exactMatch && duplicates && duplicates.possibleMatches.length > 0 && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300">
+          <Copy className="h-4 w-4 shrink-0 mt-0.5 text-slate-400" />
+          <p>
+            <span className="font-medium">Possible duplicate</span> — same filename and size as{' '}
+            {duplicates.possibleMatches.map((m) => `"${m.title}"`).join(', ')}. This is a filename/size match only, not confirmed.
+          </p>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 mb-4">
         <div>

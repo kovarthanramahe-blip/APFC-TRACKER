@@ -15,7 +15,9 @@ import {
   type ImportPreview,
   type PdfPageTextItem,
 } from '../../lib/contentImport';
+import { runFileImport } from '../../lib/importPipeline';
 import { REPOSITORY_CONTENT_TYPE_REGISTRY, type RepositoryContentType } from '../../lib/repository';
+import { queryImportedContent } from '../../lib/importedContentRepository';
 import type { Note } from '../../lib/types';
 
 // This component has no rendering test here (no React Testing Library / DOM environment in this
@@ -506,6 +508,238 @@ describe('Global Repository Import — existing specialised import flows are una
     if (result.status !== 'ok') return;
     useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'My Note', content: result.content.text, createdAt: 'a', updatedAt: 'a', pinned: false });
     expect(useAppStore.getState().notes).toHaveLength(1);
+    expect(useAppStore.getState().importedContent).toEqual([]);
+  });
+});
+
+// Phase 2 — the modal now runs file selection through lib/importPipeline.ts's runFileImport
+// (extractContentFromFile/buildImportPreview, unchanged, plus hashing + duplicate detection)
+// instead of calling extractContentFromFile/buildImportPreview separately. These tests exercise
+// that exact call sequence — same "no rendering, exercise the pipeline calls the component makes"
+// convention as every other describe block in this file.
+describe('Global Repository Import — Phase 2: file selection runs through runFileImport', () => {
+  beforeEach(fullReset);
+
+  it('a supported file still produces an identical preview to the pre-Phase-2 extract+preview calls', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const outcome = await runFileImport(new File(['# Heading\n\nBody text.'], 'notes.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(outcome.status).toBe('ok');
+    expect(outcome.preview?.content).toBe('# Heading\n\nBody text.');
+    expect(outcome.preview?.sourceFilename).toBe('notes.md');
+    expect(outcome.preview?.originalFormat).toBe('markdown');
+  });
+
+  it('an unsupported/malformed file still produces the same user-facing error as before', async () => {
+    const outcome = await runFileImport(new File(['irrelevant'], 'photo.jpg'), [], 'phd_research');
+    expect(outcome.status).toBe('error');
+    expect(outcome.error).toMatch(/Unsupported file type/i);
+  });
+
+  it('.doc is still rejected with its own specific message, unchanged', async () => {
+    const outcome = await runFileImport(new File(['ignored'], 'legacy.doc'), [], 'phd_research');
+    expect(outcome.status).toBe('error');
+    expect(outcome.error).toMatch(/doc/i);
+  });
+
+  it('produces a sourceHash the modal can pass straight through to confirmImportedContent', async () => {
+    const outcome = await runFileImport(new File(['Hash me'], 'hashme.md'), [], 'phd_research');
+    expect(outcome.sourceHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('Global Repository Import — Phase 2: sourceHash/sourceFileSize flow into saved provenance', () => {
+  beforeEach(fullReset);
+
+  it('confirming a file-backed import stamps provenance.sourceHash/sourceFileSize exactly as runFileImport computed them', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const file = new File(['Some fieldwork notes.'], 'fieldwork.md');
+    const outcome = await runFileImport(file, useAppStore.getState().importedContent, 'phd_research');
+    expect(outcome.status).toBe('ok');
+
+    const saved = confirmImportedContent(outcome.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: outcome.sourceHash,
+      sourceFileSize: file.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.provenance.sourceHash).toBe(outcome.sourceHash);
+    expect(stored.provenance.sourceFileSize).toBe(file.size);
+  });
+
+  it('a "note" save never carries sourceHash/sourceFileSize — Note has no provenance field', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const newNote: Note = {
+      id: 'n1',
+      subject: 'general',
+      title: 'A note',
+      content: 'Body',
+      createdAt: 'a',
+      updatedAt: 'a',
+      pinned: false,
+      workspaceId: 'phd_research',
+    };
+    useAppStore.getState().upsertNote(newNote);
+    expect(useAppStore.getState().notes[0]).not.toHaveProperty('provenance');
+  });
+});
+
+describe('Global Repository Import — Phase 2: duplicate detection is advisory, never blocking', () => {
+  beforeEach(fullReset);
+
+  it('re-importing the exact same file surfaces an exactMatch against the previously saved item', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const bytes = 'Identical bytes every time.';
+
+    const first = await runFileImport(new File([bytes], 'thesis.md'), useAppStore.getState().importedContent, 'phd_research');
+    const saved = confirmImportedContent(first.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    const second = await runFileImport(new File([bytes], 'thesis.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(second.duplicates?.exactMatch?.id).toBe(saved.id);
+  });
+
+  it('a genuinely different file produces no duplicate match at all', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const first = await runFileImport(new File(['First version'], 'v1.md'), useAppStore.getState().importedContent, 'phd_research');
+    const saved = confirmImportedContent(first.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    const second = await runFileImport(new File(['Completely different content'], 'v2.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(second.duplicates?.exactMatch).toBeNull();
+    expect(second.duplicates?.possibleMatches).toEqual([]);
+  });
+
+  it('an existing item in a DIFFERENT workspace is never reported as a duplicate', async () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const bytes = 'Same bytes, different workspace.';
+    const first = await runFileImport(new File([bytes], 'shared-name.md'), useAppStore.getState().importedContent, 'upsc_cse');
+    const saved = confirmImportedContent(first.preview!, {
+      workspaceId: 'upsc_cse',
+      contentType: 'note',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const second = await runFileImport(new File([bytes], 'shared-name.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(second.duplicates?.exactMatch).toBeNull();
+    expect(second.duplicates?.possibleMatches).toEqual([]);
+  });
+
+  it('an exact duplicate never prevents saving a second copy — nothing is auto-blocked or overwritten', async () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const bytes = 'Duplicate-tolerant content.';
+    const first = await runFileImport(new File([bytes], 'again.md'), useAppStore.getState().importedContent, 'phd_research');
+    const firstSaved = confirmImportedContent(first.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: first.sourceHash,
+      sourceFileSize: first.size,
+    });
+    useAppStore.getState().addImportedContent(firstSaved);
+
+    const second = await runFileImport(new File([bytes], 'again.md'), useAppStore.getState().importedContent, 'phd_research');
+    expect(second.duplicates?.exactMatch).not.toBeNull();
+    // Saving anyway — the modal's Confirm button is never disabled by a duplicate match.
+    const secondSaved = confirmImportedContent(second.preview!, {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      sourceHash: second.sourceHash,
+      sourceFileSize: second.size,
+    });
+    useAppStore.getState().addImportedContent(secondSaved);
+
+    expect(useAppStore.getState().importedContent).toHaveLength(2);
+    expect(firstSaved.id).not.toBe(secondSaved.id);
+  });
+});
+
+// Phase 4B — the import preview/confirm flow can optionally assign folder/pin/archive at confirm
+// time, for both the ImportedContent path and the Note path. Default behaviour (nothing assigned)
+// stays unchanged from before this stage.
+describe('Global Repository Import — Phase 4B: organisation assignment at import time', () => {
+  beforeEach(fullReset);
+
+  it('confirming without touching folder/pin/archive produces an item identical to before this stage (default behaviour unchanged)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const saved = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: 'research_document', metadata: undefined });
+    useAppStore.getState().addImportedContent(saved);
+    expect(useAppStore.getState().importedContent[0].metadata).toBeUndefined();
+  });
+
+  it('confirming with a folder/pin/archive assignment saves them onto the ImportedContent metadata', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const saved = confirmImportedContent(preview(), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      metadata: { folderId: 'f1', isPinned: true, isArchived: true },
+    });
+    useAppStore.getState().addImportedContent(saved);
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.folderId).toBe('f1');
+    expect(stored.metadata?.isPinned).toBe(true);
+    expect(stored.metadata?.isArchived).toBe(true);
+  });
+
+  it('confirming a "note" import with a folder/pin assignment saves them onto the Note itself', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const newNote: Note = {
+      id: 'n1',
+      subject: 'general',
+      title: 'Imported Note',
+      content: 'Body',
+      createdAt: 'a',
+      updatedAt: 'a',
+      pinned: true,
+      workspaceId: 'phd_research',
+      folderId: 'f1',
+      isArchived: false,
+    };
+    useAppStore.getState().upsertNote(newNote);
+    expect(useAppStore.getState().notes[0].folderId).toBe('f1');
+    expect(useAppStore.getState().notes[0].pinned).toBe(true);
+  });
+
+  it('an archived-at-import item is excluded from the default query and appears in the archived view', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const saved = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: 'research_document', metadata: { isArchived: true } });
+    useAppStore.getState().addImportedContent(saved);
+    expect(queryImportedContent(useAppStore.getState().importedContent, {})).toEqual([]);
+    expect(queryImportedContent(useAppStore.getState().importedContent, { archived: true })).toHaveLength(1);
+  });
+
+  it('a duplicate re-import can still be independently organised — organisation state is per-item, not shared', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const first = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: 'research_document', sourceHash: 'h1', metadata: { folderId: 'f1' } });
+    useAppStore.getState().addImportedContent(first);
+    const second = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: 'research_document', sourceHash: 'h1', metadata: { folderId: 'f2' } });
+    useAppStore.getState().addImportedContent(second);
+
+    expect(useAppStore.getState().importedContent).toHaveLength(2);
+    expect(useAppStore.getState().importedContent.find((i) => i.id === first.id)?.metadata?.folderId).toBe('f1');
+    expect(useAppStore.getState().importedContent.find((i) => i.id === second.id)?.metadata?.folderId).toBe('f2');
+  });
+
+  it('workspace isolation: an import-time folder assignment never leaks across workspaces', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const saved = confirmImportedContent(preview(), { workspaceId: 'upsc_cse', contentType: 'note', metadata: { folderId: 'f1' } });
+    useAppStore.getState().addImportedContent(saved);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
     expect(useAppStore.getState().importedContent).toEqual([]);
   });
 });

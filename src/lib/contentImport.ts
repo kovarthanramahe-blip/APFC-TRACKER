@@ -483,7 +483,33 @@ export interface ImportedContentProvenance {
    * every item before this stage really did come from a file (see confirmImportedContent, the only
    * way to create an ImportedContent before createManualImportedContent existed). */
   origin?: 'import' | 'manual';
+  /** SHA-256 hex digest of the ORIGINAL file's own raw bytes (see lib/fileHash.ts) — present only
+   * when a real File was available to hash at import time; NEVER fabricated for a manually created
+   * record or a programmatic import with no underlying file (see lib/importDuplicates.ts, the one
+   * consumer of this field: its exact-duplicate check simply has nothing to compare when this is
+   * absent, and correctly falls back to the filename+size check instead of guessing). This is
+   * never a hash of `rawContent` (the EXTRACTED text) — hashing the extraction output would give a
+   * false "different file" for two runs of the same file through an evolving extractor, and a false
+   * "same file" for two different files that happen to extract to identical text. */
+  sourceHash?: string;
+  /** The imported file's own byte size, captured alongside sourceFilename/sourceHash at import
+   * time — used by lib/importDuplicates.ts's "possible duplicate" fallback (filename + size) when
+   * no hash is available yet to compare. Absent under the exact same conditions sourceHash is. */
+  sourceFileSize?: number;
+  /** A small integer versioning THIS provenance record's own shape — reserved for a future change
+   * to how import provenance is captured/interpreted, so an older record can be told apart from a
+   * newer one if that's ever needed. Always IMPORT_PIPELINE_VERSION for every record produced by
+   * confirmImportedContent/createManualImportedContent from this stage onward; absent (not
+   * defaulted to 0) on every record created before this field existed, matching this module's own
+   * established convention for `origin`/`updatedAt`. */
+  importVersion?: number;
 }
+
+/** The current version of confirmImportedContent/createManualImportedContent's own OUTPUT SHAPE
+ * (provenance fields, not the app or the extraction logic) — stamped as provenance.importVersion
+ * on every record those two functions produce. Bump this only if a future change to what provenance
+ * captures would need an older record told apart from a newer one; nothing reads this yet. */
+export const IMPORT_PIPELINE_VERSION = 1;
 
 /**
  * The generic, content-type-agnostic slice of an item's metadata — organisation fields every
@@ -513,6 +539,20 @@ export interface ImportedContentMetadata {
    * optional-by-construction and every existing reader that already treats a missing metadata as
    * "no extra info" continues to work unchanged. */
   description?: string;
+  /** Premium Note Organisation, Phase 3B — id of a lib/folders.ts Folder this item is filed under,
+   * resolved against lib/store.ts's workspace-scoped `folders` array; `null`/absent both mean
+   * "unfiled" (shown at the workspace's own root). Never a new top-level ImportedContent field, for
+   * the exact same reason `topicAreaId` above lives here rather than as one. */
+  folderId?: string | null;
+  /** Whether this item is pinned in the Notes/Repository organisation UI — purely a visibility
+   * affordance (see lib/importedContentRepository.ts's own doc comment on isContentPinned): pinning
+   * never duplicates the item into a second record. */
+  isPinned?: boolean;
+  /** Whether this item is archived — archiving only ever changes this flag; it never deletes or
+   * mutates rawContent/provenance, and an archived item still counts as real data everywhere
+   * (export/import, cloud sync). Excluded from the default Notes/Repository view unless the user
+   * explicitly opens the Archived view. */
+  isArchived?: boolean;
   [key: string]: unknown;
 }
 
@@ -610,6 +650,13 @@ export function confirmImportedContent(
     sourceNote?: string;
     metadata?: ImportedContentMetadata;
     importedAt?: string;
+    /** SHA-256 of the original file's bytes (see lib/fileHash.ts) and its byte size — both
+     * optional, both only ever what the caller actually computed from a real File (never
+     * fabricated here). Omitting them is fully backward compatible: every existing caller that
+     * doesn't pass them produces a record identical to before this field existed, just with
+     * `provenance.importVersion` newly stamped (see IMPORT_PIPELINE_VERSION). */
+    sourceHash?: string;
+    sourceFileSize?: number;
   },
 ): ImportedContent {
   const now = options.importedAt ?? new Date().toISOString();
@@ -625,6 +672,9 @@ export function confirmImportedContent(
       importedAt: now,
       sourceNote: options.sourceNote,
       origin: 'import',
+      sourceHash: options.sourceHash,
+      sourceFileSize: options.sourceFileSize,
+      importVersion: IMPORT_PIPELINE_VERSION,
     },
     metadata: options.metadata,
     updatedAt: now,
@@ -659,10 +709,25 @@ export function createManualImportedContent(options: {
       importedAt: now,
       sourceNote: options.sourceNote,
       origin: 'manual',
+      importVersion: IMPORT_PIPELINE_VERSION,
     },
     metadata: options.metadata,
     updatedAt: now,
   };
+}
+
+/**
+ * Whether `item`'s `rawContent` may safely be edited in place — true only for a manually created
+ * record (no original file to preserve, so its rawContent is already user-authored — see
+ * createManualImportedContent), false for anything with a real imported source. This is the SAME
+ * rule pages/WorkingBibliography.tsx's own edit form already applies inline before ever calling
+ * updateImportedContent with a `rawContent` change — exported here, generically, so a future
+ * editable-content feature for ANY content type (not just bibliography) can reuse the identical
+ * invariant rather than re-deriving it per call site. No editor is built here — this establishes
+ * only the safe interface a later one must check before ever touching rawContent.
+ */
+export function isSourceEditable(item: ImportedContent): boolean {
+  return item.provenance.origin === 'manual';
 }
 
 // ============================================================================================

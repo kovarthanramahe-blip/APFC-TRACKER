@@ -17,6 +17,9 @@ import { getLocalDateString } from './utils';
 import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
 import type { ImportedContent } from './contentImport';
+import { applyImportedContentOrganizationPatch, type ImportedContentOrganizationPatch } from './importedContentRepository';
+import { applyNoteOrganizationPatch, type NoteOrganizationPatch } from './noteOrganization';
+import { type Folder, deleteFolderFromList, renameFolder as renameFolderInList } from './folders';
 import {
   createRelationship as createContentRelationship,
   type ContentRelationship,
@@ -25,6 +28,9 @@ import {
   type RelationshipType,
 } from './contentRelationships';
 import type { RepositoryImportPlan } from './repositoryImport';
+import type { Annotation, NormalizedPoint } from './annotations';
+import { isGeometryAnnotation } from './annotations';
+import { sanitizeAnnotations } from './annotationSanitize';
 import type { UpscCseCoverageState, UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
 import {
@@ -137,6 +143,11 @@ interface AppState {
   // deleteImportedContent below, so a deleted note never leaves a dangling relationship behind.
   deleteNote: (id: string) => void;
   togglePinNote: (id: string) => void;
+  // Premium Note Organisation (Phase 3B) — folder/tag/pin/archive changes for one or many notes in
+  // a single set() call (see lib/noteOrganization.ts's applyNoteOrganizationPatch, the pure
+  // function this applies per-note). The single-item card UI and multi-select bulk actions both go
+  // through this one action, never a separate single-item variant.
+  bulkUpdateNotes: (ids: string[], patch: NoteOrganizationPatch) => void;
 
   // Mock tests
   attempts: MockTestAttempt[];
@@ -237,6 +248,24 @@ interface AppState {
   // Cascade-deletes any relationship referencing this id too (see contentRelationships below) —
   // otherwise a deleted item would leave dangling relationships pointing at nothing.
   deleteImportedContent: (id: string) => void;
+  // Premium Note Organisation (Phase 3B) — the ImportedContent mirror of bulkUpdateNotes above (see
+  // lib/importedContentRepository.ts's applyImportedContentOrganizationPatch). Only ever touches
+  // `metadata`/`updatedAt` — never rawContent/provenance, preserving source immutability.
+  bulkUpdateImportedContent: (ids: string[], patch: ImportedContentOrganizationPatch) => void;
+
+  // Premium Note Organisation (Phase 3B) — a workspace-scoped folder tree shared by Notes and
+  // ImportedContent (see lib/folders.ts). Workspace-owned exactly like notes/importedContent above.
+  // Deleting a folder never silently deletes its contents: `contentAction` decides what happens to
+  // every Note/ImportedContent item currently filed under it (and to its own direct child folders,
+  // which are ALWAYS promoted to its parent — never recursively deleted, see lib/folders.ts's own
+  // header) — 'moveToParent' re-files them under the deleted folder's own parent (root, if it was
+  // itself a root folder); there is no separate "move to root" variant because a root folder's own
+  // parent already IS root. The caller (Notes.tsx) is the one place "cancel" is enforced: it simply
+  // never calls this action unless the user explicitly confirmed.
+  folders: Folder[];
+  addFolder: (folder: Folder) => void;
+  renameFolder: (id: string, name: string) => void;
+  deleteFolder: (id: string, contentAction: 'moveToParent') => void;
 
   // Repository relationships: a minimal, generic relationship between two entities in the PhD
   // Research repository, workspace-scoped exactly like importedContent itself (archived/restored by
@@ -263,6 +292,26 @@ interface AppState {
   // half-applied import — either the whole plan merges in this one set() call, or (the user
   // cancels, so this is never called) nothing changes at all.
   applyRepositoryImportPlan: (plan: RepositoryImportPlan) => void;
+
+  // Premium Study Reader (Phase 7) — text-anchored (highlight/underline/strikethrough/note),
+  // geometry-anchored (ink/highlighter/shape/arrow), and page-level (sticky note/bookmark)
+  // annotations over a Repository content entry (pages/RepositoryDetail.tsx), keyed by documentId
+  // (`${entityType}:${entityId}`, the same compound key that page already uses — see
+  // lib/annotations.ts for the full domain model and lib/textAnchor.ts for how text is anchored).
+  // Workspace-owned exactly like importedContent/notes above. Stroke history for undo/redo is
+  // deliberately NOT stored here — that's ephemeral per-session UI state (see
+  // components/annotations), never persisted, per this feature's own "only annotation history,
+  // never an app-wide undo system" scope.
+  annotations: Annotation[];
+  addAnnotation: (annotation: Annotation) => void;
+  /** Applies only to a textNote/stickyNote annotation (the two annotation types with editable
+   * `text`) — a no-op on any other annotation id, never silently mutates the wrong type. */
+  updateAnnotationText: (id: string, text: string) => void;
+  /** Applies only to a geometry-anchored annotation (ink/highlighter/shape/arrow — the ones with a
+   * `points` array) — a no-op on any other annotation id. Used by the Phase F lasso tool's "move
+   * selection" action; the points passed in are already-clamped normalized coordinates. */
+  updateAnnotationPoints: (id: string, points: NormalizedPoint[]) => void;
+  deleteAnnotation: (id: string) => void;
 
   // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
   // for now — there is still no switcher UI (Stage 2 makes the mechanism real and tested; a later
@@ -319,6 +368,8 @@ interface WorkspaceOwnedData {
   revisionQueue: RevisionQueue;
   importedContent: ImportedContent[];
   contentRelationships: ContentRelationship[];
+  annotations: Annotation[];
+  folders: Folder[];
 }
 
 function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
@@ -345,6 +396,8 @@ function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
     revisionQueue: createRevisionQueue(),
     importedContent: [],
     contentRelationships: [],
+    annotations: [],
+    folders: [],
   };
 }
 
@@ -470,7 +523,17 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // backfillImportedContentUpdatedAt, reached both at the top-level active `importedContent` field
 // and inside every archived inactiveWorkspaceOwnedData snapshot (same withWorkspaceOwnedDefaults
 // path every other per-item backfill above already uses).
-export const APP_STORE_PERSIST_VERSION = 12;
+// Version 14 (Premium Note Organisation, Phase 3B) adds `folders` (Folder[] — see lib/folders.ts)
+// the exact same way as importedContent/contentRelationships/etc. before it: another brand-new,
+// workspace-owned field with nothing pre-existing to migrate (no prior version could have ever
+// produced a folder), defaulted to `[]` at both the top-level active field and inside every
+// inactiveWorkspaceOwnedData snapshot. Note.folderId/tags/isArchived and
+// ImportedContentMetadata.folderId/isPinned/isArchived are all NEW but purely additive optional
+// fields on EXISTING array items (not new top-level fields), so — exactly like Version 12's
+// ImportedContent.updatedAt before this version bump existed for it — they need no migration step
+// of their own: every reader already treats a missing optional field as its own documented default
+// (see each field's own doc comment in lib/types.ts / lib/contentImport.ts).
+export const APP_STORE_PERSIST_VERSION = 14;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -523,9 +586,11 @@ function backfillImportedContentUpdatedAt(value: unknown): unknown {
  * stamped — see stampRelationshipEntityTypes), `upscCseSyllabusCoverage: {}` (plus, for whatever
  * coverage entries already exist, the granular roll-up backfill — see migrateGranularCoverageBackfill),
  * `upscCsePrelimsPyqAttempts: []`, `upscCseStudyTasks: []`, `phdResearchStartDate`,
- * `phdTopicAreas: []`, and `phdMicroTargets: []` onto a workspace-owned data snapshot that predates
- * one or more of these — used for both the active top-level state and every archived snapshot
- * inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
+ * `phdTopicAreas: []`, `phdMicroTargets: []`, and (Version 13) a SANITISED `annotations: []` (see
+ * lib/annotationSanitize.ts — drops/repairs any record with an unrecognised type, missing anchor,
+ * or invalid geometry rather than trusting the persisted shape blindly) onto a workspace-owned data
+ * snapshot that predates one or more of these — used for both the active top-level state and every
+ * archived snapshot inside inactiveWorkspaceOwnedData (see withWorkspaceOwnedDefaultsInArchive). */
 function withWorkspaceOwnedDefaults(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
   const snapshot = value;
@@ -541,6 +606,8 @@ function withWorkspaceOwnedDefaults(value: unknown): unknown {
     phdResearchStartDate: typeof snapshot.phdResearchStartDate === 'string' ? snapshot.phdResearchStartDate : PHD_RESEARCH_START_DATE_DEFAULT,
     phdTopicAreas: Array.isArray(snapshot.phdTopicAreas) ? snapshot.phdTopicAreas : [],
     phdMicroTargets: Array.isArray(snapshot.phdMicroTargets) ? snapshot.phdMicroTargets : [],
+    annotations: sanitizeAnnotations(snapshot.annotations),
+    folders: Array.isArray(snapshot.folders) ? snapshot.folders : [],
   };
 }
 
@@ -587,6 +654,7 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     phdResearchStartDate: typeof state.phdResearchStartDate === 'string' ? state.phdResearchStartDate : PHD_RESEARCH_START_DATE_DEFAULT,
     phdTopicAreas: Array.isArray(state.phdTopicAreas) ? state.phdTopicAreas : [],
     phdMicroTargets: Array.isArray(state.phdMicroTargets) ? state.phdMicroTargets : [],
+    folders: Array.isArray(state.folders) ? state.folders : [],
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: withWorkspaceOwnedDefaultsInArchive(state.inactiveWorkspaceOwnedData),
   };
@@ -681,6 +749,12 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           notes: state.notes.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n)),
         })),
+      bulkUpdateNotes: (ids, patch) =>
+        set((state) => {
+          const idSet = new Set(ids);
+          const now = new Date().toISOString();
+          return { notes: state.notes.map((n) => (idSet.has(n.id) ? applyNoteOrganizationPatch(n, patch, now) : n)) };
+        }),
 
       attempts: [],
       addAttempt: (attempt) =>
@@ -843,6 +917,30 @@ export const useAppStore = create<AppState>()(
             (r) => !((r.sourceId === id && r.sourceType === 'imported_content') || (r.targetId === id && r.targetType === 'imported_content')),
           ),
         })),
+      bulkUpdateImportedContent: (ids, patch) =>
+        set((state) => {
+          const idSet = new Set(ids);
+          const now = new Date().toISOString();
+          return { importedContent: state.importedContent.map((c) => (idSet.has(c.id) ? applyImportedContentOrganizationPatch(c, patch, now) : c)) };
+        }),
+
+      folders: [],
+      addFolder: (folder) => set((state) => ({ folders: [folder, ...state.folders] })),
+      renameFolder: (id, name) => set((state) => ({ folders: renameFolderInList(state.folders, id, name) })),
+      deleteFolder: (id, _contentAction) =>
+        set((state) => {
+          const target = state.folders.find((f) => f.id === id);
+          if (!target) return {};
+          const promotedParentId = target.parentId;
+          const now = new Date().toISOString();
+          return {
+            folders: deleteFolderFromList(state.folders, id, now),
+            notes: state.notes.map((n) => (n.folderId === id ? { ...n, folderId: promotedParentId, updatedAt: now } : n)),
+            importedContent: state.importedContent.map((c) =>
+              c.metadata?.folderId === id ? { ...c, metadata: { ...c.metadata, folderId: promotedParentId }, updatedAt: now } : c,
+            ),
+          };
+        }),
 
       contentRelationships: [],
       addContentRelationship: (input) => {
@@ -870,6 +968,18 @@ export const useAppStore = create<AppState>()(
           importedContent: [...plan.importedContentToAdd, ...state.importedContent],
           contentRelationships: [...plan.relationshipsToAdd, ...state.contentRelationships],
         })),
+
+      annotations: [],
+      addAnnotation: (annotation) => set((state) => ({ annotations: [annotation, ...state.annotations] })),
+      updateAnnotationText: (id, text) =>
+        set((state) => ({
+          annotations: state.annotations.map((a) => (a.id === id && (a.type === 'textNote' || a.type === 'stickyNote') ? { ...a, text, updatedAt: new Date().toISOString() } : a)),
+        })),
+      updateAnnotationPoints: (id, points) =>
+        set((state) => ({
+          annotations: state.annotations.map((a) => (a.id === id && isGeometryAnnotation(a) ? { ...a, points, updatedAt: new Date().toISOString() } : a)),
+        })),
+      deleteAnnotation: (id) => set((state) => ({ annotations: state.annotations.filter((a) => a.id !== id) })),
 
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
       inactiveWorkspaceOwnedData: {},
@@ -908,6 +1018,8 @@ export const useAppStore = create<AppState>()(
             revisionQueue: state.revisionQueue,
             importedContent: state.importedContent,
             contentRelationships: state.contentRelationships,
+            annotations: state.annotations,
+            folders: state.folders,
           };
           const incoming = state.inactiveWorkspaceOwnedData[id] ?? emptyWorkspaceOwnedData();
           return {
@@ -941,6 +1053,8 @@ export const useAppStore = create<AppState>()(
           revisionQueue: createRevisionQueue(),
           importedContent: [],
           contentRelationships: [],
+          annotations: [],
+          folders: [],
           // Multi-Workspace OS, Stage 2 — "reset ALL data" means every workspace's data, not just
           // the active one's; a no-op today since nothing has ever populated this archive.
           inactiveWorkspaceOwnedData: {},
@@ -981,6 +1095,8 @@ export function exportAllData() {
     revisionQueue: state.revisionQueue,
     importedContent: state.importedContent,
     contentRelationships: state.contentRelationships,
+    annotations: state.annotations,
+    folders: state.folders,
     // Multi-Workspace OS, Stage 2 — activeWorkspaceId travels WITH the flat fields above (notes,
     // completedTopics, etc.) because they only mean "this workspace's data" together with it; and
     // every OTHER workspace's archived data is equally real user data (see AppState's doc-comment)
@@ -1019,6 +1135,8 @@ export function importAllData(json: string) {
     revisionQueue: data.revisionQueue ?? createRevisionQueue(),
     importedContent: backfillImportedContentUpdatedAt(data.importedContent ?? []) as ImportedContent[],
     contentRelationships: data.contentRelationships ?? [],
+    annotations: sanitizeAnnotations(data.annotations),
+    folders: data.folders ?? [],
     activeWorkspaceId: (data.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: data.inactiveWorkspaceOwnedData ?? {},
   });

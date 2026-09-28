@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   RELATIONSHIP_TYPES,
   RELATIONSHIP_ENTITY_TYPES,
+  MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES,
   createRelationship,
   deleteRelationship,
   getOutgoingRelationships,
@@ -45,6 +46,23 @@ describe('RELATIONSHIP_TYPES / RELATIONSHIP_ENTITY_TYPES', () => {
   it('supports imported_content and note entity types', () => {
     expect(RELATIONSHIP_ENTITY_TYPES).toContain('imported_content');
     expect(RELATIONSHIP_ENTITY_TYPES).toContain('note');
+  });
+
+  it('includes links_to for wiki-link-created relationships', () => {
+    expect(RELATIONSHIP_TYPES).toContain('links_to');
+  });
+});
+
+describe('MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES', () => {
+  it('excludes links_to — that type is only ever created/removed by lib/backlinks.ts', () => {
+    expect(MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES).not.toContain('links_to');
+  });
+
+  it('includes every other declared relationship type', () => {
+    for (const t of RELATIONSHIP_TYPES) {
+      if (t === 'links_to') continue;
+      expect(MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES).toContain(t);
+    }
   });
 });
 
