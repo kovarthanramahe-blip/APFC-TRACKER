@@ -268,8 +268,22 @@ export default function UpscCsePyqTest() {
   useEffect(() => {
     setSubject('all');
   }, [year, paper]);
+  // Phase 6 — Competitive Exam Intelligence: fixed a pre-existing bug found while verifying the
+  // new Syllabus "N PYQs" practice link (pages/UpscCseSyllabus.tsx) end-to-end. This effect must
+  // reset microsyllabusId when subject/year/paper ACTUALLY change, but comparing against a
+  // one-shot "have I run before" ref is not safe under React StrictMode's development-only double
+  // invocation of a freshly-mounted effect: the second invocation sees the SAME subject/year/paper
+  // (nothing really changed) and would still fire, silently wiping out an incoming ?microsyllabusId=
+  // deep link (lib/upscCseTodaysStudy.ts's weak-area items, pages/UpscCseSyllabus.tsx's own "N
+  // PYQs" link) the instant the page loads. Comparing against the last values this effect actually
+  // SAW is safe regardless of how many times it fires with unchanged dependencies.
+  const lastSubjectFiltersRef = useRef({ subject, year, paper });
   useEffect(() => {
-    setMicrosyllabusId('all');
+    const last = lastSubjectFiltersRef.current;
+    if (last.subject !== subject || last.year !== year || last.paper !== paper) {
+      setMicrosyllabusId('all');
+    }
+    lastSubjectFiltersRef.current = { subject, year, paper };
   }, [subject, year, paper]);
 
   const availableCountOptions = COUNT_OPTIONS.filter((n) => n <= filtered.length);

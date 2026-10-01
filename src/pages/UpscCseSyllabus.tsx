@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ListTree, Search, Sparkles, Link2 } from 'lucide-react';
+import { ChevronDown, ListTree, Search, Sparkles, Link2, Target } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, ProgressBar, PageHeader, Badge } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
 import { listImportedContentBySyllabusNode } from '../lib/repository';
+import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
+import { getMicrosyllabusCounts } from '../lib/upscCsePrelimsPyqFilters';
+import { computeUpscCsePrelimsPerformance, type UpscCsePrelimsMicrosyllabusPerformance } from '../lib/upscCsePrelimsPyqPerformance';
 import {
   getPapersForStage,
   getSubjectsForPaper,
@@ -305,6 +308,14 @@ function GranularTopicRow({
   );
 }
 
+// Competitive Exam Intelligence — the same "enough real attempt data to mean something" / "good
+// enough accuracy" thresholds pages/UpscCseDashboard.tsx's Today's Study weak-area detection
+// already established (lib/upscCseTodaysStudy.ts's own minWeakAreaAttempts/
+// weakAreaAccuracyThreshold defaults of 2/50) — reused here for the performance badge's visibility
+// and tone so this page never invents a second, conflicting definition of "enough data"/"weak".
+const MIN_PYQ_ATTEMPTS_FOR_BADGE = 2;
+const WEAK_ACCURACY_THRESHOLD = 50;
+
 function MicrosyllabusRow({
   item,
   paper,
@@ -315,6 +326,8 @@ function MicrosyllabusRow({
   deepLinkRef,
   query,
   deepLinkGranularId,
+  pyqCount,
+  pyqPerformance,
 }: {
   item: UpscCseMicrosyllabusItem;
   paper: UpscCseSyllabusPaper;
@@ -325,6 +338,8 @@ function MicrosyllabusRow({
   deepLinkRef?: React.Ref<HTMLLIElement>;
   query: string;
   deepLinkGranularId?: string;
+  pyqCount: number;
+  pyqPerformance?: UpscCsePrelimsMicrosyllabusPerformance;
 }) {
   const hasGranular = microsyllabusHasGranularNodes(UPSC_CSE_GRANULAR_NODES, item.id);
   // Subject colour identity (Knowledge Library Phase 2) — the microsyllabus row gets the lighter
@@ -340,6 +355,7 @@ function MicrosyllabusRow({
   // empty topic gets no badge at all, never a visible "0 linked").
   const importedContent = useAppStore((s) => s.importedContent);
   const linkedCount = useMemo(() => listImportedContentBySyllabusNode(importedContent, item.id).length, [importedContent, item.id]);
+  const hasPerformanceSignal = !!pyqPerformance && pyqPerformance.attempted >= MIN_PYQ_ATTEMPTS_FOR_BADGE;
   const [isOpen, setIsOpen] = useState(isDeepLinked || !!deepLinkGranularId);
   // Every hook this component might need is called unconditionally, before the branch below, so
   // hook order never changes between a granularized and non-granularized render (React's Rules of
@@ -372,13 +388,36 @@ function MicrosyllabusRow({
           </p>
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{item.title}</p>
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{item.description}</p>
-          {linkedCount > 0 && (
-            <Link
-              to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
-              className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
-            >
-              <Link2 className="h-3 w-3" /> {linkedCount} linked
-            </Link>
+          {(linkedCount > 0 || pyqCount > 0) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {linkedCount > 0 && (
+                <Link
+                  to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  <Link2 className="h-3 w-3" /> {linkedCount} linked
+                </Link>
+              )}
+              {pyqCount > 0 && (
+                <Link
+                  to={`/upsc-pyq-test?microsyllabusId=${encodeURIComponent(item.id)}`}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  <Target className="h-3 w-3" /> {pyqCount} PYQ{pyqCount === 1 ? '' : 's'}
+                </Link>
+              )}
+              {hasPerformanceSignal && pyqPerformance && (
+                <span
+                  title={`${pyqPerformance.attempted} attempted, ${pyqPerformance.accuracy.toFixed(0)}% accuracy`}
+                  className={cx(
+                    'text-[11px] font-semibold tabular-nums',
+                    pyqPerformance.accuracy >= WEAK_ACCURACY_THRESHOLD ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
+                  )}
+                >
+                  {pyqPerformance.accuracy.toFixed(0)}% accuracy
+                </span>
+              )}
+            </div>
           )}
         </div>
         <CoverageStatePicker value={state} onChange={(next) => onSetCoverage(item.id, next)} />
@@ -419,14 +458,37 @@ function MicrosyllabusRow({
       {/* Outside the toggle <button> (an <a> nested inside a <button> is invalid HTML and would
           swallow keyboard activation) — shown unconditionally whenever something is linked, never
           gated behind expansion, so "what knowledge is connected" is answerable at a glance exactly
-          like the non-granular branch above already does. */}
-      {linkedCount > 0 && (
-        <Link
-          to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
-          className="flex items-center gap-1 px-2 pb-2 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
-        >
-          <Link2 className="h-3 w-3" /> {linkedCount} linked
-        </Link>
+          like the non-granular branch above already does. Same for PYQ coverage/performance. */}
+      {(linkedCount > 0 || pyqCount > 0) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 pb-2">
+          {linkedCount > 0 && (
+            <Link
+              to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
+              className="flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+            >
+              <Link2 className="h-3 w-3" /> {linkedCount} linked
+            </Link>
+          )}
+          {pyqCount > 0 && (
+            <Link
+              to={`/upsc-pyq-test?microsyllabusId=${encodeURIComponent(item.id)}`}
+              className="flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+            >
+              <Target className="h-3 w-3" /> {pyqCount} PYQ{pyqCount === 1 ? '' : 's'}
+            </Link>
+          )}
+          {hasPerformanceSignal && pyqPerformance && (
+            <span
+              title={`${pyqPerformance.attempted} attempted, ${pyqPerformance.accuracy.toFixed(0)}% accuracy`}
+              className={cx(
+                'text-[11px] font-semibold tabular-nums',
+                pyqPerformance.accuracy >= WEAK_ACCURACY_THRESHOLD ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
+              )}
+            >
+              {pyqPerformance.accuracy.toFixed(0)}% accuracy
+            </span>
+          )}
+        </div>
       )}
       {expanded && (
         <div className="border-t border-slate-200/70 dark:border-slate-800 px-2 py-2">
@@ -471,6 +533,8 @@ function SubjectSection({
   deepLinkMicrosyllabusId,
   deepLinkGranularId,
   deepLinkRef,
+  pyqCountByMicrosyllabus,
+  pyqPerformanceByMicrosyllabus,
 }: {
   tree: UpscCseSyllabusTree;
   paper: UpscCseSyllabusPaper;
@@ -483,6 +547,8 @@ function SubjectSection({
   deepLinkMicrosyllabusId?: string;
   deepLinkGranularId?: string;
   deepLinkRef?: React.Ref<HTMLLIElement>;
+  pyqCountByMicrosyllabus: Map<string, number>;
+  pyqPerformanceByMicrosyllabus: Map<string, UpscCsePrelimsMicrosyllabusPerformance>;
 }) {
   const allItems = useMemo(() => getMicrosyllabusForSubject(tree, subject.id), [tree, subject.id]);
   const items = useMemo(
@@ -552,6 +618,8 @@ function SubjectSection({
                       ? deepLinkGranularId
                       : undefined
                   }
+                  pyqCount={pyqCountByMicrosyllabus.get(item.id) ?? 0}
+                  pyqPerformance={pyqPerformanceByMicrosyllabus.get(item.id)}
                 />
               ))}
               {items.length === 0 && <li className="py-3 text-center text-xs text-slate-400">No microsyllabus items match "{query}".</li>}
@@ -572,6 +640,8 @@ function PaperSection({
   deepLinkMicrosyllabusId,
   deepLinkGranularId,
   deepLinkRef,
+  pyqCountByMicrosyllabus,
+  pyqPerformanceByMicrosyllabus,
 }: {
   tree: UpscCseSyllabusTree;
   paper: UpscCseSyllabusPaper;
@@ -581,6 +651,8 @@ function PaperSection({
   deepLinkMicrosyllabusId?: string;
   deepLinkGranularId?: string;
   deepLinkRef?: React.Ref<HTMLLIElement>;
+  pyqCountByMicrosyllabus: Map<string, number>;
+  pyqPerformanceByMicrosyllabus: Map<string, UpscCsePrelimsMicrosyllabusPerformance>;
 }) {
   const subjects = useMemo(() => getSubjectsForPaper(tree, paper.id), [tree, paper.id]);
   const microsyllabusIds = useMemo(() => tree.microsyllabus.filter((m) => m.paperId === paper.id).map((m) => m.id), [tree, paper.id]);
@@ -650,6 +722,8 @@ function PaperSection({
                   deepLinkMicrosyllabusId={deepLinkMicrosyllabusId}
                   deepLinkGranularId={deepLinkGranularId}
                   deepLinkRef={deepLinkRef}
+                  pyqCountByMicrosyllabus={pyqCountByMicrosyllabus}
+                  pyqPerformanceByMicrosyllabus={pyqPerformanceByMicrosyllabus}
                 />
               ))}
             </div>
@@ -674,6 +748,25 @@ export default function UpscCseSyllabus() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const coverage = useAppStore((s) => s.upscCseSyllabusCoverage);
   const setUpscCseCoverageState = useAppStore((s) => s.setUpscCseCoverageState);
+  const pyqAttempts = useAppStore((s) => s.upscCsePrelimsPyqAttempts);
+
+  // Competitive Exam Intelligence — PYQ coverage (item #1) + performance (item #2) per
+  // microsyllabus, computed ONCE here (never per-row) and threaded down through
+  // PaperSection/SubjectSection exactly like `coverage` already is. Reuses lib/
+  // upscCsePrelimsPyqFilters.ts's existing getMicrosyllabusCounts and lib/
+  // upscCsePrelimsPyqPerformance.ts's existing computeUpscCsePrelimsPerformance verbatim — the
+  // SAME aggregation pages/UpscCseDashboard.tsx's "Today's Study" weak-area detection and
+  // pages/UpscCsePyqTest.tsx's own Performance view already use. UPSC CSE's PYQ bank only has
+  // Prelims questions mapped today, so a Mains microsyllabus id simply has no entry in either map
+  // — never fabricated, just honestly absent (both lookups below already degrade to "no badge").
+  const pyqCountByMicrosyllabus = useMemo(() => {
+    const counts = getMicrosyllabusCounts(UPSC_CSE_PRELIMS_PYQ_BANK, 'all', 'all', 'all');
+    return new Map(counts.map((c) => [c.id, c.count]));
+  }, []);
+  const pyqPerformanceByMicrosyllabus = useMemo(() => {
+    const perf = computeUpscCsePrelimsPerformance(UPSC_CSE_PRELIMS_PYQ_BANK, pyqAttempts, UPSC_CSE_PRELIMS_SYLLABUS);
+    return new Map((perf?.microsyllabus ?? []).map((m) => [m.microsyllabusId, m]));
+  }, [pyqAttempts]);
 
   const [searchParams] = useSearchParams();
   const deepLinkGranularId = searchParams.get('granularId') ?? undefined;
@@ -806,6 +899,8 @@ export default function UpscCseSyllabus() {
             deepLinkMicrosyllabusId={deepLinkMicrosyllabusId}
             deepLinkGranularId={deepLinkGranularId}
             deepLinkRef={deepLinkRef}
+            pyqCountByMicrosyllabus={pyqCountByMicrosyllabus}
+            pyqPerformanceByMicrosyllabus={pyqPerformanceByMicrosyllabus}
           />
         ))}
       </div>

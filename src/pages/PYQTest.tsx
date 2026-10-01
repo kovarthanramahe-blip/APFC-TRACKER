@@ -129,9 +129,20 @@ export default function PYQTest() {
   const autoStartWeakTopicsRef = useRef(false);
   const autoStartRepeatedMistakesRef = useRef(false);
 
-  const [year, setYear] = useState<number | 'all'>(AVAILABLE_YEARS[0]);
+  // Phase 6 — Competitive Exam Intelligence: /pyq-test?topicId=... (pages/Syllabus.tsx's new
+  // "Practice PYQs" entry point) pre-selects that topic filter, read once on mount exactly like
+  // UpscCsePyqTest.tsx's own ?microsyllabusId= deep link. An unrecognised/absent topicId falls back
+  // to 'all', never a blank/broken filter. When arriving this way, `year` also defaults to 'all'
+  // (rather than the most recent year) so every historical PYQ for the topic is visible, not just
+  // one year's worth — the filter UI remains fully adjustable afterwards either way.
+  const initialTopicId = useMemo(() => {
+    const requested = searchParams.get('topicId');
+    return requested && SYLLABUS.some((s) => s.topics.some((t) => t.id === requested)) ? requested : 'all';
+  }, [searchParams]);
+
+  const [year, setYear] = useState<number | 'all'>(initialTopicId !== 'all' ? 'all' : AVAILABLE_YEARS[0]);
   const [subject, setSubject] = useState<SubjectColorKey | 'all'>('all');
-  const [topicId, setTopicId] = useState<string | 'all'>('all');
+  const [topicId, setTopicId] = useState<string | 'all'>(initialTopicId);
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>('all');
   const [countChoice, setCountChoice] = useState<CountChoice>(10);
 
@@ -179,9 +190,19 @@ export default function PYQTest() {
   );
   const subjectPoolCount = topicCounts.reduce((sum, t) => sum + t.count, 0);
 
-  // Reset topic whenever the subject (or year) changes, since the old topic may no longer apply.
+  // Reset topic whenever the subject (or year) ACTUALLY changes, since the old topic may no longer
+  // apply — but not on first mount (which would otherwise immediately wipe out an incoming
+  // ?topicId= deep link the instant this effect first runs), and not on React StrictMode's
+  // development-only double-invocation of a fresh effect (which re-runs this effect a second time
+  // with the SAME subject/year, not changed ones). Comparing against the last subject/year this
+  // effect actually SAW (rather than a one-shot "have I run before" ref) is naturally safe against
+  // both: a same-value re-invocation never looks like a change, however many times it fires.
+  const lastFiltersRef = useRef({ subject, year });
   useEffect(() => {
-    setTopicId('all');
+    if (lastFiltersRef.current.subject !== subject || lastFiltersRef.current.year !== year) {
+      setTopicId('all');
+    }
+    lastFiltersRef.current = { subject, year };
   }, [subject, year]);
 
   const availableCountOptions = COUNT_OPTIONS.filter((n) => n <= filtered.length);
