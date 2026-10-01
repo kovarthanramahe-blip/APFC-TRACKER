@@ -477,6 +477,16 @@ export default function Repository() {
 
   const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
 
+  // A specific, view-aware empty-state message is only meaningful when the content-type/view
+  // choice is the ONLY active narrowing (no search/tag/category also in play) — otherwise "no
+  // results match your search or filters" is the more honest, general message.
+  const onlyContentTypeOrViewNarrowing = searchQuery.trim() === '' && selectedTags.length === 0 && !selectedCategory;
+  const emptyResultsLabel = selectedContentType
+    ? getRepositoryContentTypeMeta(selectedContentType).label
+    : libraryView !== 'all'
+      ? KNOWLEDGE_LIBRARY_VIEWS.find((v) => v.view === libraryView)?.label
+      : undefined;
+
   const hasActiveFilters =
     searchQuery.trim() !== '' ||
     libraryView !== 'all' ||
@@ -588,7 +598,7 @@ export default function Repository() {
       <PageHeader
         eyebrow="Repository"
         title="Repository"
-        description={`Browse and search everything stored in your ${workspaceLabel} workspace — notes, research documents, bibliography records, and more as they're added.`}
+        description={`Your personal knowledge library for ${workspaceLabel} — notes, Current Affairs, sources, research and more, all in one searchable place.`}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" onClick={() => setShowExportModal(true)}>
@@ -630,17 +640,24 @@ export default function Repository() {
           content the detailed filters below already expose (lib/repository.ts's own
           KNOWLEDGE_LIBRARY_VIEWS), never a second categorisation system. Progressive disclosure:
           this is the first, broad choice; the detailed Card below (search, content-type dropdown,
-          category, tags, folder, pinned/archived) stays available for finer filtering. */}
-      <div className="mb-5 flex flex-wrap items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 p-1 self-start">
+          category, tags, folder, pinned/archived) stays available for finer filtering. Picking a
+          view here always clears the detailed content-type dropdown (and vice versa) so the two
+          never silently disagree about which content type is actually active — only one of them is
+          ever "set" at a time, matching whichever the user touched last. */}
+      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400">Knowledge Library</p>
+      <div role="group" aria-label="Knowledge Library views" className="mb-5 flex flex-wrap items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 p-1 self-start">
         {KNOWLEDGE_LIBRARY_VIEWS.map((v) => (
           <button
             key={v.view}
             type="button"
-            onClick={() => setLibraryView(v.view)}
-            aria-pressed={libraryView === v.view}
+            onClick={() => {
+              setLibraryView(v.view);
+              setSelectedContentType('');
+            }}
+            aria-pressed={libraryView === v.view && !selectedContentType}
             className={cx(
               'rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
-              libraryView === v.view
+              libraryView === v.view && !selectedContentType
                 ? cx(accent.bg, 'text-white shadow-sm', accent.shadow)
                 : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
             )}
@@ -702,7 +719,11 @@ export default function Repository() {
               <select
                 id="repository-content-type"
                 value={selectedContentType}
-                onChange={(e) => setSelectedContentType(e.target.value as RepositoryContentType | '')}
+                onChange={(e) => {
+                  const next = e.target.value as RepositoryContentType | '';
+                  setSelectedContentType(next);
+                  if (next) setLibraryView('all');
+                }}
                 aria-label="Filter by content type"
                 className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
@@ -848,8 +869,8 @@ export default function Repository() {
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <Search className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
               <p className="text-slate-400 text-sm mb-4">
-                {selectedContentType && searchQuery.trim() === '' && selectedTags.length === 0 && !selectedCategory
-                  ? `No ${getRepositoryContentTypeMeta(selectedContentType).label} records yet in ${workspaceLabel}.`
+                {emptyResultsLabel && onlyContentTypeOrViewNarrowing
+                  ? `No ${emptyResultsLabel} yet in ${workspaceLabel}.`
                   : 'No results match your search or filters.'}
               </p>
               <Button variant="secondary" onClick={clearFilters}>
