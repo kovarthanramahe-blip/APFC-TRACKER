@@ -164,8 +164,18 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-grid">
+      {/* Phase 8 — Cross-Platform Experience: the sidebar/bottom-nav split is keyed off `md`
+          (768px), not `lg` (1024px). At `lg` it was a hard cliff: a 768-1023px viewport — the
+          Xiaomi Pad 6's and most Android tablets' actual PORTRAIT width, well above phone size —
+          got the exact same cramped 5-icon bottom tab bar and hamburger-hidden nav as a 390px
+          phone, despite having more than double the width. The seven `lg:` rules below (sidebar,
+          drawer, its backdrop, content offset, menu button, bottom padding, bottom nav) are the
+          ONLY thing this phase changes — every size/spacing/animation is untouched, so the
+          desktop and phone experiences this already serves well are unaffected; only the point at
+          which a wide-enough screen gets the full sidebar instead of the phone-shaped bottom nav
+          moves earlier, matching Tailwind's own `md` tablet-ish breakpoint. */}
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-200/70 dark:border-slate-800/70 bg-white/70 dark:bg-slate-950/60 backdrop-blur-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-200/70 dark:border-slate-800/70 bg-white/70 dark:bg-slate-950/60 backdrop-blur-xl md:block">
         <SidebarContent />
       </aside>
 
@@ -174,14 +184,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         {mobileOpen && (
           <>
             <motion.div
-              className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm lg:hidden"
+              className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm md:hidden"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileOpen(false)}
             />
             <motion.div
-              className="fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-slate-950 lg:hidden"
+              className="fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-slate-950 md:hidden"
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
@@ -199,13 +209,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       </AnimatePresence>
 
-      <div className="lg:pl-64">
+      <div className="md:pl-64">
         {/* Top bar */}
         <header className="sticky top-0 z-20 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/75 dark:bg-slate-950/60 backdrop-blur-xl pt-[env(safe-area-inset-top)]">
           <div className="flex h-14 items-center justify-between gap-3 px-3 sm:h-16 sm:px-6">
             <div className="flex items-center gap-3">
               <button
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden"
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 md:hidden"
                 onClick={() => setMobileOpen(true)}
               >
                 <Menu className="h-5 w-5" />
@@ -219,7 +229,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-6 lg:pb-10">
+        <main className="px-3 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-6 md:pb-10">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
@@ -236,7 +246,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 dark:border-slate-800/70 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 dark:border-slate-800/70 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] md:hidden">
         <div className="flex items-center justify-around py-2">
           {getMobileNavItemsForWorkspace(activeWorkspaceId).map((item) => (
             <NavLink
