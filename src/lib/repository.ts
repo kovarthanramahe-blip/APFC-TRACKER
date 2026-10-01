@@ -270,6 +270,31 @@ export function listNotesForWorkspace(notes: readonly Note[], workspaceId: Works
 
 export { getImportedContentById, selectImportedContentByType, searchImportedContent, sortImportedContent };
 
+// ============================================================================================
+// Phase 3 — Unified Knowledge <-> Syllabus Connections. Both directions reuse the SAME two plain
+// metadata fields contentImport.ts already defines (syllabusNodeId for UPSC, apfcTopicId for
+// APFC) — no new relationship engine, no merged syllabus, no second knowledge model. A Note is
+// never matched by either: Notes already have their own, separate, pre-existing APFC topic link
+// (Note.topicId, driving pages/Notes.tsx's own topic view) which this does not touch or duplicate.
+// ============================================================================================
+
+/** Every ImportedContent item (in the given collection — pass an already workspace-scoped array,
+ * e.g. via listImportedContentForWorkspace, the same way every other function here expects) whose
+ * `metadata.syllabusNodeId` matches exactly this UPSC microsyllabus/granular node id. The
+ * "Syllabus -> Knowledge" direction for UPSC, read by pages/UpscCseSyllabus.tsx to show how many
+ * knowledge items (today: Current Affairs) are linked to a given syllabus row. */
+export function listImportedContentBySyllabusNode(items: readonly ImportedContent[], syllabusNodeId: string): ImportedContent[] {
+  return items.filter((item) => item.metadata?.syllabusNodeId === syllabusNodeId);
+}
+
+/** The APFC equivalent of listImportedContentBySyllabusNode, matching `metadata.apfcTopicId`
+ * instead. Kept as its own function (not a parameterised single function) so each reads as an
+ * unambiguous, directly-testable statement about ONE workspace's own identifier — exactly the same
+ * separation ImportedContentMetadata's own two fields already keep. */
+export function listImportedContentByApfcTopic(items: readonly ImportedContent[], apfcTopicId: string): ImportedContent[] {
+  return items.filter((item) => item.metadata?.apfcTopicId === apfcTopicId);
+}
+
 export interface RepositoryQuery {
   workspaceId: WorkspaceKind;
   contentType?: RepositoryContentType;
@@ -279,6 +304,12 @@ export interface RepositoryQuery {
    * wins (it is the more specific ask) — a caller never needs to pass both, but neither is
    * silently ignored by the other. Omitted/empty means "no content-type-set filter". */
   contentTypes?: readonly RepositoryContentType[];
+  /** Phase 3 — narrows to items linked to this UPSC syllabus/granular node id (see
+   * listImportedContentBySyllabusNode). Composable with every other filter here; never matches a
+   * Note (Notes have no syllabusNodeId). */
+  syllabusNodeId?: string;
+  /** Phase 3 — the APFC equivalent, narrowing to `metadata.apfcTopicId`. */
+  apfcTopicId?: string;
   search?: string;
   tags?: readonly string[];
   category?: string;
@@ -377,7 +408,7 @@ export function queryRepository(
       ? scopedContent.filter((item) => query.contentTypes!.includes(item.contentType))
       : scopedContent;
 
-  const matchedContent = queryImportedContent(contentByType, {
+  let matchedContent = queryImportedContent(contentByType, {
     search: query.search,
     tags: query.tags,
     category: query.category,
@@ -385,12 +416,19 @@ export function queryRepository(
     pinnedOnly: query.pinnedOnly,
     archived: query.archived,
   });
+  // Phase 3 — Knowledge <-> Syllabus: narrows further to items linked to one specific syllabus
+  // node/topic, composable with every filter above. Mutually exclusive in practice (a caller picks
+  // at most one workspace's identifier at a time), but nothing here enforces that — passing both
+  // simply ANDs them together, same as any other two filters would.
+  if (query.syllabusNodeId) matchedContent = listImportedContentBySyllabusNode(matchedContent, query.syllabusNodeId);
+  if (query.apfcTopicId) matchedContent = listImportedContentByApfcTopic(matchedContent, query.apfcTopicId);
 
-  // Tags/category filters never match a Note by construction (Note has neither) — only a
-  // content-type filter that excludes 'note' needs to explicitly drop notes here.
+  // Tags/category/syllabus-node/APFC-topic filters never match a Note by construction (Note has
+  // none of these fields) — only a content-type filter that excludes 'note' needs to explicitly
+  // drop notes here.
   const notesEligible = query.contentType ? query.contentType === 'note' : !query.contentTypes || query.contentTypes.length === 0 || query.contentTypes.includes('note');
-  const tagsOrCategoryActive = (query.tags && query.tags.length > 0) || !!query.category;
-  const matchedNotes = notesEligible && !tagsOrCategoryActive ? queryNotes(scopedNotes, { search: query.search, folderId: query.folderId, pinnedOnly: query.pinnedOnly, archived: query.archived }) : [];
+  const narrowingNotesCantMatch = (query.tags && query.tags.length > 0) || !!query.category || !!query.syllabusNodeId || !!query.apfcTopicId;
+  const matchedNotes = notesEligible && !narrowingNotesCantMatch ? queryNotes(scopedNotes, { search: query.search, folderId: query.folderId, pinnedOnly: query.pinnedOnly, archived: query.archived }) : [];
 
   const entries = [...matchedContent.map(repositoryEntryFromImportedContent), ...matchedNotes.map(repositoryEntryFromNote)];
   return sortRepositoryEntries(entries, query.sort ?? 'newest');

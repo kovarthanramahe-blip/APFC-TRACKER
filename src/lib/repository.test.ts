@@ -6,6 +6,8 @@ import {
   repositoryContentTypeSupports,
   listImportedContentForWorkspace,
   listNotesForWorkspace,
+  listImportedContentBySyllabusNode,
+  listImportedContentByApfcTopic,
   queryRepository,
   sortRepositoryEntries,
   listRepositoryEntries,
@@ -421,6 +423,67 @@ describe('repository — Knowledge Library views (Phase 2)', () => {
     ];
     const results = queryRepository(items, [], { workspaceId: 'phd_research', contentTypes: contentTypesForLibraryView('questions') ?? undefined });
     expect(results.map((r) => r.entityId).sort()).toEqual(['pyq', 'qb']);
+  });
+});
+
+describe('repository — Knowledge <-> Syllabus connections (Phase 3)', () => {
+  it('listImportedContentBySyllabusNode returns only items whose metadata.syllabusNodeId matches exactly', () => {
+    const items = [
+      content({ id: 'ca-1', contentType: 'current_affairs', metadata: { syllabusNodeId: 'node-a' } }),
+      content({ id: 'ca-2', contentType: 'current_affairs', metadata: { syllabusNodeId: 'node-b' } }),
+      content({ id: 'ca-3', contentType: 'current_affairs' }),
+    ];
+    expect(listImportedContentBySyllabusNode(items, 'node-a').map((i) => i.id)).toEqual(['ca-1']);
+  });
+
+  it('listImportedContentByApfcTopic returns only items whose metadata.apfcTopicId matches exactly', () => {
+    const items = [
+      content({ id: 'd-1', contentType: 'research_document', metadata: { apfcTopicId: 'topic-a' } }),
+      content({ id: 'd-2', contentType: 'research_document', metadata: { apfcTopicId: 'topic-b' } }),
+      content({ id: 'd-3', contentType: 'research_document' }),
+    ];
+    expect(listImportedContentByApfcTopic(items, 'topic-a').map((i) => i.id)).toEqual(['d-1']);
+  });
+
+  it('a knowledge item carrying BOTH syllabusNodeId and apfcTopicId is found by either lookup independently', () => {
+    const items = [content({ id: 'shared', contentType: 'current_affairs', metadata: { syllabusNodeId: 'upsc-node', apfcTopicId: 'apfc-topic' } })];
+    expect(listImportedContentBySyllabusNode(items, 'upsc-node').map((i) => i.id)).toEqual(['shared']);
+    expect(listImportedContentByApfcTopic(items, 'apfc-topic').map((i) => i.id)).toEqual(['shared']);
+  });
+
+  it('queryRepository.syllabusNodeId narrows results end-to-end and never matches a Note', () => {
+    const items = [
+      content({ id: 'ca-1', contentType: 'current_affairs', workspaceId: 'upsc_cse', metadata: { syllabusNodeId: 'node-a' } }),
+      content({ id: 'ca-2', contentType: 'current_affairs', workspaceId: 'upsc_cse', metadata: { syllabusNodeId: 'node-b' } }),
+    ];
+    const notes = [note({ id: 'n1', workspaceId: 'upsc_cse' })];
+    const results = queryRepository(items, notes, { workspaceId: 'upsc_cse', syllabusNodeId: 'node-a' });
+    expect(results.map((r) => r.entityId)).toEqual(['ca-1']);
+  });
+
+  it('queryRepository.apfcTopicId narrows results end-to-end and never matches a Note', () => {
+    const items = [
+      content({ id: 'd-1', contentType: 'research_document', metadata: { apfcTopicId: 'topic-a' } }),
+      content({ id: 'd-2', contentType: 'research_document', metadata: { apfcTopicId: 'topic-b' } }),
+    ];
+    const notes = [note({ id: 'n1', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', apfcTopicId: 'topic-a' });
+    expect(results.map((r) => r.entityId)).toEqual(['d-1']);
+  });
+
+  it('PhD content with no syllabusNodeId/apfcTopicId never matches a syllabus/topic filter — PhD stays correctly separated from competitive-exam syllabi', () => {
+    const items = [content({ id: 'phd-doc', contentType: 'research_document', workspaceId: 'phd_research' })];
+    expect(queryRepository(items, [], { workspaceId: 'phd_research', syllabusNodeId: 'any-node' })).toEqual([]);
+    expect(queryRepository(items, [], { workspaceId: 'phd_research', apfcTopicId: 'any-topic' })).toEqual([]);
+  });
+
+  it('a syllabus/topic filter composes with an existing content-type filter rather than overriding it', () => {
+    const items = [
+      content({ id: 'ca-1', contentType: 'current_affairs', metadata: { syllabusNodeId: 'node-a' } }),
+      content({ id: 'bib-1', contentType: 'bibliography', metadata: { syllabusNodeId: 'node-a' } }),
+    ];
+    const results = queryRepository(items, [], { workspaceId: 'phd_research', contentType: 'current_affairs', syllabusNodeId: 'node-a' });
+    expect(results.map((r) => r.entityId)).toEqual(['ca-1']);
   });
 });
 

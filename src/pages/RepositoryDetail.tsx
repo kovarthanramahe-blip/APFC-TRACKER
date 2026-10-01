@@ -6,11 +6,8 @@ import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx, formatDate, getLocalDateString } from '../lib/utils';
-import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
-import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
-import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
-import { resolveMicrosyllabusPath, type UpscCseSyllabusTree } from '../lib/upscCseSyllabus';
-import { resolveGranularBreadcrumb } from '../lib/upscCseGranularSyllabus';
+import { resolveSyllabusNodeLabel } from '../lib/syllabusNodeLabel';
+import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
 import {
   getImportedContentById,
   getRepositoryContentTypeMeta,
@@ -61,34 +58,11 @@ function isRelationshipEntityType(value: string | undefined): value is Relations
   return value === 'note' || value === 'imported_content';
 }
 
-/**
- * UPSC CSE Current Affairs — resolves a stored `metadata.syllabusNodeId` to a human-readable
- * label, reusing the EXACT same resolvers and label format
- * components/repository/ImportToRepositoryModal.tsx's own buildSyllabusNodeOptions already uses to
- * build the picker — never a second syllabus dataset/search. Tries the granular tree first (a
- * granular node's own breadcrumb carries its microsyllabus id, resolved back through
- * resolveMicrosyllabusPath for the Subject/Microsyllabus titles), then falls back to treating the
- * id as a plain microsyllabus id in either real tree. Returns undefined for an id that doesn't
- * resolve in either — a stale/invalid id is simply not shown, never a fabricated label.
- */
-export function resolveSyllabusNodeLabel(syllabusNodeId: string): string | undefined {
-  const granularBreadcrumb = resolveGranularBreadcrumb(UPSC_CSE_GRANULAR_NODES, syllabusNodeId);
-  if (granularBreadcrumb) {
-    const path = resolveMicrosyllabusPath(UPSC_CSE_PRELIMS_SYLLABUS, granularBreadcrumb.microsyllabusId);
-    const parts = [path?.subject.title, path?.item.title, granularBreadcrumb.topic?.title, granularBreadcrumb.subtopic?.title, granularBreadcrumb.microTopic?.title].filter(
-      (p): p is string => !!p,
-    );
-    return `Prelims › ${parts.join(' › ')}`;
-  }
-  for (const [stageLabel, tree] of [
-    ['Prelims', UPSC_CSE_PRELIMS_SYLLABUS],
-    ['Mains', UPSC_CSE_MAINS_SYLLABUS],
-  ] as [string, UpscCseSyllabusTree][]) {
-    const path = resolveMicrosyllabusPath(tree, syllabusNodeId);
-    if (path) return `${stageLabel} › ${path.subject.title} › ${path.item.title}`;
-  }
-  return undefined;
-}
+// resolveSyllabusNodeLabel now lives in lib/syllabusNodeLabel.ts (Phase 3 — pages/Repository.tsx
+// needs the same resolver, and a page importing another page risks a circular dependency). Kept
+// as a re-export so existing imports of it from this module (e.g. this page's own test file)
+// continue to work unchanged.
+export { resolveSyllabusNodeLabel };
 
 /** Read-only content display: a byte-exact "Raw" view (the default — see this stage's own
  * requirement to preserve stored content exactly) and an opt-in "Preview" view that renders
@@ -323,8 +297,13 @@ export default function RepositoryDetail() {
   const rawContent = importedItem ? importedItem.rawContent : (noteItem?.content ?? '');
   const originLabel = { import: 'Imported', manual: 'Manually added', created: 'Created' }[entry.origin];
   const isCurrentAffairs = importedItem?.contentType === 'current_affairs';
-  const syllabusNodeLabel =
-    isCurrentAffairs && importedItem?.metadata?.syllabusNodeId ? resolveSyllabusNodeLabel(importedItem.metadata.syllabusNodeId) : undefined;
+  // Knowledge <-> Syllabus connections (Phase 3) — "Knowledge Detail -> Syllabus": generalised from
+  // current_affairs-only (syllabusNodeId/apfcTopicId are now plain, content-type-agnostic metadata
+  // fields any knowledge item can carry — see contentImport.ts's own header) to any ImportedContent
+  // item that actually has one set. Never invents a value: a Note or an item with neither field
+  // simply shows neither line, exactly as before for everything that isn't Current Affairs.
+  const syllabusNodeLabel = importedItem?.metadata?.syllabusNodeId ? resolveSyllabusNodeLabel(importedItem.metadata.syllabusNodeId) : undefined;
+  const apfcTopicPath = importedItem?.metadata?.apfcTopicId ? resolveApfcTopicPath(importedItem.metadata.apfcTopicId) : undefined;
 
   // Current Affairs revision — reuses lib/revisionQueue.ts exactly as PYQ practice already does
   // (same RevisionItem shape, same recordRevisionCorrect/recordRevisionIncorrect store actions);
@@ -421,9 +400,14 @@ export default function RepositoryDetail() {
               <span className="font-medium text-slate-500 dark:text-slate-400">Source:</span> {importedItem.metadata.source}
             </p>
           )}
-          {isCurrentAffairs && syllabusNodeLabel && (
+          {syllabusNodeLabel && (
             <p className="sm:col-span-2">
               <span className="font-medium text-slate-500 dark:text-slate-400">UPSC Syllabus Topic:</span> {syllabusNodeLabel}
+            </p>
+          )}
+          {apfcTopicPath && (
+            <p className="sm:col-span-2">
+              <span className="font-medium text-slate-500 dark:text-slate-400">APFC Syllabus Topic:</span> {apfcTopicPath.subject.title} › {apfcTopicPath.topic.title}
             </p>
           )}
         </div>

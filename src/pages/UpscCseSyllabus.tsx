@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ListTree, Search, Sparkles } from 'lucide-react';
+import { ChevronDown, ListTree, Search, Sparkles, Link2 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, ProgressBar, PageHeader, Badge } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
+import { listImportedContentBySyllabusNode } from '../lib/repository';
 import {
   getPapersForStage,
   getSubjectsForPaper,
@@ -323,6 +324,14 @@ function MicrosyllabusRow({
   // existing progress-percentage badge (box colour) is untouched — it conveys a different signal
   // (coverage state), not subject identity.
   const subjectColor = getUpscSubjectColor(subject.title);
+  // Knowledge <-> Syllabus connections (Phase 3) — "Syllabus -> Knowledge": how many Repository
+  // items (today: Current Affairs) are linked to THIS microsyllabus node, reusing the exact same
+  // metadata.syllabusNodeId the Current Affairs capture UI already writes — no new relationship
+  // engine. importedContent already only ever holds the active (UPSC CSE) workspace's own data, so
+  // this never needs its own workspace scoping. Shown only when > 0 (progressive disclosure — an
+  // empty topic gets no badge at all, never a visible "0 linked").
+  const importedContent = useAppStore((s) => s.importedContent);
+  const linkedCount = useMemo(() => listImportedContentBySyllabusNode(importedContent, item.id).length, [importedContent, item.id]);
   const [isOpen, setIsOpen] = useState(isDeepLinked || !!deepLinkGranularId);
   // Every hook this component might need is called unconditionally, before the branch below, so
   // hook order never changes between a granularized and non-granularized render (React's Rules of
@@ -355,6 +364,14 @@ function MicrosyllabusRow({
           </p>
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{item.title}</p>
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{item.description}</p>
+          {linkedCount > 0 && (
+            <Link
+              to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
+              className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+            >
+              <Link2 className="h-3 w-3" /> {linkedCount} linked
+            </Link>
+          )}
         </div>
         <CoverageStatePicker value={state} onChange={(next) => onSetCoverage(item.id, next)} />
       </li>
@@ -389,9 +406,19 @@ function MicrosyllabusRow({
       </button>
       {expanded && (
         <div className="border-t border-slate-200/70 dark:border-slate-800 px-2 py-2">
-          <div className="mb-1.5 flex items-center justify-between px-1">
+          <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-slate-400">{item.description}</p>
-            <DerivedBadge />
+            <div className="flex shrink-0 items-center gap-2">
+              {linkedCount > 0 && (
+                <Link
+                  to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  <Link2 className="h-3 w-3" /> {linkedCount} linked
+                </Link>
+              )}
+              <DerivedBadge />
+            </div>
           </div>
           <ul className="space-y-1.5">
             {topics.map((t) => (

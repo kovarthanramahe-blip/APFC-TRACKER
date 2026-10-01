@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper, Milestone } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
+import { resolveSyllabusNodeLabel } from '../lib/syllabusNodeLabel';
+import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
 import {
   queryRepository,
   listRepositoryEntries,
@@ -411,6 +413,7 @@ export function DeleteConfirmModal({ entry, onCancel, onConfirm }: { entry: Repo
 
 export default function Repository() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const accent = getWorkspaceAccent(activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
@@ -422,6 +425,14 @@ export default function Repository() {
   const folders = useAppStore((s) => s.folders);
   const bulkUpdateNotes = useAppStore((s) => s.bulkUpdateNotes);
   const bulkUpdateImportedContent = useAppStore((s) => s.bulkUpdateImportedContent);
+
+  // Knowledge <-> Syllabus connections (Phase 3) — "Syllabus -> Knowledge": arriving via
+  // /repository?syllabusNodeId=... or ?apfcTopicId=... (pages/UpscCseSyllabus.tsx's own "N linked"
+  // link today; any future syllabus page can link here the same way) pre-applies that filter. Read
+  // only once, on mount, as the initial value of ordinary local state — exactly like every other
+  // filter on this page, so "clear" (below) is a plain state reset, never a URL rewrite.
+  const [syllabusNodeIdFilter, setSyllabusNodeIdFilter] = useState<string | undefined>(() => searchParams.get('syllabusNodeId') ?? undefined);
+  const [apfcTopicIdFilter, setApfcTopicIdFilter] = useState<string | undefined>(() => searchParams.get('apfcTopicId') ?? undefined);
 
   const [searchQuery, setSearchQuery] = useState('');
   // Knowledge Library (Phase 2) — a compact primary view, read alongside (never replacing) the
@@ -464,6 +475,8 @@ export default function Repository() {
         workspaceId: activeWorkspaceId,
         contentType: selectedContentType || undefined,
         contentTypes: selectedContentType ? undefined : (contentTypesForLibraryView(libraryView) ?? undefined),
+        syllabusNodeId: syllabusNodeIdFilter,
+        apfcTopicId: apfcTopicIdFilter,
         search: searchQuery,
         tags: selectedTags,
         category: selectedCategory || undefined,
@@ -472,25 +485,63 @@ export default function Repository() {
         archived: showArchived,
         sort: sortOrder,
       }),
-    [importedContent, notes, activeWorkspaceId, libraryView, selectedContentType, searchQuery, selectedTags, selectedCategory, selectedFolderId, pinnedOnly, showArchived, sortOrder],
+    [
+      importedContent,
+      notes,
+      activeWorkspaceId,
+      libraryView,
+      selectedContentType,
+      syllabusNodeIdFilter,
+      apfcTopicIdFilter,
+      searchQuery,
+      selectedTags,
+      selectedCategory,
+      selectedFolderId,
+      pinnedOnly,
+      showArchived,
+      sortOrder,
+    ],
   );
 
   const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
 
-  // A specific, view-aware empty-state message is only meaningful when the content-type/view
+  // Knowledge <-> Syllabus connections (Phase 3) — a human-readable label for whichever topic
+  // filter is active (at most one in practice — a link only ever sets one), reusing the EXACT same
+  // resolvers pages/RepositoryDetail.tsx's own knowledge-detail display already uses, never a
+  // second lookup. Undefined (and so no chip) for a stale/unresolvable id, same "never fabricate a
+  // label" discipline as everywhere else this pattern appears.
+  const topicFilterLabel = syllabusNodeIdFilter
+    ? resolveSyllabusNodeLabel(syllabusNodeIdFilter)
+    : apfcTopicIdFilter
+      ? (() => {
+          const path = resolveApfcTopicPath(apfcTopicIdFilter);
+          return path ? `${path.subject.title} › ${path.topic.title}` : undefined;
+        })()
+      : undefined;
+
+  function clearTopicFilter() {
+    setSyllabusNodeIdFilter(undefined);
+    setApfcTopicIdFilter(undefined);
+  }
+
+  // A specific, view-aware empty-state message is only meaningful when the content-type/view/topic
   // choice is the ONLY active narrowing (no search/tag/category also in play) — otherwise "no
   // results match your search or filters" is the more honest, general message.
   const onlyContentTypeOrViewNarrowing = searchQuery.trim() === '' && selectedTags.length === 0 && !selectedCategory;
-  const emptyResultsLabel = selectedContentType
-    ? getRepositoryContentTypeMeta(selectedContentType).label
-    : libraryView !== 'all'
-      ? KNOWLEDGE_LIBRARY_VIEWS.find((v) => v.view === libraryView)?.label
-      : undefined;
+  const emptyResultsLabel = topicFilterLabel
+    ? topicFilterLabel
+    : selectedContentType
+      ? getRepositoryContentTypeMeta(selectedContentType).label
+      : libraryView !== 'all'
+        ? KNOWLEDGE_LIBRARY_VIEWS.find((v) => v.view === libraryView)?.label
+        : undefined;
 
   const hasActiveFilters =
     searchQuery.trim() !== '' ||
     libraryView !== 'all' ||
     selectedContentType !== '' ||
+    !!syllabusNodeIdFilter ||
+    !!apfcTopicIdFilter ||
     selectedCategory !== '' ||
     selectedTags.length > 0 ||
     selectedFolderId !== undefined ||
@@ -501,6 +552,7 @@ export default function Repository() {
     setSearchQuery('');
     setLibraryView('all');
     setSelectedContentType('');
+    clearTopicFilter();
     setSelectedCategory('');
     setSelectedTags([]);
     setSelectedFolderId(undefined);
@@ -666,6 +718,26 @@ export default function Repository() {
           </button>
         ))}
       </div>
+
+      {/* Knowledge <-> Syllabus connections (Phase 3) — only ever present when the user actually
+          arrived via a syllabus page's "N linked" link (see pages/UpscCseSyllabus.tsx); removable,
+          never a permanent part of the page's chrome. */}
+      {topicFilterLabel && (
+        <div className="mb-5 flex items-center gap-1.5 self-start rounded-full bg-brand-50 dark:bg-brand-500/10 px-3 py-1.5 text-sm text-brand-700 dark:text-brand-300">
+          <Milestone className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">
+            Linked to <span className="font-medium">{topicFilterLabel}</span>
+          </span>
+          <button
+            type="button"
+            onClick={clearTopicFilter}
+            aria-label="Clear topic filter"
+            className="shrink-0 rounded-full p-0.5 hover:bg-brand-100 dark:hover:bg-brand-500/20"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
@@ -869,9 +941,11 @@ export default function Repository() {
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <Search className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
               <p className="text-slate-400 text-sm mb-4">
-                {emptyResultsLabel && onlyContentTypeOrViewNarrowing
-                  ? `No ${emptyResultsLabel} yet in ${workspaceLabel}.`
-                  : 'No results match your search or filters.'}
+                {topicFilterLabel && onlyContentTypeOrViewNarrowing
+                  ? `Nothing in ${workspaceLabel} is linked to "${topicFilterLabel}" yet.`
+                  : emptyResultsLabel && onlyContentTypeOrViewNarrowing
+                    ? `No ${emptyResultsLabel} yet in ${workspaceLabel}.`
+                    : 'No results match your search or filters.'}
               </p>
               <Button variant="secondary" onClick={clearFilters}>
                 Clear filters
