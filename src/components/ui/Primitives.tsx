@@ -5,18 +5,27 @@ import { cx } from '../../lib/utils';
 import { useAppStore } from '../../lib/store';
 import { getWorkspaceAccent } from '../../lib/workspaceAccent';
 
+/** `elevated` — design-system pass: every Card used to render at the exact same visual weight, so
+ * a page's single most important/actionable card looked no different from its least important
+ * one (see Dashboard.tsx's "Today's Study" card for the first real use). Deliberately opt-in and
+ * meant to be rare — reach for it a few times per page at most, never as a new default, or every
+ * card ends up "elevated" again and nothing stands out. Swaps the `.surface` background/border for
+ * the slightly stronger `.surface-elevated` (index.css) and steps the shadow up one notch; nothing
+ * else about Card's contract changes. */
 export function Card({
   children,
   className,
   as: As = 'div',
+  elevated = false,
   ...rest
 }: {
   children: ReactNode;
   className?: string;
   as?: 'div' | 'section';
+  elevated?: boolean;
 } & HTMLAttributes<HTMLDivElement>) {
   return (
-    <As className={cx('surface rounded-2xl shadow-sm shadow-slate-900/5', className)} {...rest}>
+    <As className={cx(elevated ? 'surface-elevated shadow-md shadow-slate-900/8' : 'surface shadow-sm shadow-slate-900/5', 'rounded-2xl', className)} {...rest}>
       {children}
     </As>
   );
@@ -55,6 +64,32 @@ export function ProgressBar({
   );
 }
 
+/** Small labelled number tile used across the dashboard/analytics pages (UPSC CSE Analytics, PhD
+ * Analytics) — extracted here from two byte-identical local copies so both stay in sync rather
+ * than drifting independently. */
+export function StatTile({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  tone?: 'neutral' | 'success' | 'danger' | 'brand';
+}) {
+  const tones: Record<string, string> = {
+    neutral: 'text-slate-800 dark:text-slate-100',
+    success: 'text-emerald-600 dark:text-emerald-400',
+    danger: 'text-rose-600 dark:text-rose-400',
+    brand: 'text-brand-600 dark:text-brand-400',
+  };
+  return (
+    <Card className="p-4 text-center">
+      <p className={cx('font-display text-xl font-bold', tones[tone])}>{value}</p>
+      <p className="mt-0.5 text-[11px] text-slate-400">{label}</p>
+    </Card>
+  );
+}
+
 export function Badge({
   children,
   className,
@@ -72,8 +107,14 @@ export function Badge({
     danger: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
     warning: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
   };
+  // UI audit — Badge is used across the app for dynamic, content-derived text (syllabus topic/
+  // subject names, bibliography categories, study tags), none of which this component can bound
+  // in advance. `max-w-full` lets a badge actually shrink to fit inside a constrained flex/grid
+  // parent instead of forcing that parent wider; `truncate` then ellipsizes gracefully instead of
+  // the label spilling past the pill's own rounded background. Every existing short-label badge is
+  // unaffected — truncation only ever engages once content already exceeds the available width.
   return (
-    <span className={cx('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium', tones[tone], className)}>
+    <span className={cx('inline-flex max-w-full items-center gap-1 truncate rounded-full px-2.5 py-0.5 text-xs font-medium', tones[tone], className)}>
       {children}
     </span>
   );
@@ -93,7 +134,11 @@ export function Button({
 } & ButtonHTMLAttributes<HTMLButtonElement>) {
   const variants: Record<string, string> = {
     primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/30',
-    secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
+    // Design system — secondary used to be a borderless flat fill (bg-slate-100), which on a Card's
+    // own near-white `.surface` background reads as barely-there — a secondary action next to a
+    // primary one lost most of its own visual identity as a distinct, clickable control. A subtle
+    // border restores that without adding real visual weight (still clearly lighter than primary).
+    secondary: 'border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
     ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
     danger: 'bg-rose-600 text-white hover:bg-rose-700',
   };
@@ -137,7 +182,17 @@ export function PageHeader({
         <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">{title}</h1>
         {description && <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base">{description}</p>}
       </div>
-      {action && <div className="shrink-0">{action}</div>}
+      {/* No shrink-0 here (there was previously): a flex item with flex-shrink:0 is sized at its
+          MAX-CONTENT width — i.e. as if every button inside it sat on one unbroken line — which
+          defeats the action content's own `flex-wrap` (every page passing more than a couple of
+          buttons, e.g. pages/Repository.tsx, relies on that wrap to avoid horizontal overflow at
+          narrower desktop/tablet widths). min-w-0 additionally lets this item shrink past its
+          content's intrinsic min-width (the default `min-width: auto` flex quirk), so it can never
+          force the page wider than its container even in the extreme case where a single button's
+          own label doesn't fit. A short, single-element action (the common case elsewhere) renders
+          identically either way, since its min-content width already equals its max-content width —
+          there is nothing for it to shrink into. */}
+      {action && <div className="min-w-0">{action}</div>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink, NotebookPen, Copy, Archive } from 'lucide-react';
+import { GraduationCap, Upload, X, FileText, Trash2, Eye, Search, Tag, Pencil, SlidersHorizontal, Link2, Unlink, NotebookPen, Copy, Archive, ChevronDown, BookOpen, User } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -35,6 +35,7 @@ import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
 import { BulkActionBar } from '../components/organisation/BulkActionBar';
 import { SelectionCheckbox } from '../components/organisation/SelectionCheckbox';
 import { buildFolderTree, flattenFolderTree } from '../lib/folders';
+import { buildPhdKnowledgeTree, type PhdAuthorGroup } from '../lib/phdKnowledgeTree';
 
 // PhD Research workspace repository — the import-first FILE -> EXTRACT -> PREVIEW -> CONFIRM ->
 // SAVE -> DISPLAY pipeline, now run through lib/importPipeline.ts's runFileImport (Knowledge
@@ -90,9 +91,18 @@ export default function PhdResearch() {
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Knowledge Library (Phase 2) — a read-only, additive alternate presentation of the SAME
+  // documents (never a second repository engine): Author -> Source -> Chapters, built entirely
+  // from existing bibliography metadata + existing content relationships (lib/phdKnowledgeTree.ts).
+  // Defaults to the existing flat grid; nothing about the default view changes.
+  const [viewMode, setViewMode] = useState<'all' | 'bySource'>('all');
 
   const researchDocuments = useMemo(() => selectImportedContentByType(importedContent, 'research_document'), [importedContent]);
   const bibliographyRecords = useMemo(() => selectImportedContentByType(importedContent, 'bibliography'), [importedContent]);
+  const knowledgeTree = useMemo(
+    () => buildPhdKnowledgeTree(bibliographyRecords, researchDocuments, contentRelationships),
+    [bibliographyRecords, researchDocuments, contentRelationships],
+  );
   const availableTags = useMemo(() => collectImportedContentTags(researchDocuments), [researchDocuments]);
   const availableCategories = useMemo(() => collectImportedContentCategories(researchDocuments), [researchDocuments]);
   const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
@@ -267,10 +277,37 @@ export default function PhdResearch() {
       />
       <PhdResearchTabs />
 
+      {bibliographyRecords.length > 0 && (
+        <div className="mb-5 flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 p-1 self-start w-fit">
+          <button
+            type="button"
+            onClick={() => setViewMode('all')}
+            aria-pressed={viewMode === 'all'}
+            className={cx(
+              'rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
+              viewMode === 'all' ? 'bg-phd-600 text-white shadow-sm shadow-phd-600/30' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
+            )}
+          >
+            All Documents
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('bySource')}
+            aria-pressed={viewMode === 'bySource'}
+            className={cx(
+              'rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
+              viewMode === 'bySource' ? 'bg-phd-600 text-white shadow-sm shadow-phd-600/30' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
+            )}
+          >
+            By Source
+          </button>
+        </div>
+      )}
+
       {importError && (
         <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
           <p>{importError}</p>
-          <button onClick={() => setImportError(null)} className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
+          <button onClick={() => setImportError(null)} aria-label="Dismiss error" title="Dismiss error" className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -292,7 +329,7 @@ export default function PhdResearch() {
         />
       )}
 
-      {researchDocuments.length > 0 && (
+      {viewMode === 'all' && researchDocuments.length > 0 && (
         <Card className="mb-5 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative flex-1">
@@ -374,7 +411,7 @@ export default function PhdResearch() {
         </Card>
       )}
 
-      {selectedIds.size > 0 && (
+      {viewMode === 'all' && selectedIds.size > 0 && (
         <BulkActionBar
           selectedCount={selectedIds.size}
           folders={folders}
@@ -390,12 +427,14 @@ export default function PhdResearch() {
         />
       )}
 
-      {researchDocuments.length === 0 ? (
+      {viewMode === 'bySource' && <KnowledgeTreeView tree={knowledgeTree} onViewChapter={setViewing} />}
+
+      {viewMode === 'all' && researchDocuments.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FileText className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
           <p className="text-slate-400 text-sm">No research documents imported yet.</p>
         </div>
-      ) : filteredDocuments.length === 0 ? (
+      ) : viewMode === 'all' && filteredDocuments.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Search className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
           <p className="text-slate-400 text-sm mb-4">No documents match your search or filters.</p>
@@ -403,7 +442,7 @@ export default function PhdResearch() {
             Clear filters
           </Button>
         </div>
-      ) : (
+      ) : viewMode === 'all' ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredDocuments.map((doc) => {
             const tags = getContentTags(doc);
@@ -488,7 +527,7 @@ export default function PhdResearch() {
             );
           })}
         </div>
-      )}
+      ) : null}
 
       {viewing && <ViewDocumentModal document={viewing} onClose={() => setViewing(null)} />}
       {editing && (
@@ -521,6 +560,106 @@ export default function PhdResearch() {
           onClose={() => setNotesLinkingDoc(null)}
         />
       )}
+    </div>
+  );
+}
+
+// Knowledge Library (Phase 2) — Author -> Source -> Chapters drill-down, built entirely from
+// lib/phdKnowledgeTree.ts's pure grouping over EXISTING bibliography + research_document +
+// relationship data (see that module's own header: no new store field, no new entity type). A
+// compact expand/collapse tree rather than a bulky nested database view; clicking a chapter opens
+// the SAME ViewDocumentModal the "All Documents" grid above already uses — never a second reader.
+function KnowledgeTreeView({ tree, onViewChapter }: { tree: PhdAuthorGroup[]; onViewChapter: (doc: ImportedContent) => void }) {
+  const [openAuthors, setOpenAuthors] = useState<Set<string>>(() => new Set(tree.length === 1 ? [tree[0].author] : []));
+  const [openSources, setOpenSources] = useState<Set<string>>(new Set());
+
+  function toggle(set: Set<string>, setSet: (next: Set<string>) => void, key: string) {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setSet(next);
+  }
+
+  if (tree.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <BookOpen className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
+        <p className="text-slate-400 text-sm">No bibliography sources to group by yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {tree.map((group) => {
+        const authorOpen = openAuthors.has(group.author);
+        const chapterCount = group.sources.reduce((sum, s) => sum + s.chapters.length, 0);
+        return (
+          <Card key={group.author} className="overflow-hidden p-0">
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left"
+              onClick={() => toggle(openAuthors, setOpenAuthors, group.author)}
+              aria-expanded={authorOpen}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-phd-600/10 text-phd-600 dark:text-phd-400">
+                <User className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{group.author}</p>
+                <p className="text-xs text-slate-400">
+                  {group.sources.length} source{group.sources.length === 1 ? '' : 's'} · {chapterCount} chapter{chapterCount === 1 ? '' : 's'}
+                </p>
+              </div>
+              <ChevronDown className={cx('h-4 w-4 shrink-0 text-slate-400 transition-transform', authorOpen && 'rotate-180')} />
+            </button>
+            {authorOpen && (
+              <div className="border-t border-slate-200/70 dark:border-slate-800 px-4 py-2 space-y-1.5">
+                {group.sources.map((node) => {
+                  const sourceKey = `${group.author}:${node.source.id}`;
+                  const sourceOpen = openSources.has(sourceKey);
+                  return (
+                    <div key={sourceKey} className="rounded-lg border border-slate-200/70 dark:border-slate-800">
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left"
+                        onClick={() => toggle(openSources, setOpenSources, sourceKey)}
+                        aria-expanded={sourceOpen}
+                        disabled={node.chapters.length === 0}
+                      >
+                        <BookOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{node.source.title || 'Untitled'}</span>
+                        <span className="shrink-0 text-xs text-slate-400">
+                          {node.chapters.length} chapter{node.chapters.length === 1 ? '' : 's'}
+                        </span>
+                        {node.chapters.length > 0 && (
+                          <ChevronDown className={cx('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', sourceOpen && 'rotate-180')} />
+                        )}
+                      </button>
+                      {sourceOpen && node.chapters.length > 0 && (
+                        <ul className="border-t border-slate-100 dark:border-slate-800/70 px-2 py-1">
+                          {node.chapters.map((chapter) => (
+                            <li key={chapter.id}>
+                              <button
+                                type="button"
+                                onClick={() => onViewChapter(chapter)}
+                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                              >
+                                <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                <span className="truncate">{chapter.title || 'Untitled'}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -667,7 +806,7 @@ function ViewDocumentModal({ document, onClose }: { document: ImportedContent; o
             <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">{document.title}</h3>
             <p className="text-xs text-slate-400 truncate">{document.provenance.sourceFilename ?? 'Manually added'}</p>
           </div>
-          <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onClose} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -700,7 +839,7 @@ function EditMetadataModal({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md rounded-t-2xl sm:inset-0 sm:top-24 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">Edit organisation — {document.title}</h3>
-          <button onClick={onCancel} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onCancel} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -777,7 +916,7 @@ function LinkedSourcesModal({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg rounded-t-2xl sm:inset-0 sm:top-16 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">Linked Sources / Bibliography — {document.title}</h3>
-          <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onClose} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>

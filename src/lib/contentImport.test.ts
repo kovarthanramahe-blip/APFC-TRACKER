@@ -304,6 +304,36 @@ describe('2b. UPSC CSE Current Affairs data foundation', () => {
     expect(content.metadata?.syllabusNodeId).toBeUndefined();
   });
 
+  it('apfcTopicId (Knowledge Library Phase 2 shared-mapping foundation) survives both creation paths, independent of syllabusNodeId', () => {
+    const preview = buildImportPreview({ name: 'ca.md' }, { format: 'markdown', text: 'text' });
+    const imported = confirmImportedContent(preview, {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { syllabusNodeId: 'current-affairs-national', apfcTopicId: 'apfc-polity-rights' },
+    });
+    expect(imported.metadata?.syllabusNodeId).toBe('current-affairs-national');
+    expect(imported.metadata?.apfcTopicId).toBe('apfc-polity-rights');
+
+    const manual = createManualImportedContent({
+      workspaceId: 'apfc',
+      contentType: 'research_document',
+      title: 'Shared knowledge note',
+      metadata: { apfcTopicId: 'apfc-polity-rights' },
+    });
+    expect(manual.metadata?.apfcTopicId).toBe('apfc-polity-rights');
+  });
+
+  it('a knowledge item can carry apfcTopicId, syllabusNodeId, both, or neither, independently', () => {
+    const preview = buildImportPreview({ name: 'x.md' }, { format: 'markdown', text: 'text' });
+    const neither = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'research_document' });
+    expect(neither.metadata?.apfcTopicId).toBeUndefined();
+    expect(neither.metadata?.syllabusNodeId).toBeUndefined();
+
+    const apfcOnly = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'research_document', metadata: { apfcTopicId: 't1' } });
+    expect(apfcOnly.metadata?.apfcTopicId).toBe('t1');
+    expect(apfcOnly.metadata?.syllabusNodeId).toBeUndefined();
+  });
+
   it('existing content types are entirely unaffected by the new current_affairs type/fields', () => {
     const preview = buildImportPreview({ name: 'gs1.pdf' }, { format: 'pdf', text: 'text' });
     const pyq = confirmImportedContent(preview, { workspaceId: 'upsc_cse', contentType: 'pyq', metadata: { year: 2023 } });

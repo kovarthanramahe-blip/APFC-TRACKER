@@ -578,6 +578,14 @@ export interface ImportedContentMetadata {
    * tree, exactly like topicAreaId above is a plain FK into PhdTopicArea. Never validated against a
    * second topic registry here, and never a new syllabus/relationship model. */
   syllabusNodeId?: string;
+  /** Knowledge Library foundation (Phase 2) — the id of an existing APFC syllabus topic
+   * (data/syllabus.ts's SYLLABUS[].topics[].id) this item relates to, independent of
+   * syllabusNodeId above. A knowledge item can carry either, both, or neither: both are plain FKs
+   * into their own already-existing, UNMERGED syllabus tree (APFC's SYLLABUS vs UPSC CSE's
+   * UPSC_CSE_PRELIMS_SYLLABUS/UPSC_CSE_MAINS_SYLLABUS) — this never merges the two syllabi, and
+   * never introduces a second shared syllabus/topic registry. Never validated against a second
+   * registry here, and never auto-filled. Foundation only — no UI sets this yet. */
+  apfcTopicId?: string;
   [key: string]: unknown;
 }
 
