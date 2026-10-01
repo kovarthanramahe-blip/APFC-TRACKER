@@ -41,6 +41,7 @@ import {
   type UpscCseGranularNode,
 } from '../lib/upscCseGranularSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
+import { getUpscSubjectColor } from '../lib/upscCseSubjectColors';
 
 // UPSC CSE Syllabus UI — the 4-level stage -> paper -> subject -> microsyllabus hierarchy
 // (lib/upscCseSyllabus.ts, data/upscCsePrelimsSyllabus.ts, data/upscCseMainsSyllabus.ts),
@@ -317,6 +318,11 @@ function MicrosyllabusRow({
   deepLinkGranularId?: string;
 }) {
   const hasGranular = microsyllabusHasGranularNodes(UPSC_CSE_GRANULAR_NODES, item.id);
+  // Subject colour identity (Knowledge Library Phase 2) — the microsyllabus row gets the lighter
+  // VARIANT of its subject's own hue (never a different colour), a left-border accent only; the
+  // existing progress-percentage badge (box colour) is untouched — it conveys a different signal
+  // (coverage state), not subject identity.
+  const subjectColor = getUpscSubjectColor(subject.title);
   const [isOpen, setIsOpen] = useState(isDeepLinked || !!deepLinkGranularId);
   // Every hook this component might need is called unconditionally, before the branch below, so
   // hook order never changes between a granularized and non-granularized render (React's Rules of
@@ -338,7 +344,8 @@ function MicrosyllabusRow({
       <li
         ref={isDeepLinked ? deepLinkRef : undefined}
         className={cx(
-          'flex items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors',
+          'flex items-start gap-3 rounded-lg border-l-2 px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors',
+          subjectColor.variant.border,
           isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60',
         )}
       >
@@ -360,7 +367,14 @@ function MicrosyllabusRow({
   const expanded = isOpen || !!query.trim() || !!deepLinkGranularId;
 
   return (
-    <li ref={isDeepLinked ? deepLinkRef : undefined} className={cx('rounded-xl border border-slate-200/70 dark:border-slate-800 overflow-hidden', isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60')}>
+    <li
+      ref={isDeepLinked ? deepLinkRef : undefined}
+      className={cx(
+        'rounded-xl border border-l-2 border-slate-200/70 dark:border-slate-800 overflow-hidden',
+        subjectColor.variant.border,
+        isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60',
+      )}
+    >
       <button className="flex w-full items-center gap-3 px-2 py-2.5 text-left" onClick={() => setIsOpen((v) => !v)}>
         <span className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white', progressToneClass(summary.weightedPct))}>
           {summary.weightedPct}%
@@ -440,6 +454,9 @@ function SubjectSection({
   const leafIds = useMemo(() => expandToLeafCoverageIds(allItems.map((m) => m.id), UPSC_CSE_GRANULAR_NODES), [allItems]);
   const summary = useMemo(() => computeCoverageSummary(leafIds, coverage), [leafIds, coverage]);
   const containsDeepLink = (!!deepLinkMicrosyllabusId && allItems.some((m) => m.id === deepLinkMicrosyllabusId)) || !!deepLinkGranularId;
+  // Subject colour identity (Knowledge Library Phase 2) — a small strong-identity dot next to the
+  // subject title, distinct from the percentage badge (which conveys coverage, not identity).
+  const subjectColor = getUpscSubjectColor(subject.title);
 
   if (query.trim() && items.length === 0) return null;
   const expanded = isOpen || !!query.trim() || containsDeepLink;
@@ -451,7 +468,10 @@ function SubjectSection({
           {summary.weightedPct}%
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{subject.title}</p>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">
+            <span className={cx('h-2 w-2 shrink-0 rounded-full', subjectColor.base.dot)} aria-hidden="true" />
+            <span className="truncate">{subject.title}</span>
+          </p>
           <div className="mt-1 max-w-[10rem]">
             <ProgressBar value={summary.weightedPct} colorClassName={progressToneClass(summary.weightedPct)} height="h-1" />
           </div>

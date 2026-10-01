@@ -436,6 +436,23 @@ describe('Repository Item Management — Current Affairs metadata-preservation r
     const merged = preserveUneditedMetadata(undefined, doc, { folderId: null, isPinned: false, isArchived: false });
     expect(merged).toBeUndefined();
   });
+
+  it('apfcTopicId (Knowledge Library Phase 2 shared-mapping foundation) survives a metadata edit exactly like syllabusNodeId does', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'T' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { syllabusNodeId: 'node-1', apfcTopicId: 'apfc-rights' },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    const merged = preserveUneditedMetadata({ tags: ['new-tag'] }, doc, { folderId: null, isPinned: false, isArchived: false });
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.syllabusNodeId).toBe('node-1');
+    expect(stored.metadata?.apfcTopicId).toBe('apfc-rights');
+  });
 });
 
 describe('Repository Item Management — rawContent and provenance preservation', () => {

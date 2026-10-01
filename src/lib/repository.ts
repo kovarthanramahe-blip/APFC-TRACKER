@@ -273,6 +273,12 @@ export { getImportedContentById, selectImportedContentByType, searchImportedCont
 export interface RepositoryQuery {
   workspaceId: WorkspaceKind;
   contentType?: RepositoryContentType;
+  /** Knowledge Library (Phase 2) — matches ANY of these content types, for a compact primary view
+   * (e.g. "Sources & Books" = research_document + bibliography) spanning more than one content
+   * type at once. Additive alongside `contentType` (singular): when both are given, `contentType`
+   * wins (it is the more specific ask) — a caller never needs to pass both, but neither is
+   * silently ignored by the other. Omitted/empty means "no content-type-set filter". */
+  contentTypes?: readonly RepositoryContentType[];
   search?: string;
   tags?: readonly string[];
   category?: string;
@@ -283,6 +289,43 @@ export interface RepositoryQuery {
    * lib/noteOrganization.ts's queryNotes: the default view never shows archived entries. */
   archived?: boolean;
   sort?: ImportedContentSortOrder;
+}
+
+// ============================================================================================
+// Knowledge Library (Phase 2) — a small, fixed set of compact PRIMARY views over the exact same
+// content the detailed filters already expose, never a second categorisation system. Each view is
+// just a curated content-type set (or `null` for "every type"); selecting one sets
+// RepositoryQuery.contentTypes above, and queryRepository filters exactly as it already does for
+// everything else. Current Affairs gets its own view, matching this phase's requirement that it
+// "feel like a natural first-class knowledge type" — no separate Current Affairs engine, just one
+// more entry in this same curated list.
+// ============================================================================================
+
+export type KnowledgeLibraryView = 'all' | 'notes' | 'questions' | 'current_affairs' | 'sources' | 'research';
+
+export interface KnowledgeLibraryViewMeta {
+  view: KnowledgeLibraryView;
+  label: string;
+  /** null = every content type (no filter) — only true for 'all'. */
+  contentTypes: readonly RepositoryContentType[] | null;
+}
+
+export const KNOWLEDGE_LIBRARY_VIEWS: readonly KnowledgeLibraryViewMeta[] = [
+  { view: 'all', label: 'All', contentTypes: null },
+  { view: 'notes', label: 'Notes', contentTypes: ['note'] },
+  { view: 'questions', label: 'Questions', contentTypes: ['question_bank', 'descriptive_questions', 'pyq'] },
+  { view: 'current_affairs', label: 'Current Affairs', contentTypes: ['current_affairs'] },
+  { view: 'sources', label: 'Sources & Books', contentTypes: ['research_document', 'bibliography'] },
+  { view: 'research', label: 'Research', contentTypes: ['document', 'study_material', 'other'] },
+];
+
+/** The content-type set a Knowledge Library view filters to, or null for 'all' (no filter) — the
+ * one lookup pages/Repository.tsx needs to turn a selected view into a RepositoryQuery.contentTypes
+ * value. Never throws: an unrecognised view (should be impossible given the KnowledgeLibraryView
+ * union, but this takes a plain string at the UI boundary) falls back to null (no filter), same as
+ * 'all', rather than silently hiding everything. */
+export function contentTypesForLibraryView(view: KnowledgeLibraryView): readonly RepositoryContentType[] | null {
+  return KNOWLEDGE_LIBRARY_VIEWS.find((v) => v.view === view)?.contentTypes ?? null;
 }
 
 /** Deterministic tie-break sort over RepositoryEntry, mirroring
@@ -327,7 +370,12 @@ export function queryRepository(
   const scopedContent = listImportedContentForWorkspace(importedContent, query.workspaceId);
   const scopedNotes = listNotesForWorkspace(notes, query.workspaceId);
 
-  const contentByType = query.contentType ? selectImportedContentByType(scopedContent, query.contentType) : scopedContent;
+  // `contentType` (singular) wins when both are given — see RepositoryQuery's own doc comment.
+  const contentByType = query.contentType
+    ? selectImportedContentByType(scopedContent, query.contentType)
+    : query.contentTypes && query.contentTypes.length > 0
+      ? scopedContent.filter((item) => query.contentTypes!.includes(item.contentType))
+      : scopedContent;
 
   const matchedContent = queryImportedContent(contentByType, {
     search: query.search,
@@ -339,8 +387,8 @@ export function queryRepository(
   });
 
   // Tags/category filters never match a Note by construction (Note has neither) — only a
-  // content-type filter for something OTHER than 'note' needs to explicitly drop notes here.
-  const notesEligible = !query.contentType || query.contentType === 'note';
+  // content-type filter that excludes 'note' needs to explicitly drop notes here.
+  const notesEligible = query.contentType ? query.contentType === 'note' : !query.contentTypes || query.contentTypes.length === 0 || query.contentTypes.includes('note');
   const tagsOrCategoryActive = (query.tags && query.tags.length > 0) || !!query.category;
   const matchedNotes = notesEligible && !tagsOrCategoryActive ? queryNotes(scopedNotes, { search: query.search, folderId: query.folderId, pinnedOnly: query.pinnedOnly, archived: query.archived }) : [];
 

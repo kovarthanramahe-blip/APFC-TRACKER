@@ -19,6 +19,9 @@ import {
   serializeRepositoryExportSnapshot,
   createRepositoryImportedContent,
   createManualRepositoryContent,
+  KNOWLEDGE_LIBRARY_VIEWS,
+  contentTypesForLibraryView,
+  type KnowledgeLibraryView,
 } from './repository';
 import { IMPORTED_CONTENT_TYPES, type ImportedContent, type ImportPreview } from './contentImport';
 import type { Note } from './types';
@@ -334,6 +337,90 @@ describe('repository — content-type filtering', () => {
     const notes = [note({ id: 'n1', workspaceId: 'phd_research' })];
     const results = queryRepository(items, notes, { workspaceId: 'phd_research' });
     expect(results.map((r) => r.entityId).sort()).toEqual(['c1', 'c2', 'n1']);
+  });
+
+  it('`contentTypes` (plural) matches ANY of several content types in one query — e.g. a "Sources & Books" view spanning research_document + bibliography', () => {
+    const items = [
+      content({ id: 'c1', contentType: 'research_document' }),
+      content({ id: 'c2', contentType: 'bibliography' }),
+      content({ id: 'c3', contentType: 'pyq' }),
+    ];
+    const results = queryRepository(items, [], { workspaceId: 'phd_research', contentTypes: ['research_document', 'bibliography'] });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['c1', 'c2']);
+  });
+
+  it('`contentType` (singular) wins when both `contentType` and `contentTypes` are given', () => {
+    const items = [content({ id: 'c1', contentType: 'research_document' }), content({ id: 'c2', contentType: 'bibliography' })];
+    const results = queryRepository(items, [], { workspaceId: 'phd_research', contentType: 'bibliography', contentTypes: ['research_document'] });
+    expect(results.map((r) => r.entityId)).toEqual(['c2']);
+  });
+
+  it('`contentTypes` including "note" also includes every domain Note, exactly like the singular filter does', () => {
+    const items = [content({ id: 'c1', contentType: 'research_document' })];
+    const notes = [note({ id: 'n1', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', contentTypes: ['research_document', 'note'] });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['c1', 'n1']);
+  });
+
+  it('`contentTypes` excluding "note" excludes every domain Note', () => {
+    const items = [content({ id: 'c1', contentType: 'research_document' })];
+    const notes = [note({ id: 'n1', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', contentTypes: ['research_document'] });
+    expect(results.map((r) => r.entityId)).toEqual(['c1']);
+  });
+
+  it('an empty `contentTypes` array behaves like no filter at all (never matches nothing)', () => {
+    const items = [content({ id: 'c1', contentType: 'research_document' })];
+    const notes = [note({ id: 'n1', workspaceId: 'phd_research' })];
+    const results = queryRepository(items, notes, { workspaceId: 'phd_research', contentTypes: [] });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['c1', 'n1']);
+  });
+});
+
+describe('repository — Knowledge Library views (Phase 2)', () => {
+  it('"all" has no content-type filter (null)', () => {
+    expect(contentTypesForLibraryView('all')).toBeNull();
+  });
+
+  it('every other view maps to a non-empty, fixed set of content types', () => {
+    const nonAllViews = KNOWLEDGE_LIBRARY_VIEWS.filter((v) => v.view !== 'all');
+    expect(nonAllViews.length).toBeGreaterThan(0);
+    for (const v of nonAllViews) {
+      expect(v.contentTypes).not.toBeNull();
+      expect(v.contentTypes!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('"current_affairs" view maps to exactly the current_affairs content type', () => {
+    expect(contentTypesForLibraryView('current_affairs')).toEqual(['current_affairs']);
+  });
+
+  it('"sources" view spans both research_document and bibliography', () => {
+    expect(contentTypesForLibraryView('sources')).toEqual(expect.arrayContaining(['research_document', 'bibliography']));
+  });
+
+  it('every KnowledgeLibraryView content type is a real, registered RepositoryContentType', () => {
+    const allTypes = new Set(REPOSITORY_CONTENT_TYPES);
+    for (const v of KNOWLEDGE_LIBRARY_VIEWS) {
+      for (const type of v.contentTypes ?? []) {
+        expect(allTypes.has(type)).toBe(true);
+      }
+    }
+  });
+
+  it('an unrecognised view string falls back to null (no filter) rather than hiding everything', () => {
+    expect(contentTypesForLibraryView('not-a-real-view' as KnowledgeLibraryView)).toBeNull();
+  });
+
+  it('selecting a view and querying end-to-end returns only that view\'s content types', () => {
+    const items = [
+      content({ id: 'note-type', contentType: 'note' }),
+      content({ id: 'qb', contentType: 'question_bank' }),
+      content({ id: 'pyq', contentType: 'pyq' }),
+      content({ id: 'ca', contentType: 'current_affairs' }),
+    ];
+    const results = queryRepository(items, [], { workspaceId: 'phd_research', contentTypes: contentTypesForLibraryView('questions') ?? undefined });
+    expect(results.map((r) => r.entityId).sort()).toEqual(['pyq', 'qb']);
   });
 });
 

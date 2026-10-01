@@ -15,8 +15,11 @@ import {
   REPOSITORY_CONTENT_TYPE_REGISTRY,
   getRepositoryContentTypeMeta,
   repositoryContentTypeSupports,
+  KNOWLEDGE_LIBRARY_VIEWS,
+  contentTypesForLibraryView,
   type RepositoryEntry,
   type RepositoryContentType,
+  type KnowledgeLibraryView,
 } from '../lib/repository';
 import { collectImportedContentTags, collectImportedContentCategories, parseTagsInput, type ImportedContentSortOrder } from '../lib/importedContentRepository';
 import type { ImportedContent, ImportedContentMetadata } from '../lib/contentImport';
@@ -210,6 +213,7 @@ export function preserveUneditedMetadata(
     ...(original?.metadata?.eventDate !== undefined ? { eventDate: original.metadata.eventDate } : {}),
     ...(original?.metadata?.source !== undefined ? { source: original.metadata.source } : {}),
     ...(original?.metadata?.syllabusNodeId !== undefined ? { syllabusNodeId: original.metadata.syllabusNodeId } : {}),
+    ...(original?.metadata?.apfcTopicId !== undefined ? { apfcTopicId: original.metadata.apfcTopicId } : {}),
   };
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
@@ -420,6 +424,10 @@ export default function Repository() {
   const bulkUpdateImportedContent = useAppStore((s) => s.bulkUpdateImportedContent);
 
   const [searchQuery, setSearchQuery] = useState('');
+  // Knowledge Library (Phase 2) — a compact primary view, read alongside (never replacing) the
+  // existing detailed content-type dropdown below: selecting a specific type there always narrows
+  // further/overrides the view (see RepositoryQuery's own doc comment on why contentType wins).
+  const [libraryView, setLibraryView] = useState<KnowledgeLibraryView>('all');
   const [selectedContentType, setSelectedContentType] = useState<RepositoryContentType | ''>('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -455,6 +463,7 @@ export default function Repository() {
       queryRepository(importedContent, notes, {
         workspaceId: activeWorkspaceId,
         contentType: selectedContentType || undefined,
+        contentTypes: selectedContentType ? undefined : (contentTypesForLibraryView(libraryView) ?? undefined),
         search: searchQuery,
         tags: selectedTags,
         category: selectedCategory || undefined,
@@ -463,13 +472,14 @@ export default function Repository() {
         archived: showArchived,
         sort: sortOrder,
       }),
-    [importedContent, notes, activeWorkspaceId, selectedContentType, searchQuery, selectedTags, selectedCategory, selectedFolderId, pinnedOnly, showArchived, sortOrder],
+    [importedContent, notes, activeWorkspaceId, libraryView, selectedContentType, searchQuery, selectedTags, selectedCategory, selectedFolderId, pinnedOnly, showArchived, sortOrder],
   );
 
   const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
 
   const hasActiveFilters =
     searchQuery.trim() !== '' ||
+    libraryView !== 'all' ||
     selectedContentType !== '' ||
     selectedCategory !== '' ||
     selectedTags.length > 0 ||
@@ -479,6 +489,7 @@ export default function Repository() {
 
   function clearFilters() {
     setSearchQuery('');
+    setLibraryView('all');
     setSelectedContentType('');
     setSelectedCategory('');
     setSelectedTags([]);
@@ -614,6 +625,30 @@ export default function Repository() {
           onSave={handleCreateCurrentAffairsSave}
         />
       )}
+
+      {/* Knowledge Library (Phase 2) — a compact, fixed set of primary views over the SAME
+          content the detailed filters below already expose (lib/repository.ts's own
+          KNOWLEDGE_LIBRARY_VIEWS), never a second categorisation system. Progressive disclosure:
+          this is the first, broad choice; the detailed Card below (search, content-type dropdown,
+          category, tags, folder, pinned/archived) stays available for finer filtering. */}
+      <div className="mb-5 flex flex-wrap items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 p-1 self-start">
+        {KNOWLEDGE_LIBRARY_VIEWS.map((v) => (
+          <button
+            key={v.view}
+            type="button"
+            onClick={() => setLibraryView(v.view)}
+            aria-pressed={libraryView === v.view}
+            className={cx(
+              'rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
+              libraryView === v.view
+                ? cx(accent.bg, 'text-white shadow-sm', accent.shadow)
+                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
+            )}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
