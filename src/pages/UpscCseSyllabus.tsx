@@ -212,7 +212,11 @@ function GranularSubtopicRow({
 
   return (
     <li className={cx('rounded-lg border border-slate-100 dark:border-slate-800/70', isSelfDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60')}>
-      <button className="flex w-full items-center gap-2 px-2 py-2 text-left" onClick={() => setIsOpen((v) => !v)}>
+      <button
+        className="flex w-full items-center gap-2 px-2 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+        onClick={() => setIsOpen((v) => !v)}
+        aria-expanded={expanded}
+      >
         <span className={cx('flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white', progressToneClass(summary.weightedPct))}>
           {summary.weightedPct}%
         </span>
@@ -270,7 +274,11 @@ function GranularTopicRow({
 
   return (
     <li className={cx('rounded-xl border border-slate-200/70 dark:border-slate-800', isSelfDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60')}>
-      <button className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left" onClick={() => setIsOpen((v) => !v)}>
+      <button
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+        onClick={() => setIsOpen((v) => !v)}
+        aria-expanded={expanded}
+      >
         <span className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white', progressToneClass(summary.weightedPct))}>
           {summary.weightedPct}%
         </span>
@@ -392,7 +400,11 @@ function MicrosyllabusRow({
         isDeepLinked && 'ring-2 ring-brand-400 dark:ring-brand-500/60',
       )}
     >
-      <button className="flex w-full items-center gap-3 px-2 py-2.5 text-left" onClick={() => setIsOpen((v) => !v)}>
+      <button
+        className="flex w-full items-center gap-3 px-2 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+        onClick={() => setIsOpen((v) => !v)}
+        aria-expanded={expanded}
+      >
         <span className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white', progressToneClass(summary.weightedPct))}>
           {summary.weightedPct}%
         </span>
@@ -404,21 +416,23 @@ function MicrosyllabusRow({
         </div>
         <ChevronDown className={cx('h-4 w-4 shrink-0 text-slate-400 transition-transform', expanded && 'rotate-180')} />
       </button>
+      {/* Outside the toggle <button> (an <a> nested inside a <button> is invalid HTML and would
+          swallow keyboard activation) — shown unconditionally whenever something is linked, never
+          gated behind expansion, so "what knowledge is connected" is answerable at a glance exactly
+          like the non-granular branch above already does. */}
+      {linkedCount > 0 && (
+        <Link
+          to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
+          className="flex items-center gap-1 px-2 pb-2 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+        >
+          <Link2 className="h-3 w-3" /> {linkedCount} linked
+        </Link>
+      )}
       {expanded && (
         <div className="border-t border-slate-200/70 dark:border-slate-800 px-2 py-2">
           <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
             <p className="text-[11px] text-slate-400">{item.description}</p>
-            <div className="flex shrink-0 items-center gap-2">
-              {linkedCount > 0 && (
-                <Link
-                  to={`/repository?syllabusNodeId=${encodeURIComponent(item.id)}`}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                >
-                  <Link2 className="h-3 w-3" /> {linkedCount} linked
-                </Link>
-              )}
-              <DerivedBadge />
-            </div>
+            <DerivedBadge />
           </div>
           <ul className="space-y-1.5">
             {topics.map((t) => (
@@ -490,7 +504,11 @@ function SubjectSection({
 
   return (
     <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 overflow-hidden">
-      <button className="flex w-full items-center gap-3 px-3 py-2.5 text-left" onClick={onToggle}>
+      <button
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
         <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-white', progressToneClass(summary.weightedPct))}>
           {summary.weightedPct}%
         </span>
@@ -589,7 +607,11 @@ function PaperSection({
 
   return (
     <Card className="overflow-hidden">
-      <button className="flex w-full items-center gap-4 px-4 py-4 sm:px-5 text-left" onClick={() => setPaperOpen((v) => !v)}>
+      <button
+        className="flex w-full items-center gap-4 px-4 py-4 sm:px-5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+        onClick={() => setPaperOpen((v) => !v)}
+        aria-expanded={paperExpanded}
+      >
         <span className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white', progressToneClass(summary.weightedPct))}>
           {summary.weightedPct}%
         </span>
