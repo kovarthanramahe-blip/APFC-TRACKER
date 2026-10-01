@@ -13,6 +13,8 @@ import { getRelatedContent, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelat
 import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry, preserveUneditedMetadata } from './Repository';
 import { resolveSyllabusNodeLabel } from './RepositoryDetail';
+import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
+import { SYLLABUS } from '../data/syllabus';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { createInkAnnotation, createHighlighterInkAnnotation, createStickyNote, createBookmark, annotationsForDocument } from '../lib/annotations';
@@ -208,17 +210,65 @@ describe('Repository Detail — Current Affairs metadata display (bug-fix follow
     expect(item.metadata?.syllabusNodeId).toBeUndefined();
   });
 
-  it('a non-Current-Affairs item (e.g. research_document) never carries the Current Affairs fields, even if present in metadata by coincidence', () => {
+  it('a non-Current-Affairs item (e.g. research_document) never carries the Current Affairs-only fields (eventDate/source), even if present in metadata by coincidence', () => {
     useAppStore.getState().setActiveWorkspaceId('phd_research');
     const doc = confirmImportedContent(preview({ title: 'Research doc' }), { workspaceId: 'phd_research', contentType: 'research_document', metadata: { category: 'Fieldwork' } });
     useAppStore.getState().addImportedContent(doc);
 
     const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
-    // The display gate the component uses is contentType === 'current_affairs' — never shown here.
+    // eventDate/source remain gated on contentType === 'current_affairs' (component's own
+    // isCurrentAffairs check) — never shown for any other type. syllabusNodeId/apfcTopicId are
+    // NOT gated this way any more — see the describe block below.
     expect(item.contentType).not.toBe('current_affairs');
     expect(item.metadata?.eventDate).toBeUndefined();
     expect(item.metadata?.source).toBeUndefined();
+  });
+});
+
+describe('Repository Detail — syllabus/topic display generalised to any knowledge item (Phase 3)', () => {
+  beforeEach(fullReset);
+
+  it('a non-Current-Affairs item (e.g. research_document) WITH a syllabusNodeId set resolves a real UPSC label — the display is no longer gated to contentType === "current_affairs"', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const currentAffairsSubject = UPSC_CSE_PRELIMS_SYLLABUS.subjects.find((s) => s.title === 'Current Affairs')!;
+    const microsyllabusItem = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.subjectId === currentAffairsSubject.id)!;
+    const doc = confirmImportedContent(preview({ title: 'A linked research document' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'research_document',
+      metadata: { syllabusNodeId: microsyllabusItem.id },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    expect(item.contentType).not.toBe('current_affairs');
+    expect(resolveSyllabusNodeLabel(item.metadata!.syllabusNodeId!)).toContain(currentAffairsSubject.title);
+  });
+
+  it('a knowledge item with an apfcTopicId resolves a real APFC subject/topic pair via resolveApfcTopicPath, independent of contentType', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const subject = SYLLABUS[0];
+    const topic = subject.topics[0];
+    const doc = confirmImportedContent(preview({ title: 'An APFC-mapped note' }), {
+      workspaceId: 'apfc',
+      contentType: 'research_document',
+      metadata: { apfcTopicId: topic.id },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    const resolved = resolveApfcTopicPath(item.metadata!.apfcTopicId!);
+    expect(resolved?.subject.id).toBe(subject.id);
+    expect(resolved?.topic.id).toBe(topic.id);
+  });
+
+  it('a knowledge item with neither syllabusNodeId nor apfcTopicId resolves neither label — nothing is fabricated', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Unmapped doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
     expect(item.metadata?.syllabusNodeId).toBeUndefined();
+    expect(item.metadata?.apfcTopicId).toBeUndefined();
   });
 });
 

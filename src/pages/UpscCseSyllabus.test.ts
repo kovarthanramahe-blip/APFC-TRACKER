@@ -11,6 +11,8 @@ import { computeCoverageSummary, getCoverageState } from '../lib/upscCseSyllabus
 import { subjectHasMicrosyllabusMatch } from '../lib/upscCseSyllabusSearch';
 import { SYLLABUS } from '../data/syllabus';
 import { PYQ_BANK } from '../data/pyq';
+import { confirmImportedContent } from '../lib/contentImport';
+import { listImportedContentBySyllabusNode } from '../lib/repository';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see every other *.test.ts file for the established convention). These tests exercise exactly what
@@ -253,5 +255,40 @@ describe('UPSC CSE Syllabus page — "Study this microsyllabus" deep-link resolu
 
   it('returns undefined for an id that exists in neither tree (never guesses a stage)', () => {
     expect(resolveDeepLinkStage('not-a-real-id')).toBeUndefined();
+  });
+});
+
+describe('UPSC CSE Syllabus page — "linked knowledge" indicator (Phase 3: Syllabus -> Knowledge)', () => {
+  beforeEach(fullReset);
+
+  it('a microsyllabus item with a Current Affairs entry linked to it has a non-zero linked count', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const microsyllabusItem = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus[0];
+    const linked = confirmImportedContent(
+      { sourceFilename: 'f.md', originalFormat: 'markdown', suggestedContentType: 'current_affairs', title: 'Linked item', content: 'x' },
+      { workspaceId: 'upsc_cse', contentType: 'current_affairs', metadata: { syllabusNodeId: microsyllabusItem.id } },
+    );
+    useAppStore.getState().addImportedContent(linked);
+
+    const count = listImportedContentBySyllabusNode(useAppStore.getState().importedContent, microsyllabusItem.id).length;
+    expect(count).toBe(1);
+  });
+
+  it('a microsyllabus item with nothing linked to it has a zero count — the page shows no badge at all for it', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const microsyllabusItem = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus[1];
+    expect(listImportedContentBySyllabusNode(useAppStore.getState().importedContent, microsyllabusItem.id)).toEqual([]);
+  });
+
+  it('an item linked to a DIFFERENT microsyllabus node is never counted against this one', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const [itemA, itemB] = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus;
+    const linkedToA = confirmImportedContent(
+      { sourceFilename: 'f.md', originalFormat: 'markdown', suggestedContentType: 'current_affairs', title: 'Linked to A', content: 'x' },
+      { workspaceId: 'upsc_cse', contentType: 'current_affairs', metadata: { syllabusNodeId: itemA.id } },
+    );
+    useAppStore.getState().addImportedContent(linkedToA);
+
+    expect(listImportedContentBySyllabusNode(useAppStore.getState().importedContent, itemB.id)).toEqual([]);
   });
 });
