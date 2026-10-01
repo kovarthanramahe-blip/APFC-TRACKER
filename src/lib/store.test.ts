@@ -1809,7 +1809,7 @@ describe('updateAnnotationPoints (Phase F — lasso move)', () => {
   beforeEach(() => useAppStore.setState({ activeWorkspaceId: DEFAULT_WORKSPACE_ID, inactiveWorkspaceOwnedData: {}, annotations: [] }));
 
   it('replaces the points of a geometry annotation and bumps updatedAt', () => {
-    const ink = { id: 'ink-1', documentId: 'note:doc-a', renderMode: 'raw' as const, pageNumber: 1, studyTags: [], type: 'ink' as const, penStyle: 'fine' as const, color: '#000', thickness: 2, opacity: 1, points: [{ x: 0.1, y: 0.1 }], createdAt: 't0', updatedAt: 't0' };
+    const ink = { id: 'ink-1', documentId: 'note:doc-a', renderMode: 'raw' as const, pageNumber: 1, studyTags: [], type: 'ink' as const, penStyle: 'pencil' as const, color: '#000', thickness: 2, opacity: 1, points: [{ x: 0.1, y: 0.1 }], createdAt: 't0', updatedAt: 't0' };
     useAppStore.setState({ annotations: [ink] });
     useAppStore.getState().updateAnnotationPoints('ink-1', [{ x: 0.5, y: 0.5 }]);
     const updated = useAppStore.getState().annotations[0];
