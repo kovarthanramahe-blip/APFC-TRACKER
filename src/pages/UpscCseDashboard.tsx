@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Compass, ListTodo, Plus, Trash2, Clock, Flame, TrendingDown, History as HistoryIcon, BookOpen, ListChecks, Brain, XCircle } from 'lucide-react';
+import { Compass, ListTodo, Plus, Trash2, Clock, Flame, TrendingDown, History as HistoryIcon, BookOpen, ListChecks, Brain, XCircle, Newspaper } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, cx, uuid } from '../lib/utils';
@@ -32,6 +32,7 @@ import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 const KIND_ICON: Record<UpscCseTodaysStudyItemKind, typeof BookOpen> = {
   syllabus: BookOpen,
   revision: Brain,
+  current_affairs_revision: Newspaper,
   incorrect: XCircle,
   unanswered: ListChecks,
   weak_area: TrendingDown,
@@ -40,7 +41,7 @@ const KIND_ICON: Record<UpscCseTodaysStudyItemKind, typeof BookOpen> = {
 function CoverageStatTile({ label, summary }: { label: string; summary: { weightedPct: number; total: number; counts: { strong: number } } }) {
   return (
     <Card className="p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
       <p className="mt-1 font-display text-2xl font-bold text-slate-900 dark:text-white">{summary.weightedPct}%</p>
       <p className="mt-0.5 text-xs text-slate-400">
         {summary.counts.strong}/{summary.total} strong
@@ -73,6 +74,7 @@ export default function UpscCseDashboard() {
   const attempts = useAppStore((s) => s.upscCsePrelimsPyqAttempts);
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const revisionQueue = useAppStore((s) => s.revisionQueue);
+  const importedContent = useAppStore((s) => s.importedContent);
   const studyLog = useAppStore((s) => s.studyLog);
   const dailyGoalMinutes = useAppStore((s) => s.dailyGoalMinutes);
   const studyTasks = useAppStore((s) => s.upscCseStudyTasks);
@@ -132,6 +134,17 @@ export default function UpscCseDashboard() {
     tookTestToday,
   });
 
+  // Phase 5 — Study Intelligence: Current Affairs ids actually tracked in the revision queue (the
+  // store's importedContent already only ever holds the active workspace's own items — see
+  // lib/store.ts's setActiveWorkspaceId swap — so no further workspace filter is needed here,
+  // matching how coverage/attempts/revisionQueue above are already read directly). An item never
+  // added to revision (no entry in revisionQueue) is correctly excluded by generateTodaysStudyItems
+  // itself (getDueItems only returns ids with a real, due RevisionItem).
+  const currentAffairsRevisionIds = useMemo(
+    () => importedContent.filter((item) => item.contentType === 'current_affairs' && revisionQueue[item.id]).map((item) => item.id),
+    [importedContent, revisionQueue],
+  );
+
   const todaysStudyItems = useMemo(
     () =>
       generateTodaysStudyItems({
@@ -143,9 +156,10 @@ export default function UpscCseDashboard() {
         attempts,
         bookmarkedPyqIds,
         revisionQueue,
+        currentAffairsRevisionIds,
         today,
       }),
-    [coverage, attempts, bookmarkedPyqIds, revisionQueue, today],
+    [coverage, attempts, bookmarkedPyqIds, revisionQueue, currentAffairsRevisionIds, today],
   );
 
   const todaysTasks = useMemo(() => tasksForDate(studyTasks, today), [studyTasks, today]);
@@ -203,7 +217,9 @@ export default function UpscCseDashboard() {
 
       <StudyActivityTrend days={activityTrend} accent={workspaceAccent} className="mt-6" />
 
-      <Card className="mt-6 p-5 sm:p-6">
+      {/* Design system — same treatment as the APFC dashboard's own "Today's Study" card: the
+          single most actionable card on the page, elevated for consistency across workspaces. */}
+      <Card elevated className="mt-6 p-5 sm:p-6">
         <div className="mb-4 flex items-center gap-2">
           <Flame className="h-4 w-4 text-brand-600 dark:text-brand-400" />
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Today's Study</h3>

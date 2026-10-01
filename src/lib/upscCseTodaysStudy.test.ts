@@ -174,4 +174,31 @@ describe('generateTodaysStudyItems', () => {
     const input = baseInput({ pyqBank: [q({ id: 'q1' })], bookmarkedPyqIds: ['q1'] });
     expect(generateTodaysStudyItems(input)).toEqual(generateTodaysStudyItems(input));
   });
+
+  // Phase 5 — Study Intelligence: Current Affairs items due for revision (the same revisionQueue
+  // dict PYQs use, written to via pages/RepositoryDetail.tsx's "Add to Revision" action).
+  it('adds a current-affairs-revision item only when a tracked id is actually due today', () => {
+    // currentAffairsRevisionIds is empty — the caller (pages/UpscCseDashboard.tsx) only ever
+    // includes ids with a REAL revisionQueue entry, so an item never added to revision is simply
+    // never passed in, never surfaced here as if it were already due.
+    const notTracked = generateTodaysStudyItems(baseInput());
+    expect(notTracked.some((i) => i.kind === 'current_affairs_revision')).toBe(false);
+
+    const dueQueue: RevisionQueue = { ca1: { pyqId: 'ca1', box: 1, dueDate: '2026-09-22', lastReviewedDate: '2026-09-15', reviewCount: 1 } };
+    const due = generateTodaysStudyItems(baseInput({ currentAffairsRevisionIds: ['ca1'], revisionQueue: dueQueue }));
+    const item = due.find((i) => i.kind === 'current_affairs_revision')!;
+    expect(item).toBeDefined();
+    expect(item.actionHref).toBe('/repository?view=current_affairs');
+  });
+
+  it('does not surface a current-affairs-revision item for an id tracked but not yet due', () => {
+    const futureQueue: RevisionQueue = { ca1: { pyqId: 'ca1', box: 2, dueDate: '2099-01-01', lastReviewedDate: '2026-09-01', reviewCount: 1 } };
+    const items = generateTodaysStudyItems(baseInput({ currentAffairsRevisionIds: ['ca1'], revisionQueue: futureQueue }));
+    expect(items.some((i) => i.kind === 'current_affairs_revision')).toBe(false);
+  });
+
+  it('defaults to no current-affairs-revision items when currentAffairsRevisionIds is omitted', () => {
+    const items = generateTodaysStudyItems(baseInput());
+    expect(items.some((i) => i.kind === 'current_affairs_revision')).toBe(false);
+  });
 });
