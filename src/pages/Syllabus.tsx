@@ -9,6 +9,7 @@ import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
+import { countNotesByTopic } from '../lib/noteOrganization';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 
@@ -35,6 +36,7 @@ export default function Syllabus() {
   // one of the two workspaces that render this component.
   const accent = getWorkspaceAccent(activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
+  const notes = useAppStore((s) => s.notes);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const toggleTopic = useAppStore((s) => s.toggleTopic);
   const markSubjectTopics = useAppStore((s) => s.markSubjectTopics);
@@ -150,8 +152,9 @@ export default function Syllabus() {
           return (
             <Card key={subj.id} className="overflow-hidden">
               <button
-                className="flex w-full items-center gap-4 px-4 py-4 sm:px-5 text-left"
+                className={cx('flex w-full items-center gap-4 px-4 py-4 sm:px-5 text-left focus:outline-none focus-visible:ring-2', accent.focusRing)}
                 onClick={() => setOpenIds((prev) => (prev.includes(subj.id) ? prev.filter((i) => i !== subj.id) : [...prev, subj.id]))}
+                aria-expanded={isOpen}
               >
                 <span className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold', colors.bg, colors.text)}>
                   {pct}%
@@ -197,6 +200,7 @@ export default function Syllabus() {
                         {subj.topics.map((topic) => {
                           const checked = !!completedTopics[topic.id];
                           const isDeepLinked = topic.id === deepLinkTopicId;
+                          const noteCount = countNotesByTopic(notes, topic.id);
                           return (
                             <li
                               key={topic.id}
@@ -229,10 +233,14 @@ export default function Syllabus() {
                               )}
                               <Link
                                 to={`/notes?topicId=${encodeURIComponent(topic.id)}`}
-                                title="Notes for this topic"
-                                className={cx('shrink-0 rounded-lg p-2 text-slate-300 dark:text-slate-600', accent.hoverText)}
+                                title={noteCount > 0 ? `${noteCount} note${noteCount === 1 ? '' : 's'} for this topic` : 'Notes for this topic'}
+                                className={cx(
+                                  'shrink-0 flex items-center gap-1 rounded-lg p-2 text-slate-300 dark:text-slate-600',
+                                  noteCount > 0 ? cx('text-xs font-medium', accent.text) : accent.hoverText,
+                                )}
                               >
                                 <NotebookPen className="h-4 w-4" />
+                                {noteCount > 0 && noteCount}
                               </Link>
                             </li>
                           );

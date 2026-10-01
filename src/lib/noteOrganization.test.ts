@@ -12,6 +12,7 @@ import {
   queryNotes,
   collectNoteTags,
   applyNoteOrganizationPatch,
+  countNotesByTopic,
 } from './noteOrganization';
 import { createFolder } from './folders';
 import type { Note } from './types';
@@ -234,5 +235,32 @@ describe('applyNoteOrganizationPatch', () => {
     const snapshot = JSON.parse(JSON.stringify(n));
     applyNoteOrganizationPatch(n, { pinned: true, addTags: ['b'] });
     expect(n).toEqual(snapshot);
+  });
+});
+
+describe('countNotesByTopic (Phase 4 — Visual Syllabus System)', () => {
+  it('counts only notes whose topicId matches exactly', () => {
+    const notes: Note[] = [
+      { ...note({ id: 'n1' }), topicId: 'topic-a' },
+      { ...note({ id: 'n2' }), topicId: 'topic-a' },
+      { ...note({ id: 'n3' }), topicId: 'topic-b' },
+    ];
+    expect(countNotesByTopic(notes, 'topic-a')).toBe(2);
+    expect(countNotesByTopic(notes, 'topic-b')).toBe(1);
+  });
+
+  it('is 0 for a topic with no notes filed under it, never throwing', () => {
+    const notes: Note[] = [{ ...note({ id: 'n1' }), topicId: 'topic-a' }];
+    expect(() => countNotesByTopic(notes, 'topic-z')).not.toThrow();
+    expect(countNotesByTopic(notes, 'topic-z')).toBe(0);
+  });
+
+  it('a note with no topicId at all is never counted against any topic', () => {
+    const notes: Note[] = [note({ id: 'n1' })];
+    expect(countNotesByTopic(notes, 'topic-a')).toBe(0);
+  });
+
+  it('is 0 over an empty notes collection', () => {
+    expect(countNotesByTopic([], 'topic-a')).toBe(0);
   });
 });

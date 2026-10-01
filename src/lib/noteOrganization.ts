@@ -22,6 +22,14 @@ export function isNoteArchived(note: Note): boolean {
   return note.isArchived ?? false;
 }
 
+/** Phase 4 — Visual Syllabus System: how many notes are filed under this syllabus topic
+ * (Note.topicId — the SAME pre-existing FK pages/Syllabus.tsx's own "Study this topic" deep-link
+ * already uses, see lib/types.ts's own header on it). Used to show a compact, "at a glance" notes
+ * count on a syllabus topic row, shown only when > 0 — never fabricated for a topic with none. */
+export function countNotesByTopic(notes: readonly Note[], topicId: string): number {
+  return notes.filter((n) => n.topicId === topicId).length;
+}
+
 /** Case-insensitive substring search over title, Markdown content, tags, and (when `folders` is
  * supplied) the note's own folder name — Phase 5L: extends this one existing search function
  * rather than adding a second search engine, so every caller (queryNotes below, and Notes.tsx's
