@@ -21,7 +21,7 @@ import { computeRevisionStatusMap, revisionStatusOf, computeEligibleRevisionIds,
 import { computeUpscCsePrelimsPerformance } from './upscCsePrelimsPyqPerformance';
 import { getDueItems, type RevisionQueue } from './revisionQueue';
 
-export type UpscCseTodaysStudyItemKind = 'syllabus' | 'revision' | 'incorrect' | 'unanswered' | 'weak_area';
+export type UpscCseTodaysStudyItemKind = 'syllabus' | 'revision' | 'current_affairs_revision' | 'incorrect' | 'unanswered' | 'weak_area';
 
 export interface UpscCseTodaysStudyItem {
   id: string;
@@ -48,6 +48,20 @@ export interface GenerateTodaysStudyInput {
   attempts: readonly UpscCsePrelimsPyqAttempt[];
   bookmarkedPyqIds: readonly string[];
   revisionQueue: RevisionQueue;
+  /** Phase 5 — Study Intelligence: ids of this workspace's Current Affairs ImportedContent items
+   * (contentType === 'current_affairs') that have actually been added to the revision queue (see
+   * pages/RepositoryDetail.tsx's "Add to Revision" action, lib/store.ts's addToRevisionQueue) —
+   * NOT every Current Affairs item, since one never added to revision is never "due". Current
+   * Affairs writes into this SAME per-workspace revisionQueue dict PYQs use (same id-keyed
+   * RevisionItem shape, lib/revisionQueue.ts's own addItem/getDueItems), so no second due-date
+   * engine is introduced here — only a second eligible-id set, exactly like bookmarkedPyqIds
+   * above. IMPORTANT: unlike bookmarkedPyqIds (which getDueItems/getOrCreateItem is fine
+   * synthesising a fresh, due-today entry for), this list must contain ONLY ids that already have
+   * a real revisionQueue entry — an id with none would otherwise be silently treated as "due
+   * today" by getOrCreateItem, surfacing a Current Affairs item the user never asked to revise.
+   * Defaults to `[]` (today's study degrades to its pre-existing PYQ-only behaviour) so existing
+   * callers/tests are unaffected. */
+  currentAffairsRevisionIds?: readonly string[];
   /** yyyy-mm-dd, local date — supplied by the caller (see lib/revisionQueue.ts's own discipline:
    * never Date.now()/toISOString() inside a "pure" function). */
   today: string;
@@ -109,6 +123,24 @@ export function generateTodaysStudyItems(input: GenerateTodaysStudyInput): UpscC
       description: 'Questions you marked for revision, or previously got wrong, that are due today.',
       actionLabel: 'Review Revision Questions',
       actionHref: '/upsc-pyq-test?view=revision',
+    });
+  }
+
+  // 2b. Current Affairs items due for revision — same revisionQueue dict, same getDueItems used
+  // just above for PYQs; only the eligible-id set differs (Current Affairs ids actually tracked
+  // in the queue). Kept as its own item (distinct id/kind/href) rather than merged into the PYQ
+  // revision count above, since it links to a different destination (the Knowledge Library, not
+  // the PYQ test runner) and the two are conceptually different content.
+  const currentAffairsIds = [...(input.currentAffairsRevisionIds ?? [])];
+  const currentAffairsDueCount = getDueItems(input.revisionQueue, currentAffairsIds, input.today).length;
+  if (currentAffairsDueCount > 0) {
+    items.push({
+      id: 'current-affairs-revision-due',
+      kind: 'current_affairs_revision',
+      title: `${currentAffairsDueCount} Current Affairs item${currentAffairsDueCount === 1 ? '' : 's'} due for revision`,
+      description: 'Current Affairs notes you marked for revision that are due today.',
+      actionLabel: 'Review Current Affairs',
+      actionHref: '/repository?view=current_affairs',
     });
   }
 

@@ -438,7 +438,15 @@ export default function Repository() {
   // Knowledge Library (Phase 2) — a compact primary view, read alongside (never replacing) the
   // existing detailed content-type dropdown below: selecting a specific type there always narrows
   // further/overrides the view (see RepositoryQuery's own doc comment on why contentType wins).
-  const [libraryView, setLibraryView] = useState<KnowledgeLibraryView>('all');
+  // Phase 5 — Study Intelligence: arriving via /repository?view=current_affairs (UPSC CSE
+  // Dashboard's "Today's Study" Current-Affairs-due item today; any future caller can link here the
+  // same way) pre-selects that Knowledge Library view. Read only once, on mount, exactly like
+  // syllabusNodeIdFilter/apfcTopicIdFilter above — an unrecognised or absent `view` param falls
+  // back to 'all', never a blank/broken view.
+  const [libraryView, setLibraryView] = useState<KnowledgeLibraryView>(() => {
+    const requested = searchParams.get('view');
+    return KNOWLEDGE_LIBRARY_VIEWS.some((v) => v.view === requested) ? (requested as KnowledgeLibraryView) : 'all';
+  });
   const [selectedContentType, setSelectedContentType] = useState<RepositoryContentType | ''>('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
