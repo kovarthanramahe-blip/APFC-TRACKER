@@ -70,7 +70,7 @@ export type RepositoryCapabilities = Record<RepositoryCapability, boolean>;
  * connected right now, not what the relationship model could theoretically support (it is in fact
  * type-agnostic — see contentRelationships.ts's own header — but no linking UI exists yet for
  * question_bank/descriptive_questions/pyq/other, so this registry does not overclaim it). */
-const LINKABLE_CONTENT_TYPES: ReadonlySet<RepositoryContentType> = new Set(['note', 'research_document', 'bibliography']);
+const LINKABLE_CONTENT_TYPES: ReadonlySet<RepositoryContentType> = new Set(['note', 'research_document', 'bibliography', 'current_affairs']);
 
 /**
  * Capability derivation, one content type at a time. 'note' is the one type whose real persistence
@@ -107,6 +107,7 @@ const REPOSITORY_CONTENT_TYPE_LABELS: Record<RepositoryContentType, string> = {
   question_bank: 'Question Bank',
   descriptive_questions: 'Descriptive Questions',
   pyq: 'Previous Year Questions',
+  current_affairs: 'Current Affairs',
   other: 'Other',
 };
 

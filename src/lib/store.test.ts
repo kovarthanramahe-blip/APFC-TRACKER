@@ -83,6 +83,51 @@ describe('store — revision queue integration', () => {
   });
 });
 
+// Current Affairs revision (Repository "Add to Revision") — reuses the exact same revisionQueue
+// state and recordRevisionCorrect/recordRevisionIncorrect actions above; the only new surface is
+// addToRevisionQueue, which exists only because a Current Affairs item (unlike a PYQ) has no
+// "incorrect attempt" to derive eligibility from and so needs an explicit add.
+describe('store — addToRevisionQueue (Current Affairs revision)', () => {
+  beforeEach(resetStore);
+
+  it('adds a brand-new, unseen item: box 1, due immediately, never reviewed', () => {
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    const item = useAppStore.getState().revisionQueue['ca-1'];
+    expect(item).toEqual({ pyqId: 'ca-1', box: 1, dueDate: '2026-01-08', lastReviewedDate: null, reviewCount: 0 });
+  });
+
+  it('adding the same id twice does not create a duplicate record or reset it', () => {
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['ca-1']);
+  });
+
+  it('adding an id again after it has already been reviewed does not reset its progress', () => {
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    useAppStore.getState().recordRevisionCorrect('ca-1', '2026-01-08'); // now box 2
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-20'); // user revisits and "adds" it again later
+    const item = useAppStore.getState().revisionQueue['ca-1'];
+    expect(item.box).toBe(2);
+    expect(item.reviewCount).toBe(1);
+  });
+
+  it('a Current Affairs id and a PYQ id are tracked independently in the same queue', () => {
+    useAppStore.getState().recordRevisionCorrect('pyq-1', '2026-01-08');
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    const queue = useAppStore.getState().revisionQueue;
+    expect(queue['pyq-1'].box).toBe(2);
+    expect(queue['ca-1'].box).toBe(1);
+  });
+
+  it('correct/incorrect review on an added Current Affairs item uses the exact same algorithm as PYQ review', () => {
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    useAppStore.getState().recordRevisionCorrect('ca-1', '2026-01-08');
+    expect(useAppStore.getState().revisionQueue['ca-1'].box).toBe(2);
+    useAppStore.getState().recordRevisionIncorrect('ca-1', '2026-01-10');
+    expect(useAppStore.getState().revisionQueue['ca-1'].box).toBe(1);
+  });
+});
+
 // Multi-Workspace OS, Stage 1 — persist migration. Fixtures below simulate a real pre-Stage-1
 // persisted blob (version 1, exactly the shape store.ts wrote before this stage — no
 // activeWorkspaceId, no workspaceId anywhere) exactly as it would arrive from localStorage or from
@@ -1764,7 +1809,7 @@ describe('updateAnnotationPoints (Phase F — lasso move)', () => {
   beforeEach(() => useAppStore.setState({ activeWorkspaceId: DEFAULT_WORKSPACE_ID, inactiveWorkspaceOwnedData: {}, annotations: [] }));
 
   it('replaces the points of a geometry annotation and bumps updatedAt', () => {
-    const ink = { id: 'ink-1', documentId: 'note:doc-a', renderMode: 'raw' as const, pageNumber: 1, studyTags: [], type: 'ink' as const, penStyle: 'pen' as const, color: '#000', thickness: 2, opacity: 1, points: [{ x: 0.1, y: 0.1 }], createdAt: 't0', updatedAt: 't0' };
+    const ink = { id: 'ink-1', documentId: 'note:doc-a', renderMode: 'raw' as const, pageNumber: 1, studyTags: [], type: 'ink' as const, penStyle: 'fine' as const, color: '#000', thickness: 2, opacity: 1, points: [{ x: 0.1, y: 0.1 }], createdAt: 't0', updatedAt: 't0' };
     useAppStore.setState({ annotations: [ink] });
     useAppStore.getState().updateAnnotationPoints('ink-1', [{ x: 0.5, y: 0.5 }]);
     const updated = useAppStore.getState().annotations[0];

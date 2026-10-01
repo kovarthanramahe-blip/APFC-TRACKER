@@ -13,7 +13,7 @@ import {
 } from '../lib/repository';
 import { exportAllData, importAllData } from '../lib/store';
 import { navigationTargetFor } from '../lib/repositoryNavigation';
-import { canEditEntry, canDeleteEntry } from './Repository';
+import { canEditEntry, canDeleteEntry, preserveUneditedMetadata } from './Repository';
 import { getIncomingRelationships, getOutgoingRelationships } from '../lib/contentRelationships';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
@@ -347,6 +347,94 @@ describe('Repository Item Management — edit metadata (title editing, tag/categ
 
     useAppStore.getState().updateImportedContent(doc.id, { title: 'T', metadata: undefined });
     expect(useAppStore.getState().importedContent[0].metadata).toBeUndefined();
+  });
+});
+
+describe('Repository Item Management — Current Affairs metadata-preservation regression (bug fix)', () => {
+  beforeEach(fullReset);
+
+  it('a Current Affairs item with eventDate/source/syllabusNodeId survives a title/tag/category/description edit', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'Original Title' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { eventDate: '2026-03-14', source: 'The Hindu, 14 Mar 2026', syllabusNodeId: 'node-1' },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    // Simulates EditMetadataModal's save: a fresh metadata object built ONLY from
+    // title/tags/category/description, with no idea the Current Affairs fields exist — exactly
+    // the shape handleEditSave receives from the modal.
+    const editedMetadata = { tags: ['new-tag'], category: 'Daily Reading' };
+    const merged = preserveUneditedMetadata(editedMetadata, doc, { folderId: null, isPinned: false, isArchived: false });
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Edited Title', metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.title).toBe('Edited Title');
+    expect(stored.metadata?.tags).toEqual(['new-tag']);
+    expect(stored.metadata?.category).toBe('Daily Reading');
+    expect(stored.metadata?.eventDate).toBe('2026-03-14');
+    expect(stored.metadata?.source).toBe('The Hindu, 14 Mar 2026');
+    expect(stored.metadata?.syllabusNodeId).toBe('node-1');
+  });
+
+  it('a Current Affairs item with undefined eventDate/source/syllabusNodeId keeps them undefined after editing — never defaulted', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'No CA fields set' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const merged = preserveUneditedMetadata({ category: 'General' }, doc, { folderId: null, isPinned: false, isArchived: false });
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'No CA fields set', metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.category).toBe('General');
+    expect(stored.metadata?.eventDate).toBeUndefined();
+    expect(stored.metadata?.source).toBeUndefined();
+    expect(stored.metadata?.syllabusNodeId).toBeUndefined();
+  });
+
+  it('existing folderId/isPinned/isArchived preservation still works, now alongside the Current Affairs fields', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'T' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { eventDate: '2026-01-05', source: 'PIB', syllabusNodeId: 'node-2' },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    const merged = preserveUneditedMetadata(undefined, doc, { folderId: 'folder-1', isPinned: true, isArchived: true });
+    expect(merged).toEqual({
+      folderId: 'folder-1',
+      isPinned: true,
+      isArchived: true,
+      eventDate: '2026-01-05',
+      source: 'PIB',
+      syllabusNodeId: 'node-2',
+    });
+  });
+
+  it('non-Current-Affairs metadata editing is completely unchanged by this fix', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Research doc' }), { workspaceId: 'phd_research', contentType: 'research_document', metadata: { tags: ['old'] } });
+    useAppStore.getState().addImportedContent(doc);
+
+    const merged = preserveUneditedMetadata({ tags: ['new-tag'], category: 'Sources' }, doc, { folderId: null, isPinned: false, isArchived: false });
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Research doc', metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata).toEqual({ tags: ['new-tag'], category: 'Sources' });
+    expect(stored.metadata).not.toHaveProperty('eventDate');
+    expect(stored.metadata).not.toHaveProperty('source');
+    expect(stored.metadata).not.toHaveProperty('syllabusNodeId');
+  });
+
+  it('a field absent before editing (e.g. no folderId set) remains absent, never fabricated as null/false', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'T' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const merged = preserveUneditedMetadata(undefined, doc, { folderId: null, isPinned: false, isArchived: false });
+    expect(merged).toBeUndefined();
   });
 });
 

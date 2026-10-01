@@ -14,7 +14,13 @@ import { adaptStudyPlan as runAdaptStudyPlan, type AdaptiveResult } from './stud
 import type { SyllabusSubject } from './types';
 import type { PyqPerformanceSnapshot } from './pyqPerformance';
 import { getLocalDateString } from './utils';
-import { createRevisionQueue, recordCorrect as recordRevisionCorrectItem, recordIncorrect as recordRevisionIncorrectItem, type RevisionQueue } from './revisionQueue';
+import {
+  createRevisionQueue,
+  recordCorrect as recordRevisionCorrectItem,
+  recordIncorrect as recordRevisionIncorrectItem,
+  addItem as addRevisionQueueItem,
+  type RevisionQueue,
+} from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
 import type { ImportedContent } from './contentImport';
 import { applyImportedContentOrganizationPatch, type ImportedContentOrganizationPatch } from './importedContentRepository';
@@ -153,7 +159,9 @@ interface AppState {
   attempts: MockTestAttempt[];
   addAttempt: (attempt: MockTestAttempt) => void;
 
-  // PYQ practice test attempts (local-only for now — no cloud sync yet)
+  // PYQ practice test attempts — included in the whole-store cloud sync like every other
+  // persisted field here (exportAllData()/cloudSync.ts push the entire store, this included;
+  // there is no separate or local-only handling for it).
   pyqAttempts: PYQAttempt[];
   addPyqAttempt: (attempt: PYQAttempt) => void;
 
@@ -226,13 +234,17 @@ interface AppState {
   adaptStudyPlan: (syllabus: SyllabusSubject[], pyqPerf: PyqPerformanceSnapshot | null, currentDate: string) => AdaptiveResult | null;
 
   // Revision queue (Stage 2 of the spaced-repetition feature): pure scheduling state only
-  // (lib/revisionQueue's box/dueDate/lastReviewedDate/reviewCount per pyqId) — which PYQ ids are
+  // (lib/revisionQueue's box/dueDate/lastReviewedDate/reviewCount per item id) — which PYQ ids are
   // even eligible (incorrect or bookmarked) is derived live by the caller from pyqAttempts/
   // bookmarkedPyqIds, never stored here, so an id never needs to be added/removed as its
   // eligibility changes. `today` is always supplied by the caller (yyyy-mm-dd, local date).
   revisionQueue: RevisionQueue;
-  recordRevisionCorrect: (pyqId: string, today: string) => void;
-  recordRevisionIncorrect: (pyqId: string, today: string) => void;
+  recordRevisionCorrect: (itemId: string, today: string) => void;
+  recordRevisionIncorrect: (itemId: string, today: string) => void;
+  // Current Affairs Repository revision: unlike a PYQ attempt, a Current Affairs item has no
+  // "incorrect attempt" to derive eligibility from, so it needs an explicit, idempotent "add to
+  // revision" action — see lib/revisionQueue.ts's addItem (reused as-is; no second engine).
+  addToRevisionQueue: (itemId: string, today: string) => void;
 
   // Import-First Content Repository foundation: generic, workspace-scoped records produced by
   // lib/contentImport.ts's pipeline (note/question_bank/descriptive_questions/pyq/
@@ -878,10 +890,12 @@ export const useAppStore = create<AppState>()(
       },
 
       revisionQueue: createRevisionQueue(),
-      recordRevisionCorrect: (pyqId, today) =>
-        set((state) => ({ revisionQueue: recordRevisionCorrectItem(state.revisionQueue, pyqId, today) })),
-      recordRevisionIncorrect: (pyqId, today) =>
-        set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, pyqId, today) })),
+      recordRevisionCorrect: (itemId, today) =>
+        set((state) => ({ revisionQueue: recordRevisionCorrectItem(state.revisionQueue, itemId, today) })),
+      recordRevisionIncorrect: (itemId, today) =>
+        set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, itemId, today) })),
+      addToRevisionQueue: (itemId, today) =>
+        set((state) => ({ revisionQueue: addRevisionQueueItem(state.revisionQueue, itemId, today) })),
 
       importedContent: [],
       // The store is the single source of truth for which workspace an item belongs to — always
