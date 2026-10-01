@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { computePyqPerformance } from '../lib/pyqPerformance';
-import { computeUnifiedTopicStatus } from '../lib/topicStatus';
+import { computeUnifiedTopicStatus, MIN_PYQ_ATTEMPTS_FOR_SIGNAL, WEAK_PYQ_ACCURACY_THRESHOLD } from '../lib/topicStatus';
+import { getTopicCounts } from '../lib/pyqFilters';
 import { countNotesByTopic } from '../lib/noteOrganization';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
@@ -50,11 +51,24 @@ export default function Syllabus() {
   // otherwise the checkmark alone would misleadingly read as "done". PYQ_BANK only ever contains
   // APFC questions, so for a workspace with no PYQ practice yet (pyqAttempts always []) this
   // naturally degrades to "no PYQ signal" for every topic — never a special case to handle here.
-  const needsRevisionTopicIds = useMemo(() => {
+  const topicStatusById = useMemo(() => {
     const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
     const statuses = computeUnifiedTopicStatus(syllabus, completedTopics, pyqPerf);
-    return new Set(statuses.filter((t) => t.status === 'needs_revision').map((t) => t.topicId));
+    return new Map(statuses.map((t) => [t.topicId, t]));
   }, [syllabus, completedTopics, pyqAttempts]);
+  const needsRevisionTopicIds = useMemo(
+    () => new Set([...topicStatusById.values()].filter((t) => t.status === 'needs_revision').map((t) => t.topicId)),
+    [topicStatusById],
+  );
+
+  // Phase 6 — Competitive Exam Intelligence: how many PYQs exist in the bank for each topic
+  // (historical coverage, independent of whether the user has attempted any of them) — reuses
+  // lib/pyqFilters.ts's existing getTopicCounts verbatim (the same aggregation PYQTest.tsx's own
+  // topic filter chips already use), never a second PYQ-counting pass.
+  const pyqCountByTopic = useMemo(() => {
+    const counts = getTopicCounts(PYQ_BANK, 'all', 'all');
+    return new Map(counts.map((c) => [c.id, c.count]));
+  }, []);
 
   // Deep-link support: "Study this topic" from a PYQ review arrives as /syllabus?topicId=...
   const [searchParams] = useSearchParams();
@@ -201,6 +215,9 @@ export default function Syllabus() {
                           const checked = !!completedTopics[topic.id];
                           const isDeepLinked = topic.id === deepLinkTopicId;
                           const noteCount = countNotesByTopic(notes, topic.id);
+                          const pyqCount = pyqCountByTopic.get(topic.id) ?? 0;
+                          const status = topicStatusById.get(topic.id);
+                          const hasPerformanceSignal = !!status && status.pyqAttempted >= MIN_PYQ_ATTEMPTS_FOR_SIGNAL && status.pyqAccuracy !== null;
                           return (
                             <li
                               key={topic.id}
@@ -230,6 +247,37 @@ export default function Syllabus() {
                                 >
                                   <AlertTriangle className="h-4 w-4" />
                                 </span>
+                              )}
+                              {/* Phase 6 — Competitive Exam Intelligence: PYQ coverage + performance for
+                                  this topic, surfacing lib/pyqFilters.ts's getTopicCounts and
+                                  lib/topicStatus.ts's already-computed pyqAttempted/pyqAccuracy (item
+                                  #1/#2 of the Phase 6 spec) rather than inventing a new aggregation —
+                                  only shown when the bank genuinely has questions for this topic, and
+                                  the accuracy badge only once there is enough real attempt data to mean
+                                  anything (same MIN_PYQ_ATTEMPTS_FOR_SIGNAL threshold the needs_revision
+                                  warning above already uses). */}
+                              {hasPerformanceSignal && status && (
+                                <span
+                                  title={`${status.pyqAttempted} PYQ${status.pyqAttempted === 1 ? '' : 's'} attempted, ${status.pyqAccuracy!.toFixed(0)}% accuracy`}
+                                  className={cx(
+                                    'shrink-0 rounded-lg px-2 py-1 text-xs font-semibold tabular-nums',
+                                    status.pyqAccuracy! >= WEAK_PYQ_ACCURACY_THRESHOLD
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-amber-600 dark:text-amber-400',
+                                  )}
+                                >
+                                  {status.pyqAccuracy!.toFixed(0)}%
+                                </span>
+                              )}
+                              {pyqCount > 0 && (
+                                <Link
+                                  to={`/pyq-test?topicId=${encodeURIComponent(topic.id)}`}
+                                  title={`${pyqCount} PYQ${pyqCount === 1 ? '' : 's'} for this topic — practice`}
+                                  className={cx('shrink-0 flex items-center gap-1 rounded-lg p-2 text-xs font-medium', accent.text)}
+                                >
+                                  <Target className="h-4 w-4" />
+                                  {pyqCount}
+                                </Link>
                               )}
                               <Link
                                 to={`/notes?topicId=${encodeURIComponent(topic.id)}`}
