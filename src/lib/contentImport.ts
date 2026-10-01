@@ -586,6 +586,13 @@ export interface ImportedContentMetadata {
    * never introduces a second shared syllabus/topic registry. Never validated against a second
    * registry here, and never auto-filled. Foundation only — no UI sets this yet. */
   apfcTopicId?: string;
+  /** PhD Research Intelligence (Phase 7) — reading/review progression for a bibliography source or
+   * research document ('unread' | 'reading' | 'read' | 'reviewed' — see lib/phdReadingStatus.ts for
+   * the actual enum/validation/accessor; kept as a plain string here, same as every other optional
+   * metadata field in this interface, rather than importing that module's type into this one).
+   * Absent means 'unread' — never backfilled onto existing records. Applies to any ImportedContent
+   * item in principle, but only ever set by the PhD Research workspace's own UI today. */
+  readingStatus?: string;
   [key: string]: unknown;
 }
 

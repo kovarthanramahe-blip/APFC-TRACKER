@@ -36,6 +36,8 @@ import { BulkActionBar } from '../components/organisation/BulkActionBar';
 import { SelectionCheckbox } from '../components/organisation/SelectionCheckbox';
 import { buildFolderTree, flattenFolderTree } from '../lib/folders';
 import { buildPhdKnowledgeTree, type PhdAuthorGroup } from '../lib/phdKnowledgeTree';
+import { ReadingStatusPicker } from '../components/phdResearch/ReadingStatusPicker';
+import type { ReadingStatus } from '../lib/phdReadingStatus';
 
 // PhD Research workspace repository — the import-first FILE -> EXTRACT -> PREVIEW -> CONFIRM ->
 // SAVE -> DISPLAY pipeline, now run through lib/importPipeline.ts's runFileImport (Knowledge
@@ -427,7 +429,13 @@ export default function PhdResearch() {
         />
       )}
 
-      {viewMode === 'bySource' && <KnowledgeTreeView tree={knowledgeTree} onViewChapter={setViewing} />}
+      {viewMode === 'bySource' && (
+        <KnowledgeTreeView
+          tree={knowledgeTree}
+          onViewChapter={setViewing}
+          onSetReadingStatus={(item, status) => updateImportedContent(item.id, { metadata: { ...item.metadata, readingStatus: status } })}
+        />
+      )}
 
       {viewMode === 'all' && researchDocuments.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -569,7 +577,15 @@ export default function PhdResearch() {
 // relationship data (see that module's own header: no new store field, no new entity type). A
 // compact expand/collapse tree rather than a bulky nested database view; clicking a chapter opens
 // the SAME ViewDocumentModal the "All Documents" grid above already uses — never a second reader.
-function KnowledgeTreeView({ tree, onViewChapter }: { tree: PhdAuthorGroup[]; onViewChapter: (doc: ImportedContent) => void }) {
+function KnowledgeTreeView({
+  tree,
+  onViewChapter,
+  onSetReadingStatus,
+}: {
+  tree: PhdAuthorGroup[];
+  onViewChapter: (doc: ImportedContent) => void;
+  onSetReadingStatus: (item: ImportedContent, status: ReadingStatus) => void;
+}) {
   const [openAuthors, setOpenAuthors] = useState<Set<string>>(() => new Set(tree.length === 1 ? [tree[0].author] : []));
   const [openSources, setOpenSources] = useState<Set<string>>(new Set());
 
@@ -620,34 +636,42 @@ function KnowledgeTreeView({ tree, onViewChapter }: { tree: PhdAuthorGroup[]; on
                   const sourceOpen = openSources.has(sourceKey);
                   return (
                     <div key={sourceKey} className="rounded-lg border border-slate-200/70 dark:border-slate-800">
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left"
-                        onClick={() => toggle(openSources, setOpenSources, sourceKey)}
-                        aria-expanded={sourceOpen}
-                        disabled={node.chapters.length === 0}
-                      >
-                        <BookOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{node.source.title || 'Untitled'}</span>
-                        <span className="shrink-0 text-xs text-slate-400">
-                          {node.chapters.length} chapter{node.chapters.length === 1 ? '' : 's'}
-                        </span>
-                        {node.chapters.length > 0 && (
-                          <ChevronDown className={cx('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', sourceOpen && 'rotate-180')} />
-                        )}
-                      </button>
+                      {/* The reading-status <select> sits OUTSIDE the toggle <button> as a sibling
+                          (a <select> nested inside a <button> is invalid HTML and would swallow
+                          clicks/keyboard activation) — same fix pattern as the microsyllabus "N
+                          linked" link in pages/UpscCseSyllabus.tsx. */}
+                      <div className="flex items-center gap-2 pr-2">
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left"
+                          onClick={() => toggle(openSources, setOpenSources, sourceKey)}
+                          aria-expanded={sourceOpen}
+                          disabled={node.chapters.length === 0}
+                        >
+                          <BookOpen className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{node.source.title || 'Untitled'}</span>
+                          <span className="shrink-0 text-xs text-slate-400">
+                            {node.chapters.length} chapter{node.chapters.length === 1 ? '' : 's'}
+                          </span>
+                          {node.chapters.length > 0 && (
+                            <ChevronDown className={cx('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', sourceOpen && 'rotate-180')} />
+                          )}
+                        </button>
+                        <ReadingStatusPicker item={node.source} onChange={(status) => onSetReadingStatus(node.source, status)} className="shrink-0" />
+                      </div>
                       {sourceOpen && node.chapters.length > 0 && (
                         <ul className="border-t border-slate-100 dark:border-slate-800/70 px-2 py-1">
                           {node.chapters.map((chapter) => (
-                            <li key={chapter.id}>
+                            <li key={chapter.id} className="flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => onViewChapter(chapter)}
-                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
                               >
                                 <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                                 <span className="truncate">{chapter.title || 'Untitled'}</span>
                               </button>
+                              <ReadingStatusPicker item={chapter} onChange={(status) => onSetReadingStatus(chapter, status)} className="shrink-0" />
                             </li>
                           ))}
                         </ul>

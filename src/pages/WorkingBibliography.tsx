@@ -55,6 +55,7 @@ import {
   type ContentRelationship,
 } from '../lib/contentRelationships';
 import { countRelatedContent } from '../lib/relatedContentSummary';
+import { ReadingStatusPicker } from '../components/phdResearch/ReadingStatusPicker';
 
 // PhD Research — Working Bibliography. A structured, searchable source repository sitting
 // alongside the research-document repository (pages/PhdResearch.tsx), reusing the same
@@ -482,7 +483,7 @@ export default function WorkingBibliography() {
       {importError && (
         <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
           <p>{importError}</p>
-          <button onClick={() => setImportError(null)} className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
+          <button onClick={() => setImportError(null)} aria-label="Dismiss error" title="Dismiss error" className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -765,7 +766,7 @@ export default function WorkingBibliography() {
           <table className="w-full min-w-[64rem] border-collapse text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/80">
-                {['', 'Title', 'Author(s)', 'Year', 'Type', 'Journal / Book / Publisher', 'DOI / URL', 'Tags / Category', 'Notes', 'Actions'].map((h, i) => (
+                {['', 'Title', 'Reading Status', 'Author(s)', 'Year', 'Type', 'Journal / Book / Publisher', 'DOI / URL', 'Tags / Category', 'Notes', 'Actions'].map((h, i) => (
                   <th key={h || `col-${i}`} className="whitespace-normal break-words border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-200">
                     {h}
                   </th>
@@ -813,6 +814,12 @@ export default function WorkingBibliography() {
                             onOpen: () => setNotesLinkingRecord(record),
                           },
                         ]}
+                      />
+                    </td>
+                    <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top">
+                      <ReadingStatusPicker
+                        item={record}
+                        onChange={(status) => updateImportedContent(record.id, { metadata: { ...record.metadata, readingStatus: status } })}
                       />
                     </td>
                     <td className="border-b border-slate-100 dark:border-slate-800 px-3 py-2 align-top text-slate-600 dark:text-slate-300">
@@ -996,7 +1003,7 @@ function ViewSourceModal({ record, onClose }: { record: ImportedContent; onClose
                 <Pencil className="h-3.5 w-3.5" /> Raw
               </button>
             </div>
-            <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <button onClick={onClose} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -1052,7 +1059,7 @@ function BibliographyFormModal({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-2xl rounded-t-2xl sm:inset-0 sm:top-10 sm:bottom-10 sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">{isEditing ? 'Edit Bibliography Record' : 'Add Bibliography Record'}</h3>
-          <button onClick={onCancel} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onCancel} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1185,7 +1192,7 @@ function LinkedDocumentsModal({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg rounded-t-2xl sm:inset-0 sm:top-16 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">Linked Research Documents — {record.title}</h3>
-          <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onClose} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
