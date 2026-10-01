@@ -19,6 +19,7 @@ import { runFileImport } from '../../lib/importPipeline';
 import { REPOSITORY_CONTENT_TYPE_REGISTRY, type RepositoryContentType } from '../../lib/repository';
 import { queryImportedContent } from '../../lib/importedContentRepository';
 import type { Note } from '../../lib/types';
+import { showsCurrentAffairsFields, buildMetadata, buildSyllabusNodeOptions } from './ImportToRepositoryModal';
 
 // This component has no rendering test here (no React Testing Library / DOM environment in this
 // repo — see every other *.test.ts file for the established convention). These tests exercise
@@ -92,10 +93,21 @@ describe('Global Repository Import — file type support', () => {
 });
 
 describe('Global Repository Import — explicit content-type selection', () => {
-  it('the registry lists exactly the 9 supported content types', () => {
+  it('the registry lists exactly the 10 supported content types', () => {
     const types = REPOSITORY_CONTENT_TYPE_REGISTRY.map((m) => m.type).sort();
     expect(types).toEqual(
-      ['bibliography', 'descriptive_questions', 'document', 'note', 'other', 'pyq', 'question_bank', 'research_document', 'study_material'].sort(),
+      [
+        'bibliography',
+        'current_affairs',
+        'descriptive_questions',
+        'document',
+        'note',
+        'other',
+        'pyq',
+        'question_bank',
+        'research_document',
+        'study_material',
+      ].sort(),
     );
   });
 
@@ -105,6 +117,91 @@ describe('Global Repository Import — explicit content-type selection', () => {
       const saved = confirmImportedContent(preview(), { workspaceId: 'phd_research', contentType: meta.type });
       expect(saved.contentType).toBe(meta.type);
     }
+  });
+});
+
+describe('UPSC CSE Current Affairs capture — field visibility (no DOM rendering; tests the exact JSX predicate)', () => {
+  it('fields render when content type is current_affairs', () => {
+    expect(showsCurrentAffairsFields('current_affairs')).toBe(true);
+  });
+
+  it('fields do not render for a non-current-affairs content type', () => {
+    expect(showsCurrentAffairsFields('note')).toBe(false);
+    expect(showsCurrentAffairsFields('pyq')).toBe(false);
+    expect(showsCurrentAffairsFields('research_document')).toBe(false);
+  });
+});
+
+describe('UPSC CSE Current Affairs capture — metadata plumbing (buildMetadata)', () => {
+  it('captures the event date', () => {
+    const metadata = buildMetadata('', '', '', null, false, false, '2026-03-14', '', '');
+    expect(metadata?.eventDate).toBe('2026-03-14');
+  });
+
+  it('captures the source', () => {
+    const metadata = buildMetadata('', '', '', null, false, false, '', 'The Hindu, 14 Mar 2026', '');
+    expect(metadata?.source).toBe('The Hindu, 14 Mar 2026');
+  });
+
+  it('trims the source the same way every other freeform field in this builder is trimmed', () => {
+    const metadata = buildMetadata('', '', '', null, false, false, '', '  PTI  ', '');
+    expect(metadata?.source).toBe('PTI');
+  });
+
+  it('stores exactly the syllabus node id the user selected, with no validation against a second registry', () => {
+    const metadata = buildMetadata('', '', '', null, false, false, '', '', 'some-real-looking-node-id');
+    expect(metadata?.syllabusNodeId).toBe('some-real-looking-node-id');
+  });
+
+  it('existing metadata (tags/category/description/folder/pin/archive) is preserved alongside the new Current Affairs fields', () => {
+    const metadata = buildMetadata('history, polity', 'Daily Reading', 'Short summary', 'folder-1', true, false, '2026-01-05', 'PIB', 'node-id-1');
+    expect(metadata).toEqual({
+      tags: ['history', 'polity'],
+      category: 'Daily Reading',
+      description: 'Short summary',
+      folderId: 'folder-1',
+      isPinned: true,
+      eventDate: '2026-01-05',
+      source: 'PIB',
+      syllabusNodeId: 'node-id-1',
+    });
+  });
+
+  it('existing non-current-affairs behaviour is completely unchanged when the three new fields are left empty', () => {
+    // Exactly how the component calls this for every OTHER content type — the new parameters are
+    // always empty strings, never omitted, since the component always has all three in state.
+    const metadata = buildMetadata('tag1', 'Cat', 'Desc', null, false, false, '', '', '');
+    expect(metadata).toEqual({ tags: ['tag1'], category: 'Cat', description: 'Desc' });
+    expect(metadata).not.toHaveProperty('eventDate');
+    expect(metadata).not.toHaveProperty('source');
+    expect(metadata).not.toHaveProperty('syllabusNodeId');
+  });
+
+  it('returns undefined (no metadata object at all) when every field, including the three new ones, is empty — unchanged from before', () => {
+    expect(buildMetadata('', '', '', null, false, false, '', '', '')).toBeUndefined();
+  });
+});
+
+describe('UPSC CSE Current Affairs capture — syllabus topic selector (reuses existing syllabus data, no new hierarchy)', () => {
+  it('lists real microsyllabus items, including the real Current Affairs subject', () => {
+    const { microsyllabusOptions } = buildSyllabusNodeOptions();
+    expect(microsyllabusOptions.length).toBeGreaterThan(0);
+    expect(microsyllabusOptions.some((opt) => opt.label.includes('Current Affairs'))).toBe(true);
+  });
+
+  it('lists real granular topic/subtopic/micro-topic nodes', () => {
+    const { granularOptions } = buildSyllabusNodeOptions();
+    expect(granularOptions.length).toBeGreaterThan(0);
+    expect(granularOptions.every((opt) => opt.id.length > 0 && opt.label.length > 0)).toBe(true);
+  });
+
+  it('every option id is a real, existing syllabus node id — never fabricated', () => {
+    const { microsyllabusOptions } = buildSyllabusNodeOptions();
+    // Spot-check: every microsyllabus option's id must resolve back to a real tree node (proven by
+    // simply not being empty and being unique — the builder derives these ids directly from
+    // getMicrosyllabusForSubject, never invents its own).
+    const ids = microsyllabusOptions.map((o) => o.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 

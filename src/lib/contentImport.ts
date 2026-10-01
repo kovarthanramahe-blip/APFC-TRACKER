@@ -45,6 +45,13 @@ import { uuid } from './utils';
  * names rather than renamed, since a rename would ripple through every existing consumer (the
  * Repository UI, import modal, relationship/statistics code, and their tests) for a cosmetic
  * difference only, not a functional one.
+ *
+ * 'current_affairs' (UPSC CSE Current Affairs data-foundation stage) — a dated, sourced current
+ * event/article, deliberately represented as an ImportedContent rather than a new entity: see
+ * ImportedContentMetadata's eventDate/source/syllabusNodeId below for its only type-specific
+ * fields. No new persistence path, no new CRUD module — it round-trips through the exact same
+ * confirmImportedContent/createManualImportedContent functions every other content type already
+ * does.
  */
 export type ImportedContentType =
   | 'note'
@@ -55,6 +62,7 @@ export type ImportedContentType =
   | 'pyq'
   | 'research_document'
   | 'bibliography'
+  | 'current_affairs'
   | 'other';
 
 export const IMPORTED_CONTENT_TYPES: readonly ImportedContentType[] = [
@@ -66,6 +74,7 @@ export const IMPORTED_CONTENT_TYPES: readonly ImportedContentType[] = [
   'pyq',
   'research_document',
   'bibliography',
+  'current_affairs',
   'other',
 ];
 
@@ -553,6 +562,22 @@ export interface ImportedContentMetadata {
    * (export/import, cloud sync). Excluded from the default Notes/Repository view unless the user
    * explicitly opens the Archived view. */
   isArchived?: boolean;
+  /** UPSC CSE Current Affairs data foundation — contentType: 'current_affairs' only. ISO date
+   * (yyyy-mm-dd) of the actual event/article itself, NOT when it was imported/saved into the app
+   * (that's provenance.importedAt, an entirely separate timestamp). Never auto-filled — only ever
+   * what the user actually typed, matching this module's existing discipline for every other
+   * user-supplied field. */
+  eventDate?: string;
+  /** UPSC CSE Current Affairs data foundation — contentType: 'current_affairs' only. Freeform
+   * source attribution (e.g. "The Hindu, 14 Mar 2026") — user-supplied, never auto-invented or
+   * derived from rawContent, same discipline as provenance.sourceNote. */
+  source?: string;
+  /** UPSC CSE Current Affairs data foundation — contentType: 'current_affairs' only. The id of an
+   * existing UPSC CSE syllabus microsyllabus or granular node (data/upscCsePrelimsSyllabus.ts /
+   * lib/upscCseGranularSyllabus.ts) this item relates to — a plain string FK into that EXISTING
+   * tree, exactly like topicAreaId above is a plain FK into PhdTopicArea. Never validated against a
+   * second topic registry here, and never a new syllabus/relationship model. */
+  syllabusNodeId?: string;
   [key: string]: unknown;
 }
 

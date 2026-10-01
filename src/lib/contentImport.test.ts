@@ -248,6 +248,71 @@ describe('2. import metadata / provenance', () => {
   });
 });
 
+describe('2b. UPSC CSE Current Affairs data foundation', () => {
+  it('current_affairs is accepted as an ImportedContentType', () => {
+    expect(IMPORTED_CONTENT_TYPES).toContain('current_affairs');
+    const type: ImportedContentType = 'current_affairs';
+    expect(type).toBe('current_affairs');
+  });
+
+  it('eventDate/source/syllabusNodeId survive confirmImportedContent (file import path) untouched', () => {
+    const preview = buildImportPreview({ name: 'daily-ca.md' }, { format: 'markdown', text: 'Some current affairs text' });
+    const content = confirmImportedContent(preview, {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { eventDate: '2026-03-14', source: 'The Hindu, 14 Mar 2026', syllabusNodeId: 'current-affairs-national' },
+    });
+    expect(content.contentType).toBe('current_affairs');
+    expect(content.metadata?.eventDate).toBe('2026-03-14');
+    expect(content.metadata?.source).toBe('The Hindu, 14 Mar 2026');
+    expect(content.metadata?.syllabusNodeId).toBe('current-affairs-national');
+    // eventDate is the EVENT's own date, never conflated with provenance.importedAt (when it was
+    // actually saved into the app) — the two are independent and need not match.
+    expect(content.metadata?.eventDate).not.toBe(content.provenance.importedAt);
+  });
+
+  it('eventDate/source/syllabusNodeId survive createManualImportedContent (manual entry path) untouched', () => {
+    const content = createManualImportedContent({
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      title: 'New policy announcement',
+      content: 'Details of the announcement.',
+      metadata: { eventDate: '2026-01-05', source: 'PIB Press Release', syllabusNodeId: 'current-affairs-international' },
+    });
+    expect(content.contentType).toBe('current_affairs');
+    expect(content.metadata?.eventDate).toBe('2026-01-05');
+    expect(content.metadata?.source).toBe('PIB Press Release');
+    expect(content.metadata?.syllabusNodeId).toBe('current-affairs-international');
+  });
+
+  it('metadata remains fully optional for a current_affairs item — no field is required or auto-filled', () => {
+    const preview = buildImportPreview({ name: 'ca.md' }, { format: 'markdown', text: 'text' });
+    const content = confirmImportedContent(preview, { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    expect(content.contentType).toBe('current_affairs');
+    expect(content.metadata).toBeUndefined();
+  });
+
+  it('a current_affairs item with only some of the three fields leaves the rest genuinely absent, never defaulted', () => {
+    const preview = buildImportPreview({ name: 'ca.md' }, { format: 'markdown', text: 'text' });
+    const content = confirmImportedContent(preview, {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { source: 'PTI' },
+    });
+    expect(content.metadata?.source).toBe('PTI');
+    expect(content.metadata?.eventDate).toBeUndefined();
+    expect(content.metadata?.syllabusNodeId).toBeUndefined();
+  });
+
+  it('existing content types are entirely unaffected by the new current_affairs type/fields', () => {
+    const preview = buildImportPreview({ name: 'gs1.pdf' }, { format: 'pdf', text: 'text' });
+    const pyq = confirmImportedContent(preview, { workspaceId: 'upsc_cse', contentType: 'pyq', metadata: { year: 2023 } });
+    expect(pyq.contentType).toBe('pyq');
+    expect(pyq.metadata).toEqual({ year: 2023 });
+    expect((pyq.metadata as Record<string, unknown>).eventDate).toBeUndefined();
+  });
+});
+
 describe('3. workspace scoping / isolation', () => {
   it('confirmImportedContent stamps exactly the workspaceId it is given', () => {
     const preview = buildImportPreview({ name: 'a.md' }, { format: 'markdown', text: 'x' });
@@ -268,9 +333,20 @@ describe('3. workspace scoping / isolation', () => {
 });
 
 describe('4. content-type selection', () => {
-  it('IMPORTED_CONTENT_TYPES lists exactly the 9 specified content types', () => {
+  it('IMPORTED_CONTENT_TYPES lists exactly the 10 specified content types', () => {
     expect([...IMPORTED_CONTENT_TYPES].sort()).toEqual(
-      ['note', 'document', 'study_material', 'question_bank', 'descriptive_questions', 'pyq', 'research_document', 'bibliography', 'other'].sort(),
+      [
+        'note',
+        'document',
+        'study_material',
+        'question_bank',
+        'descriptive_questions',
+        'pyq',
+        'research_document',
+        'bibliography',
+        'current_affairs',
+        'other',
+      ].sort(),
     );
   });
 

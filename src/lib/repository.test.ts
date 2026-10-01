@@ -69,7 +69,18 @@ function relationship(overrides: Partial<ContentRelationship> = {}): ContentRela
 
 describe('repository registry — completeness', () => {
   it('registers exactly the required initial content types', () => {
-    const required = ['note', 'document', 'study_material', 'research_document', 'bibliography', 'question_bank', 'descriptive_questions', 'pyq', 'other'];
+    const required = [
+      'note',
+      'document',
+      'study_material',
+      'research_document',
+      'bibliography',
+      'question_bank',
+      'descriptive_questions',
+      'pyq',
+      'current_affairs',
+      'other',
+    ];
     expect(REPOSITORY_CONTENT_TYPES.slice().sort()).toEqual(required.slice().sort());
   });
 
@@ -123,6 +134,15 @@ describe('repository registry — capability definitions', () => {
     for (const type of ['question_bank', 'descriptive_questions', 'pyq', 'other', 'document', 'study_material'] as const) {
       expect(repositoryContentTypeSupports(type, 'linkable')).toBe(false);
     }
+  });
+
+  it('current_affairs is linkable (reuses the existing RepositoryDetail "Add link" workflow — bug fix follow-up)', () => {
+    expect(repositoryContentTypeSupports('current_affairs', 'linkable')).toBe(true);
+  });
+
+  it('current_affairs is also taggable and categorisable, like every other non-note type', () => {
+    expect(repositoryContentTypeSupports('current_affairs', 'taggable')).toBe(true);
+    expect(repositoryContentTypeSupports('current_affairs', 'categorisable')).toBe(true);
   });
 
   it('document and study_material are taggable and categorisable like every non-note type', () => {

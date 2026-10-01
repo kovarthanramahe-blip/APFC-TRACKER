@@ -1,11 +1,16 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
-import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
-import { cx } from '../lib/utils';
+import { cx, formatDate, getLocalDateString } from '../lib/utils';
+import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
+import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
+import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
+import { resolveMicrosyllabusPath, type UpscCseSyllabusTree } from '../lib/upscCseSyllabus';
+import { resolveGranularBreadcrumb } from '../lib/upscCseGranularSyllabus';
 import {
   getImportedContentById,
   getRepositoryContentTypeMeta,
@@ -25,7 +30,7 @@ import {
   type RelationshipType,
 } from '../lib/contentRelationships';
 import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
-import { canEditEntry, canDeleteEntry, EditMetadataModal, DeleteConfirmModal } from './Repository';
+import { canEditEntry, canDeleteEntry, EditMetadataModal, DeleteConfirmModal, preserveUneditedMetadata } from './Repository';
 import type { ImportedContentMetadata } from '../lib/contentImport';
 import { DocumentAnnotator, type DocumentAnnotatorHandle } from '../components/annotations/DocumentAnnotator';
 import { AnnotationIndex } from '../components/annotations/AnnotationIndex';
@@ -54,6 +59,35 @@ import type { Annotation } from '../lib/annotations';
 
 function isRelationshipEntityType(value: string | undefined): value is RelationshipEntityType {
   return value === 'note' || value === 'imported_content';
+}
+
+/**
+ * UPSC CSE Current Affairs — resolves a stored `metadata.syllabusNodeId` to a human-readable
+ * label, reusing the EXACT same resolvers and label format
+ * components/repository/ImportToRepositoryModal.tsx's own buildSyllabusNodeOptions already uses to
+ * build the picker — never a second syllabus dataset/search. Tries the granular tree first (a
+ * granular node's own breadcrumb carries its microsyllabus id, resolved back through
+ * resolveMicrosyllabusPath for the Subject/Microsyllabus titles), then falls back to treating the
+ * id as a plain microsyllabus id in either real tree. Returns undefined for an id that doesn't
+ * resolve in either — a stale/invalid id is simply not shown, never a fabricated label.
+ */
+export function resolveSyllabusNodeLabel(syllabusNodeId: string): string | undefined {
+  const granularBreadcrumb = resolveGranularBreadcrumb(UPSC_CSE_GRANULAR_NODES, syllabusNodeId);
+  if (granularBreadcrumb) {
+    const path = resolveMicrosyllabusPath(UPSC_CSE_PRELIMS_SYLLABUS, granularBreadcrumb.microsyllabusId);
+    const parts = [path?.subject.title, path?.item.title, granularBreadcrumb.topic?.title, granularBreadcrumb.subtopic?.title, granularBreadcrumb.microTopic?.title].filter(
+      (p): p is string => !!p,
+    );
+    return `Prelims › ${parts.join(' › ')}`;
+  }
+  for (const [stageLabel, tree] of [
+    ['Prelims', UPSC_CSE_PRELIMS_SYLLABUS],
+    ['Mains', UPSC_CSE_MAINS_SYLLABUS],
+  ] as [string, UpscCseSyllabusTree][]) {
+    const path = resolveMicrosyllabusPath(tree, syllabusNodeId);
+    if (path) return `${stageLabel} › ${path.subject.title} › ${path.item.title}`;
+  }
+  return undefined;
 }
 
 /** Read-only content display: a byte-exact "Raw" view (the default — see this stage's own
@@ -170,6 +204,10 @@ export default function RepositoryDetail() {
   const deleteNote = useAppStore((s) => s.deleteNote);
   const addContentRelationship = useAppStore((s) => s.addContentRelationship);
   const deleteContentRelationship = useAppStore((s) => s.deleteContentRelationship);
+  const revisionQueue = useAppStore((s) => s.revisionQueue);
+  const addToRevisionQueue = useAppStore((s) => s.addToRevisionQueue);
+  const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
+  const recordRevisionIncorrect = useAppStore((s) => s.recordRevisionIncorrect);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -241,7 +279,12 @@ export default function RepositoryDetail() {
 
   function handleEditSave(title: string, contentType: RepositoryContentType, metadata: ImportedContentMetadata | undefined) {
     if (!entry) return;
-    updateImportedContent(entry.entityId, { title, contentType, metadata });
+    const mergedMetadata = preserveUneditedMetadata(metadata, importedItem, {
+      folderId: entry.folderId,
+      isPinned: entry.isPinned,
+      isArchived: entry.isArchived,
+    });
+    updateImportedContent(entry.entityId, { title, contentType, metadata: mergedMetadata });
     setShowEditModal(false);
   }
 
@@ -279,6 +322,29 @@ export default function RepositoryDetail() {
   const updatedDateLabel = Number.isNaN(updatedDate.getTime()) ? null : updatedDate.toLocaleDateString('en-IN');
   const rawContent = importedItem ? importedItem.rawContent : (noteItem?.content ?? '');
   const originLabel = { import: 'Imported', manual: 'Manually added', created: 'Created' }[entry.origin];
+  const isCurrentAffairs = importedItem?.contentType === 'current_affairs';
+  const syllabusNodeLabel =
+    isCurrentAffairs && importedItem?.metadata?.syllabusNodeId ? resolveSyllabusNodeLabel(importedItem.metadata.syllabusNodeId) : undefined;
+
+  // Current Affairs revision — reuses lib/revisionQueue.ts exactly as PYQ practice already does
+  // (same RevisionItem shape, same recordRevisionCorrect/recordRevisionIncorrect store actions);
+  // the only addition is addToRevisionQueue, since a Current Affairs item has no "attempt" of its
+  // own to derive eligibility from the way PYQ practice does.
+  const revisionItem = isCurrentAffairs ? revisionQueue[entry.entityId] : undefined;
+  const isDueForRevision = !!revisionItem && revisionItem.dueDate <= getLocalDateString();
+
+  function handleAddToRevision() {
+    if (!entry) return;
+    addToRevisionQueue(entry.entityId, getLocalDateString());
+  }
+  function handleRevisionCorrect() {
+    if (!entry) return;
+    recordRevisionCorrect(entry.entityId, getLocalDateString());
+  }
+  function handleRevisionIncorrect() {
+    if (!entry) return;
+    recordRevisionIncorrect(entry.entityId, getLocalDateString());
+  }
 
   return (
     <div>
@@ -345,6 +411,21 @@ export default function RepositoryDetail() {
               <span className="font-medium text-slate-500 dark:text-slate-400">Source note:</span> {importedItem.provenance.sourceNote}
             </p>
           )}
+          {isCurrentAffairs && importedItem?.metadata?.eventDate && (
+            <p>
+              <span className="font-medium text-slate-500 dark:text-slate-400">Event date:</span> {formatDate(importedItem.metadata.eventDate)}
+            </p>
+          )}
+          {isCurrentAffairs && importedItem?.metadata?.source && (
+            <p>
+              <span className="font-medium text-slate-500 dark:text-slate-400">Source:</span> {importedItem.metadata.source}
+            </p>
+          )}
+          {isCurrentAffairs && syllabusNodeLabel && (
+            <p className="sm:col-span-2">
+              <span className="font-medium text-slate-500 dark:text-slate-400">UPSC Syllabus Topic:</span> {syllabusNodeLabel}
+            </p>
+          )}
         </div>
         {entry.description && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{entry.description}</p>}
         {entry.tags.length > 0 && (
@@ -357,6 +438,40 @@ export default function RepositoryDetail() {
           </div>
         )}
       </Card>
+
+      {isCurrentAffairs && (
+        <Card className="mb-5 p-4">
+          <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <Repeat className="h-3.5 w-3.5" /> Revision
+          </p>
+          {!revisionItem ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-400">Not yet in your revision queue.</p>
+              <Button variant="secondary" size="sm" onClick={handleAddToRevision}>
+                <Plus className="h-3.5 w-3.5" /> Add to Revision
+              </Button>
+            </div>
+          ) : isDueForRevision ? (
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Due for review now — Box {revisionItem.box}, reviewed {revisionItem.reviewCount} time{revisionItem.reviewCount === 1 ? '' : 's'} so far.
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={handleRevisionIncorrect}>
+                  <X className="h-3.5 w-3.5" /> Didn&apos;t recall
+                </Button>
+                <Button size="sm" onClick={handleRevisionCorrect}>
+                  <Check className="h-3.5 w-3.5" /> Recalled it
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">
+              Queued for revision — Box {revisionItem.box}, next review {formatDate(revisionItem.dueDate)}.
+            </p>
+          )}
+        </Card>
+      )}
 
       <Card className="mb-5 p-4">
         <ContentView content={rawContent} documentId={`${entry.entityType}:${entry.entityId}`} />

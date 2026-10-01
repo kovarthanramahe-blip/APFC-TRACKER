@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, X, AlertTriangle, CheckCircle2, ArrowRight, ShieldAlert, Copy } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
@@ -16,6 +16,11 @@ import {
   type ImportPreview,
   type ImportedContentMetadata,
 } from '../../lib/contentImport';
+import { UPSC_CSE_PRELIMS_SYLLABUS } from '../../data/upscCsePrelimsSyllabus';
+import { UPSC_CSE_MAINS_SYLLABUS } from '../../data/upscCseMainsSyllabus';
+import { UPSC_CSE_GRANULAR_NODES } from '../../data/upscCseGranularTopics';
+import { getPapersForStage, getSubjectsForPaper, getMicrosyllabusForSubject, resolveMicrosyllabusPath, type UpscCseSyllabusTree } from '../../lib/upscCseSyllabus';
+import { resolveGranularBreadcrumb } from '../../lib/upscCseGranularSyllabus';
 import { runFileImport } from '../../lib/importPipeline';
 import type { DuplicateMatchResult } from '../../lib/importDuplicates';
 import {
@@ -73,18 +78,42 @@ import { FolderPicker } from '../organisation/FolderPicker';
 
 type Stage = 'pick' | 'extracting' | 'error' | 'preview' | 'success';
 
-function buildMetadata(
+/** The exact predicate the preview-stage JSX uses to decide whether the Current Affairs capture
+ * fields (Event Date/Source/UPSC Syllabus Topic) are shown — exported so it is directly testable
+ * without a DOM/rendering environment (this file's own test file has none — see its header), the
+ * single source of truth the JSX reads from rather than a parallel condition that could drift. */
+export function showsCurrentAffairsFields(type: RepositoryContentType): boolean {
+  return type === 'current_affairs';
+}
+
+export function buildMetadata(
   tagsInput: string,
   categoryInput: string,
   descriptionInput: string,
   folderId: string | null,
   isPinned: boolean,
   isArchived: boolean,
+  eventDateInput: string,
+  sourceInput: string,
+  syllabusNodeIdInput: string,
 ): ImportedContentMetadata | undefined {
   const tags = parseTagsInput(tagsInput);
   const category = categoryInput.trim();
   const description = descriptionInput.trim();
-  if (tags.length === 0 && !category && !description && folderId === null && !isPinned && !isArchived) return undefined;
+  const source = sourceInput.trim();
+  if (
+    tags.length === 0 &&
+    !category &&
+    !description &&
+    folderId === null &&
+    !isPinned &&
+    !isArchived &&
+    !eventDateInput &&
+    !source &&
+    !syllabusNodeIdInput
+  ) {
+    return undefined;
+  }
   const metadata: ImportedContentMetadata = {};
   if (tags.length > 0) metadata.tags = tags;
   if (category) metadata.category = category;
@@ -92,10 +121,51 @@ function buildMetadata(
   if (folderId !== null) metadata.folderId = folderId;
   if (isPinned) metadata.isPinned = true;
   if (isArchived) metadata.isArchived = true;
+  // UPSC CSE Current Affairs capture — only ever set when the user actually filled them in; never
+  // auto-invented or derived from rawContent (see contentImport.ts's own discipline for `source`).
+  if (eventDateInput) metadata.eventDate = eventDateInput;
+  if (source) metadata.source = source;
+  if (syllabusNodeIdInput) metadata.syllabusNodeId = syllabusNodeIdInput;
   return metadata;
 }
 
 const QUESTION_LIKE_TYPES: ReadonlySet<RepositoryContentType> = new Set(['question_bank', 'descriptive_questions', 'pyq']);
+
+export interface SyllabusNodeOption {
+  id: string;
+  label: string;
+}
+
+/** UPSC CSE Current Affairs capture — the smallest local selector over the EXISTING syllabus data
+ * (no new syllabus hierarchy, no new search/selector abstraction): every microsyllabus item from
+ * both real trees, plus every granular topic/subtopic/micro-topic node, each labelled with its real
+ * ancestor path via the existing resolveMicrosyllabusPath/resolveGranularBreadcrumb resolvers. */
+export function buildSyllabusNodeOptions(): { microsyllabusOptions: SyllabusNodeOption[]; granularOptions: SyllabusNodeOption[] } {
+  const microsyllabusOptions: SyllabusNodeOption[] = [];
+  for (const [stageLabel, tree] of [
+    ['Prelims', UPSC_CSE_PRELIMS_SYLLABUS],
+    ['Mains', UPSC_CSE_MAINS_SYLLABUS],
+  ] as [string, UpscCseSyllabusTree][]) {
+    for (const paper of getPapersForStage(tree)) {
+      for (const subject of getSubjectsForPaper(tree, paper.id)) {
+        for (const item of getMicrosyllabusForSubject(tree, subject.id)) {
+          microsyllabusOptions.push({ id: item.id, label: `${stageLabel} › ${subject.title} › ${item.title}` });
+        }
+      }
+    }
+  }
+
+  const granularOptions: SyllabusNodeOption[] = UPSC_CSE_GRANULAR_NODES.map((node) => {
+    const path = resolveMicrosyllabusPath(UPSC_CSE_PRELIMS_SYLLABUS, node.microsyllabusId);
+    const breadcrumb = resolveGranularBreadcrumb(UPSC_CSE_GRANULAR_NODES, node.id);
+    const parts = [path?.subject.title ?? '', path?.item.title ?? '', breadcrumb?.topic?.title, breadcrumb?.subtopic?.title, breadcrumb?.microTopic?.title].filter(
+      (p): p is string => !!p,
+    );
+    return { id: node.id, label: `Prelims › ${parts.join(' › ')}` };
+  });
+
+  return { microsyllabusOptions, granularOptions };
+}
 
 export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
@@ -134,8 +204,16 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [isPinned, setIsPinned] = useState(false);
   const [isArchived, setIsArchived] = useState(false);
+  // UPSC CSE Current Affairs capture — only ever read/shown when selectedType === 'current_affairs'
+  // (see the JSX below); cleared alongside every other field on a new file pick or reset, exactly
+  // like folderId/isPinned/isArchived above.
+  const [eventDateInput, setEventDateInput] = useState('');
+  const [sourceInput, setSourceInput] = useState('');
+  const [syllabusNodeIdInput, setSyllabusNodeIdInput] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedEntry, setSavedEntry] = useState<RepositoryEntry | null>(null);
+
+  const syllabusNodeOptions = useMemo(buildSyllabusNodeOptions, []);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -170,6 +248,9 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     setFolderId(null);
     setIsPinned(false);
     setIsArchived(false);
+    setEventDateInput('');
+    setSourceInput('');
+    setSyllabusNodeIdInput('');
     setSaveError(null);
     setStage('preview');
   }
@@ -194,7 +275,17 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
         upsertNote(newNote);
         setSavedEntry(repositoryEntryFromNote(newNote));
       } else {
-        const metadata = buildMetadata(tagsInput, categoryInput, descriptionInput, folderId, isPinned, isArchived);
+        const metadata = buildMetadata(
+          tagsInput,
+          categoryInput,
+          descriptionInput,
+          folderId,
+          isPinned,
+          isArchived,
+          eventDateInput,
+          sourceInput,
+          syllabusNodeIdInput,
+        );
         const savedItem = confirmImportedContent(preview, {
           workspaceId: activeWorkspaceId,
           contentType: selectedType,
@@ -225,6 +316,9 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     setFolderId(null);
     setIsPinned(false);
     setIsArchived(false);
+    setEventDateInput('');
+    setSourceInput('');
+    setSyllabusNodeIdInput('');
     setSaveError(null);
     setSavedEntry(null);
   }
@@ -358,6 +452,66 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                   saved until you confirm.
                 </p>
               </div>
+
+              {showsCurrentAffairsFields(selectedType) && (
+                <div className="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3">
+                  <div>
+                    <label htmlFor="ca-event-date" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Event Date
+                    </label>
+                    <input
+                      id="ca-event-date"
+                      type="date"
+                      value={eventDateInput}
+                      onChange={(e) => setEventDateInput(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-400">The date of the event/article itself — not today's date.</p>
+                  </div>
+
+                  <div>
+                    <label htmlFor="ca-source" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Source
+                    </label>
+                    <input
+                      id="ca-source"
+                      value={sourceInput}
+                      onChange={(e) => setSourceInput(e.target.value)}
+                      placeholder="e.g. The Hindu, 14 Mar 2026"
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="ca-syllabus-node" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      UPSC Syllabus Topic
+                    </label>
+                    <select
+                      id="ca-syllabus-node"
+                      value={syllabusNodeIdInput}
+                      onChange={(e) => setSyllabusNodeIdInput(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    >
+                      <option value="">No topic selected</option>
+                      <optgroup label="Microsyllabus Topics">
+                        {syllabusNodeOptions.microsyllabusOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Granular Topics">
+                        {syllabusNodeOptions.granularOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-400">Optional — links this item to its real UPSC CSE syllabus topic.</p>
+                  </div>
+                </div>
+              )}
 
               {QUESTION_LIKE_TYPES.has(selectedType) && (
                 <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">

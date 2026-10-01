@@ -7,6 +7,7 @@ import {
   recordCorrect,
   recordIncorrect,
   getQueueCounts,
+  addItem,
   BOX_INTERVALS_DAYS,
   MAX_BOX,
   type RevisionQueue,
@@ -178,6 +179,53 @@ describe('immutability', () => {
     };
     const next = recordCorrect(queue, 'q1', TODAY);
     expect(next.q2).toEqual(queue.q2);
+  });
+});
+
+// --- addItem (Current Affairs "Add to Revision" — reuses this exact engine for a non-PYQ id) ----
+describe('addItem', () => {
+  it('adds a brand-new item: unseen, due today, box 1, never reviewed', () => {
+    const queue = addItem({}, 'ca-1', TODAY);
+    expect(queue['ca-1']).toEqual({ pyqId: 'ca-1', box: 1, dueDate: TODAY, lastReviewedDate: null, reviewCount: 0 });
+  });
+
+  it('is idempotent: adding an id already in the queue returns the exact same object (no duplicate, no reset)', () => {
+    const queue: RevisionQueue = { 'ca-1': { pyqId: 'ca-1', box: 3, dueDate: '2026-02-01', lastReviewedDate: '2026-01-01', reviewCount: 4 } };
+    const next = addItem(queue, 'ca-1', TODAY);
+    expect(next).toBe(queue); // same reference — nothing changed
+    expect(next['ca-1'].box).toBe(3);
+    expect(next['ca-1'].reviewCount).toBe(4);
+  });
+
+  it('does not mutate the input queue', () => {
+    const queue: RevisionQueue = {};
+    addItem(queue, 'ca-1', TODAY);
+    expect(queue).toEqual({});
+  });
+
+  it('leaves unrelated items in the queue untouched', () => {
+    const queue: RevisionQueue = { q1: { pyqId: 'q1', box: 2, dueDate: '2026-02-01', lastReviewedDate: '2026-01-01', reviewCount: 1 } };
+    const next = addItem(queue, 'ca-1', TODAY);
+    expect(next.q1).toEqual(queue.q1);
+  });
+
+  it('works identically for a PYQ-shaped id and a Current-Affairs/ImportedContent-shaped id — the engine has no PYQ-specific type constraint', () => {
+    let queue = addItem({}, 'q1', TODAY);
+    queue = addItem(queue, 'imported-content-uuid-1234', TODAY);
+    expect(Object.keys(queue).sort()).toEqual(['imported-content-uuid-1234', 'q1']);
+  });
+
+  it('an item added via addItem is immediately due, exactly like any other unseen item', () => {
+    const queue = addItem({}, 'ca-1', TODAY);
+    expect(getDueItems(queue, ['ca-1'], TODAY).map((i) => i.pyqId)).toEqual(['ca-1']);
+  });
+
+  it('recordCorrect/recordIncorrect work on an item that was first added via addItem', () => {
+    let queue = addItem({}, 'ca-1', TODAY);
+    queue = recordCorrect(queue, 'ca-1', TODAY);
+    expect(queue['ca-1'].box).toBe(2);
+    queue = recordIncorrect(queue, 'ca-1', '2026-01-10');
+    expect(queue['ca-1'].box).toBe(1);
   });
 });
 

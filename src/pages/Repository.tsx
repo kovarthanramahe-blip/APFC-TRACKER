@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
@@ -19,12 +19,13 @@ import {
   type RepositoryContentType,
 } from '../lib/repository';
 import { collectImportedContentTags, collectImportedContentCategories, parseTagsInput, type ImportedContentSortOrder } from '../lib/importedContentRepository';
-import type { ImportedContentMetadata } from '../lib/contentImport';
+import type { ImportedContent, ImportedContentMetadata } from '../lib/contentImport';
 import { navigationTargetFor, repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { ImportToRepositoryModal } from '../components/repository/ImportToRepositoryModal';
 import { ExportRepositoryModal } from '../components/repository/ExportRepositoryModal';
 import { ImportRepositoryBackupModal } from '../components/repository/ImportRepositoryBackupModal';
 import { UpscCsePyqImportModal } from '../components/upscCse/UpscCsePyqImportModal';
+import { CreateCurrentAffairsModal } from '../components/repository/CreateCurrentAffairsModal';
 import { PinToggle } from '../components/organisation/PinToggle';
 import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
 import { BulkActionBar } from '../components/organisation/BulkActionBar';
@@ -183,6 +184,34 @@ function buildEditedMetadata(tagsInput: string, categoryInput: string, descripti
   if (category) metadata.category = category;
   if (description) metadata.description = description;
   return metadata;
+}
+
+/**
+ * EditMetadataModal's own form only has fields for title/contentType/tags/category/description —
+ * it builds `metadata` fresh from those, with no idea folderId/isPinned/isArchived (Premium Note
+ * Organisation) or eventDate/source/syllabusNodeId (UPSC CSE Current Affairs) exist. A plain
+ * metadata edit must never silently wipe any of them, so they're carried over from the item's own
+ * current state before `metadata` is replaced wholesale (updateImportedContent does a shallow
+ * replace of the whole metadata object, not a deep merge — see lib/store.ts's updateImportedContent).
+ * `original` is the item's real, pre-edit ImportedContent (only place eventDate/source/
+ * syllabusNodeId live); a field genuinely absent on it stays absent here too — never defaulted.
+ * Shared by both pages/Repository.tsx and pages/RepositoryDetail.tsx's own handleEditSave.
+ */
+export function preserveUneditedMetadata(
+  editedMetadata: ImportedContentMetadata | undefined,
+  original: ImportedContent | undefined,
+  organisation: { folderId: string | null; isPinned: boolean; isArchived: boolean },
+): ImportedContentMetadata | undefined {
+  const merged: ImportedContentMetadata = {
+    ...editedMetadata,
+    ...(organisation.folderId !== null ? { folderId: organisation.folderId } : {}),
+    ...(organisation.isPinned ? { isPinned: true } : {}),
+    ...(organisation.isArchived ? { isArchived: true } : {}),
+    ...(original?.metadata?.eventDate !== undefined ? { eventDate: original.metadata.eventDate } : {}),
+    ...(original?.metadata?.source !== undefined ? { source: original.metadata.source } : {}),
+    ...(original?.metadata?.syllabusNodeId !== undefined ? { syllabusNodeId: original.metadata.syllabusNodeId } : {}),
+  };
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 /** Every registered content type EXCEPT 'note' — this modal only ever edits an existing
@@ -382,6 +411,7 @@ export default function Repository() {
   const accent = getWorkspaceAccent(activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
   const notes = useAppStore((s) => s.notes);
+  const addImportedContent = useAppStore((s) => s.addImportedContent);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
   const deleteNote = useAppStore((s) => s.deleteNote);
@@ -401,6 +431,7 @@ export default function Repository() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportBackupModal, setShowImportBackupModal] = useState(false);
   const [showUpscPyqImportModal, setShowUpscPyqImportModal] = useState(false);
+  const [showCreateCurrentAffairsModal, setShowCreateCurrentAffairsModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<RepositoryEntry | null>(null);
   const [deletingEntry, setDeletingEntry] = useState<RepositoryEntry | null>(null);
   // Keyed by `${entityType}:${entityId}` — a note and an ImportedContent item can share the same
@@ -517,19 +548,19 @@ export default function Repository() {
 
   function handleEditSave(title: string, contentType: RepositoryContentType, metadata: ImportedContentMetadata | undefined) {
     if (!editingEntry) return;
-    // EditMetadataModal's form only has fields for title/contentType/tags/category/description —
-    // it builds `metadata` fresh from those, with no idea folderId/isPinned/isArchived exist. A
-    // plain metadata edit must never silently wipe them, so they're carried over from the entry's
-    // own current organisation state before this replaces `metadata` wholesale (the same discipline
-    // updateImportedContent already applies to id/workspaceId, just at this call site instead).
-    const mergedMetadata: ImportedContentMetadata = {
-      ...metadata,
-      ...(editingEntry.folderId !== null ? { folderId: editingEntry.folderId } : {}),
-      ...(editingEntry.isPinned ? { isPinned: true } : {}),
-      ...(editingEntry.isArchived ? { isArchived: true } : {}),
-    };
-    updateImportedContent(editingEntry.entityId, { title, contentType, metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : undefined });
+    const original = importedContent.find((c) => c.id === editingEntry.entityId);
+    const mergedMetadata = preserveUneditedMetadata(metadata, original, {
+      folderId: editingEntry.folderId,
+      isPinned: editingEntry.isPinned,
+      isArchived: editingEntry.isArchived,
+    });
+    updateImportedContent(editingEntry.entityId, { title, contentType, metadata: mergedMetadata });
     setEditingEntry(null);
+  }
+
+  function handleCreateCurrentAffairsSave(item: ImportedContent) {
+    addImportedContent(item);
+    setShowCreateCurrentAffairsModal(false);
   }
 
   function handleDeleteConfirm() {
@@ -563,6 +594,11 @@ export default function Repository() {
                 <FileQuestion className="h-4 w-4" /> Import UPSC Prelims PYQ Source
               </Button>
             )}
+            {activeWorkspaceId === 'upsc_cse' && (
+              <Button variant="secondary" onClick={() => setShowCreateCurrentAffairsModal(true)}>
+                <Newspaper className="h-4 w-4" /> Create Manually — Current Affairs
+              </Button>
+            )}
           </div>
         }
       />
@@ -571,6 +607,13 @@ export default function Repository() {
       {showExportModal && <ExportRepositoryModal onClose={() => setShowExportModal(false)} />}
       {showImportBackupModal && <ImportRepositoryBackupModal onClose={() => setShowImportBackupModal(false)} />}
       {showUpscPyqImportModal && <UpscCsePyqImportModal onClose={() => setShowUpscPyqImportModal(false)} />}
+      {showCreateCurrentAffairsModal && (
+        <CreateCurrentAffairsModal
+          workspaceId={activeWorkspaceId}
+          onClose={() => setShowCreateCurrentAffairsModal(false)}
+          onSave={handleCreateCurrentAffairsSave}
+        />
+      )}
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">

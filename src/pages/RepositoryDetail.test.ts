@@ -7,10 +7,14 @@ import {
   getRepositoryContentTypeMeta,
   repositoryEntryFromImportedContent,
   repositoryEntryFromNote,
+  repositoryContentTypeSupports,
 } from '../lib/repository';
 import { getRelatedContent, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
 import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
-import { canEditEntry, canDeleteEntry } from './Repository';
+import { canEditEntry, canDeleteEntry, preserveUneditedMetadata } from './Repository';
+import { resolveSyllabusNodeLabel } from './RepositoryDetail';
+import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
+import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { createInkAnnotation, createHighlighterInkAnnotation, createStickyNote, createBookmark, annotationsForDocument } from '../lib/annotations';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
@@ -150,6 +154,74 @@ describe('Repository Detail — metadata display', () => {
   });
 });
 
+describe('Repository Detail — Current Affairs metadata display (bug-fix follow-up: show what is already saved)', () => {
+  beforeEach(fullReset);
+
+  it('resolveSyllabusNodeLabel resolves a real microsyllabus id to a human-readable label, not the raw id', () => {
+    const currentAffairsSubject = UPSC_CSE_PRELIMS_SYLLABUS.subjects.find((s) => s.title === 'Current Affairs')!;
+    const microsyllabusItem = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.subjectId === currentAffairsSubject.id)!;
+
+    const label = resolveSyllabusNodeLabel(microsyllabusItem.id);
+    expect(label).toBeDefined();
+    expect(label).toContain(currentAffairsSubject.title);
+    expect(label).toContain(microsyllabusItem.title);
+    expect(label).not.toBe(microsyllabusItem.id);
+  });
+
+  it('resolveSyllabusNodeLabel resolves a real granular node id to a label including its microsyllabus ancestry', () => {
+    const granularNode = UPSC_CSE_GRANULAR_NODES[0];
+    const label = resolveSyllabusNodeLabel(granularNode.id);
+    expect(label).toBeDefined();
+    expect(label).toContain(granularNode.title);
+  });
+
+  it('resolveSyllabusNodeLabel returns undefined for an unknown/stale id — never a fabricated label', () => {
+    expect(resolveSyllabusNodeLabel('not-a-real-node-id')).toBeUndefined();
+  });
+
+  it('a current_affairs item with all three fields set exposes them via importedItem.metadata, exactly as saved', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const currentAffairsSubject = UPSC_CSE_PRELIMS_SYLLABUS.subjects.find((s) => s.title === 'Current Affairs')!;
+    const microsyllabusItem = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.subjectId === currentAffairsSubject.id)!;
+    const doc = confirmImportedContent(preview({ title: 'Policy announcement' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { eventDate: '2026-03-14', source: 'The Hindu, 14 Mar 2026', syllabusNodeId: microsyllabusItem.id },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    expect(item.contentType).toBe('current_affairs');
+    expect(item.metadata?.eventDate).toBe('2026-03-14');
+    expect(item.metadata?.source).toBe('The Hindu, 14 Mar 2026');
+    expect(resolveSyllabusNodeLabel(item.metadata!.syllabusNodeId!)).toContain(currentAffairsSubject.title);
+  });
+
+  it('a current_affairs item with none of the three fields set has nothing to show — no fake/default values are produced', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'Bare current affairs item' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    expect(item.metadata?.eventDate).toBeUndefined();
+    expect(item.metadata?.source).toBeUndefined();
+    expect(item.metadata?.syllabusNodeId).toBeUndefined();
+  });
+
+  it('a non-Current-Affairs item (e.g. research_document) never carries the Current Affairs fields, even if present in metadata by coincidence', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Research doc' }), { workspaceId: 'phd_research', contentType: 'research_document', metadata: { category: 'Fieldwork' } });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    // The display gate the component uses is contentType === 'current_affairs' — never shown here.
+    expect(item.contentType).not.toBe('current_affairs');
+    expect(item.metadata?.eventDate).toBeUndefined();
+    expect(item.metadata?.source).toBeUndefined();
+    expect(item.metadata?.syllabusNodeId).toBeUndefined();
+  });
+});
+
 describe('Repository Detail — relationship display', () => {
   beforeEach(fullReset);
 
@@ -177,6 +249,88 @@ describe('Repository Detail — relationship display', () => {
     useAppStore.getState().addImportedContent(doc);
     expect(() => getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content')).not.toThrow();
     expect(getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content')).toEqual([]);
+  });
+});
+
+describe('Repository Detail — Current Affairs content linking (reuses the existing relationship/Add-link workflow)', () => {
+  beforeEach(fullReset);
+
+  it('a resolved current_affairs entry reports linkable === true, so the existing Add-link UI (gated on repositoryContentTypeSupports) becomes available for it', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+
+    const resolved = resolveEntity('imported_content', article.id);
+    expect(resolved).toBeDefined();
+    expect(repositoryContentTypeSupports(resolved!.entry.contentType, 'linkable')).toBe(true);
+  });
+
+  it('a current_affairs item can create a valid relationship to a Note through the existing addContentRelationship mechanism (no new relationship type or store)', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().upsertNote({ id: 'ca-note', subject: 'general', title: 'My analysis', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+
+    const result = useAppStore.getState().addContentRelationship({ source: { id: article.id, type: 'imported_content' }, target: { id: 'ca-note', type: 'note' }, type: 'related_to' });
+    expect(result.status).toBe('ok');
+  });
+
+  it('the relationship is displayed after creation — getRelatedContent resolves it from the current_affairs item\'s side', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'upsc_cse', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addImportedContent(bib);
+    useAppStore.getState().addContentRelationship({ source: { id: article.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+
+    const related = getRelatedContent(useAppStore.getState().contentRelationships, article.id, 'imported_content');
+    expect(related).toHaveLength(1);
+    expect(related[0].relationship.type).toBe('cites');
+    expect(related[0].relatedId).toBe(bib.id);
+  });
+
+  it('removing the relationship works through the existing deleteContentRelationship mechanism', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'upsc_cse', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addImportedContent(bib);
+    const result = useAppStore.getState().addContentRelationship({ source: { id: article.id, type: 'imported_content' }, target: { id: bib.id, type: 'imported_content' }, type: 'cites' });
+    expect(result.status).toBe('ok');
+    const createdId = result.status === 'ok' ? result.relationship.id : undefined;
+
+    useAppStore.getState().deleteContentRelationship(createdId!);
+    expect(getRelatedContent(useAppStore.getState().contentRelationships, article.id, 'imported_content')).toEqual([]);
+  });
+
+  it('existing Note/Research Document/Bibliography relationship behaviour is unchanged when current_affairs items also exist in the store', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'upsc_cse', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'upsc_cse', contentType: 'bibliography' });
+    const article = confirmImportedContent(preview({ title: 'Unrelated current affairs item' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+    useAppStore.getState().addContentRelationship({ source: { id: bib.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'related_to' });
+
+    const related = getRelatedContent(useAppStore.getState().contentRelationships, doc.id, 'imported_content');
+    expect(related).toHaveLength(2);
+    const types = related.map((r) => r.relationship.type).sort();
+    expect(types).toEqual(['cites', 'related_to']);
+    // The unrelated current_affairs item never shows up as a relationship of doc's.
+    expect(related.some((r) => r.relatedId === article.id)).toBe(false);
+  });
+
+  it('existing non-linkable content (e.g. pyq) remains non-linkable — adding current_affairs to LINKABLE_CONTENT_TYPES did not widen the set for other types', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const pyq = confirmImportedContent(preview({ title: 'A PYQ' }), { workspaceId: 'upsc_cse', contentType: 'pyq' });
+    useAppStore.getState().addImportedContent(pyq);
+
+    const resolved = resolveEntity('imported_content', pyq.id);
+    expect(resolved).toBeDefined();
+    expect(repositoryContentTypeSupports(resolved!.entry.contentType, 'linkable')).toBe(false);
   });
 });
 
@@ -211,6 +365,39 @@ describe('Repository Detail — edit action', () => {
     expect(stored.title).toBe('Edited via Detail');
     expect(stored.metadata).toEqual({ category: 'New Category' });
     expect(stored.rawContent).toBe('Untouched raw content.');
+  });
+
+  it('bug fix: the detail page\'s REAL Edit save (via preserveUneditedMetadata) no longer silently erases Current Affairs eventDate/source/syllabusNodeId, or folderId/isPinned/isArchived (which this page previously preserved for none of them)', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'Original' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      metadata: { eventDate: '2026-02-01', source: 'PTI', syllabusNodeId: 'node-9', folderId: 'folder-9', isPinned: true, isArchived: true },
+    });
+    useAppStore.getState().addImportedContent(doc);
+    const resolved = resolveEntity('imported_content', doc.id)!;
+
+    // Exactly what pages/RepositoryDetail.tsx's own handleEditSave now does: build the merged
+    // metadata via preserveUneditedMetadata (fed by the resolved entry's folderId/isPinned/
+    // isArchived and the item's own pre-edit metadata), then call updateImportedContent.
+    const editedMetadata = { tags: ['edited'], category: 'Edited Category' };
+    const merged = preserveUneditedMetadata(editedMetadata, doc, {
+      folderId: resolved.entry.folderId,
+      isPinned: resolved.entry.isPinned,
+      isArchived: resolved.entry.isArchived,
+    });
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Edited via Detail', metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.title).toBe('Edited via Detail');
+    expect(stored.metadata?.tags).toEqual(['edited']);
+    expect(stored.metadata?.category).toBe('Edited Category');
+    expect(stored.metadata?.eventDate).toBe('2026-02-01');
+    expect(stored.metadata?.source).toBe('PTI');
+    expect(stored.metadata?.syllabusNodeId).toBe('node-9');
+    expect(stored.metadata?.folderId).toBe('folder-9');
+    expect(stored.metadata?.isPinned).toBe(true);
+    expect(stored.metadata?.isArchived).toBe(true);
   });
 
   it('a Note entry is editable-by-capability but the detail page never opens a metadata modal for it (it navigates to Notes instead — same rule as pages/Repository.tsx)', () => {
@@ -735,5 +922,111 @@ describe('annotations — workspace isolation (Phase 7)', () => {
     useAppStore.getState().setActiveWorkspaceId('apfc'); // no-op, already active; archives nothing new
     useAppStore.getState().resetAllData();
     expect(useAppStore.getState().annotations).toEqual([]);
+  });
+});
+
+describe('Repository Detail — Current Affairs revision (reuses the existing revisionQueue engine, no second engine)', () => {
+  beforeEach(() => {
+    fullReset();
+    useAppStore.setState({ revisionQueue: createRevisionQueue() });
+  });
+
+  it('a Current Affairs Repository item can be added to the existing revision queue', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+    expect(useAppStore.getState().revisionQueue[article.id]).toBeDefined();
+    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(1);
+  });
+
+  it('adding the same Current Affairs item twice does not duplicate the queue entry', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-09');
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual([article.id]);
+  });
+
+  it('due/review lookup (getDueItems-equivalent via the store) works for the Current Affairs item: unseen means immediately due', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+    const item = useAppStore.getState().revisionQueue[article.id];
+    expect(item.dueDate).toBe('2026-01-08'); // due today — immediately reviewable
+  });
+
+  it('a correct review on a Current Affairs item uses the existing spaced-repetition algorithm (box advances)', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+
+    useAppStore.getState().recordRevisionCorrect(article.id, '2026-01-08');
+    const item = useAppStore.getState().revisionQueue[article.id];
+    expect(item.box).toBe(2);
+    expect(item.reviewCount).toBe(1);
+  });
+
+  it('an incorrect review on a Current Affairs item resets it to box 1, exactly like a PYQ', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+    useAppStore.getState().recordRevisionCorrect(article.id, '2026-01-08'); // box 2
+
+    useAppStore.getState().recordRevisionIncorrect(article.id, '2026-01-10');
+    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(1);
+  });
+
+  it('the Current Affairs content resolves correctly for review — title and raw content come from the real ImportedContent item, not a fabricated copy', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement', content: 'Full article body for review.' }), {
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+    });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+
+    const resolved = resolveEntity('imported_content', article.id);
+    expect(resolved?.entry.title).toBe('Policy announcement');
+    expect(resolved?.item && 'rawContent' in resolved.item ? resolved.item.rawContent : undefined).toBe('Full article body for review.');
+  });
+
+  it('a queued Current Affairs item whose content has since been deleted resolves to nothing, but never throws, and its revision record is not silently deleted', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+    useAppStore.getState().recordRevisionCorrect(article.id, '2026-01-08');
+
+    useAppStore.getState().deleteImportedContent(article.id);
+
+    expect(() => resolveEntity('imported_content', article.id)).not.toThrow();
+    expect(resolveEntity('imported_content', article.id)).toBeUndefined();
+    // The existing system has no precedent for cascading a content deletion into the revision
+    // queue (PYQ_BANK questions are never deleted), so a stale revision record is left exactly as
+    // it was — RepositoryDetail.tsx simply renders its existing "Content not found" state instead
+    // of the revision widget, rather than this layer silently deleting history.
+    expect(useAppStore.getState().revisionQueue[article.id]).toBeDefined();
+    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(2);
+  });
+
+  it('existing PYQ revision behaviour (recordRevisionCorrect/Incorrect keyed by pyqId) is unchanged when a Current Affairs item is also in the queue', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+
+    useAppStore.getState().recordRevisionCorrect('some-pyq-id', '2026-01-08');
+    expect(useAppStore.getState().revisionQueue['some-pyq-id'].box).toBe(2);
+    expect(useAppStore.getState().revisionQueue['some-pyq-id'].reviewCount).toBe(1);
+    // The Current Affairs entry is untouched by the unrelated PYQ review.
+    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(1);
   });
 });
