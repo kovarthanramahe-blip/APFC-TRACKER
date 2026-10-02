@@ -188,7 +188,9 @@ describe('generateTodaysStudyItems', () => {
     const due = generateTodaysStudyItems(baseInput({ currentAffairsRevisionIds: ['ca1'], revisionQueue: dueQueue }));
     const item = due.find((i) => i.kind === 'current_affairs_revision')!;
     expect(item).toBeDefined();
-    expect(item.actionHref).toBe('/repository?view=current_affairs');
+    // Phase 12 — dueOnly=1 narrows the destination straight to the items actually due, since
+    // Repository now reads this param (lib/upscCseTodaysStudy.ts's own header on why).
+    expect(item.actionHref).toBe('/repository?view=current_affairs&dueOnly=1');
   });
 
   it('does not surface a current-affairs-revision item for an id tracked but not yet due', () => {

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper, Milestone } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper, Milestone, Repeat } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
-import { cx } from '../lib/utils';
+import { cx, getLocalDateString } from '../lib/utils';
 import { resolveSyllabusNodeLabel } from '../lib/syllabusNodeLabel';
 import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
 import {
@@ -418,6 +418,7 @@ export default function Repository() {
   const accent = getWorkspaceAccent(activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
   const notes = useAppStore((s) => s.notes);
+  const revisionQueue = useAppStore((s) => s.revisionQueue);
   const addImportedContent = useAppStore((s) => s.addImportedContent);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
@@ -447,6 +448,15 @@ export default function Repository() {
     const requested = searchParams.get('view');
     return KNOWLEDGE_LIBRARY_VIEWS.some((v) => v.view === requested) ? (requested as KnowledgeLibraryView) : 'all';
   });
+  // Phase 12 — Current Affairs Revision Experience: arriving via /repository?view=current_affairs&
+  // dueOnly=1 (UPSC CSE "Today's Study" own Current-Affairs-due item — lib/upscCseTodaysStudy.ts)
+  // narrows straight to the items that are ACTUALLY due today, instead of landing on every Current
+  // Affairs item and leaving the user to find the due ones by opening each one. Read only once, on
+  // mount, exactly like the other URL-driven filters above. Reuses the SAME revisionQueue dict and
+  // "due" definition pages/RepositoryDetail.tsx's own isDueForRevision already uses (an id with a
+  // real revisionQueue entry whose dueDate has arrived) — never a second revision/eligibility engine.
+  const [dueOnlyFilter, setDueOnlyFilter] = useState<boolean>(() => searchParams.get('dueOnly') === '1');
+  const today = useMemo(() => getLocalDateString(), []);
   const [selectedContentType, setSelectedContentType] = useState<RepositoryContentType | ''>('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -477,39 +487,45 @@ export default function Repository() {
   const availableCategories = useMemo(() => collectImportedContentCategories(workspaceContent), [workspaceContent]);
   const availableTags = useMemo(() => collectImportedContentTags(workspaceContent), [workspaceContent]);
 
-  const results = useMemo(
-    () =>
-      queryRepository(importedContent, notes, {
-        workspaceId: activeWorkspaceId,
-        contentType: selectedContentType || undefined,
-        contentTypes: selectedContentType ? undefined : (contentTypesForLibraryView(libraryView) ?? undefined),
-        syllabusNodeId: syllabusNodeIdFilter,
-        apfcTopicId: apfcTopicIdFilter,
-        search: searchQuery,
-        tags: selectedTags,
-        category: selectedCategory || undefined,
-        folderId: selectedFolderId,
-        pinnedOnly,
-        archived: showArchived,
-        sort: sortOrder,
-      }),
-    [
-      importedContent,
-      notes,
-      activeWorkspaceId,
-      libraryView,
-      selectedContentType,
-      syllabusNodeIdFilter,
-      apfcTopicIdFilter,
-      searchQuery,
-      selectedTags,
-      selectedCategory,
-      selectedFolderId,
+  const results = useMemo(() => {
+    const queried = queryRepository(importedContent, notes, {
+      workspaceId: activeWorkspaceId,
+      contentType: selectedContentType || undefined,
+      contentTypes: selectedContentType ? undefined : (contentTypesForLibraryView(libraryView) ?? undefined),
+      syllabusNodeId: syllabusNodeIdFilter,
+      apfcTopicId: apfcTopicIdFilter,
+      search: searchQuery,
+      tags: selectedTags,
+      category: selectedCategory || undefined,
+      folderId: selectedFolderId,
       pinnedOnly,
-      showArchived,
-      sortOrder,
-    ],
-  );
+      archived: showArchived,
+      sort: sortOrder,
+    });
+    if (!dueOnlyFilter) return queried;
+    return queried.filter((entry) => {
+      const revisionItem = revisionQueue[entry.entityId];
+      return !!revisionItem && revisionItem.dueDate <= today;
+    });
+  }, [
+    importedContent,
+    notes,
+    activeWorkspaceId,
+    libraryView,
+    selectedContentType,
+    syllabusNodeIdFilter,
+    apfcTopicIdFilter,
+    searchQuery,
+    selectedTags,
+    selectedCategory,
+    selectedFolderId,
+    pinnedOnly,
+    showArchived,
+    sortOrder,
+    dueOnlyFilter,
+    revisionQueue,
+    today,
+  ]);
 
   const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
 
@@ -550,6 +566,7 @@ export default function Repository() {
     selectedContentType !== '' ||
     !!syllabusNodeIdFilter ||
     !!apfcTopicIdFilter ||
+    dueOnlyFilter ||
     selectedCategory !== '' ||
     selectedTags.length > 0 ||
     selectedFolderId !== undefined ||
@@ -561,6 +578,7 @@ export default function Repository() {
     setLibraryView('all');
     setSelectedContentType('');
     clearTopicFilter();
+    setDueOnlyFilter(false);
     setSelectedCategory('');
     setSelectedTags([]);
     setSelectedFolderId(undefined);
@@ -740,6 +758,24 @@ export default function Repository() {
             type="button"
             onClick={clearTopicFilter}
             aria-label="Clear topic filter"
+            className="shrink-0 rounded-full p-0.5 hover:bg-brand-100 dark:hover:bg-brand-500/20"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Phase 12 — same removable-chip pattern as the topic filter above, for the same reason:
+          only ever present when the user actually arrived via Today's Study's "due for revision"
+          link, never a permanent part of the page's chrome. */}
+      {dueOnlyFilter && (
+        <div className="mb-5 flex items-center gap-1.5 self-start rounded-full bg-brand-50 dark:bg-brand-500/10 px-3 py-1.5 text-sm text-brand-700 dark:text-brand-300">
+          <Repeat className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">Due for revision</span>
+          <button
+            type="button"
+            onClick={() => setDueOnlyFilter(false)}
+            aria-label="Clear due-for-revision filter"
             className="shrink-0 rounded-full p-0.5 hover:bg-brand-100 dark:hover:bg-brand-500/20"
           >
             <X className="h-3.5 w-3.5" />
@@ -949,11 +985,13 @@ export default function Repository() {
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <Search className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
               <p className="text-slate-400 text-sm mb-4">
-                {topicFilterLabel && onlyContentTypeOrViewNarrowing
-                  ? `Nothing in ${workspaceLabel} is linked to "${topicFilterLabel}" yet.`
-                  : emptyResultsLabel && onlyContentTypeOrViewNarrowing
-                    ? `No ${emptyResultsLabel} yet in ${workspaceLabel}.`
-                    : 'No results match your search or filters.'}
+                {dueOnlyFilter && onlyContentTypeOrViewNarrowing
+                  ? 'Nothing due for revision right now — nice work.'
+                  : topicFilterLabel && onlyContentTypeOrViewNarrowing
+                    ? `Nothing in ${workspaceLabel} is linked to "${topicFilterLabel}" yet.`
+                    : emptyResultsLabel && onlyContentTypeOrViewNarrowing
+                      ? `No ${emptyResultsLabel} yet in ${workspaceLabel}.`
+                      : 'No results match your search or filters.'}
               </p>
               <Button variant="secondary" onClick={clearFilters}>
                 Clear filters

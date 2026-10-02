@@ -149,6 +149,53 @@ describe('Repository page — content-type filtering', () => {
   });
 });
 
+// Phase 12 — Current Affairs Revision Experience: /repository?view=current_affairs&dueOnly=1 (the
+// link lib/upscCseTodaysStudy.ts's own "Review Current Affairs" item now sends the user to) narrows
+// the view down to just the items actually due. These tests exercise exactly the post-filter the
+// component applies on top of queryRepository's own results: an entry's id has a revisionQueue
+// entry whose dueDate has arrived — the SAME definition pages/RepositoryDetail.tsx's own
+// isDueForRevision already uses, never a second "is this due" calculation.
+describe('Repository page — due-for-revision filter (dueOnly)', () => {
+  beforeEach(fullReset);
+
+  function applyDueOnlyFilter(entries: ReturnType<typeof queryRepository>, revisionQueue: ReturnType<typeof useAppStore.getState>['revisionQueue'], today: string) {
+    return entries.filter((entry) => {
+      const revisionItem = revisionQueue[entry.entityId];
+      return !!revisionItem && revisionItem.dueDate <= today;
+    });
+  }
+
+  it('keeps only Current Affairs items with a real, due-today revisionQueue entry', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const due = confirmImportedContent(preview({ title: 'Due article' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    const notYetDue = confirmImportedContent(preview({ title: 'Not yet due article' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    const neverAdded = confirmImportedContent(preview({ title: 'Never added to revision' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(due);
+    useAppStore.getState().addImportedContent(notYetDue);
+    useAppStore.getState().addImportedContent(neverAdded);
+    useAppStore.getState().addToRevisionQueue(due.id, '2026-09-20');
+    useAppStore.getState().addToRevisionQueue(notYetDue.id, '2026-09-20');
+    useAppStore.getState().recordRevisionCorrect(notYetDue.id, '2026-09-20'); // pushes dueDate into the future
+
+    const state = useAppStore.getState();
+    const queried = queryRepository(state.importedContent, state.notes, { workspaceId: 'upsc_cse', contentTypes: ['current_affairs'] });
+    const filtered = applyDueOnlyFilter(queried, state.revisionQueue, '2026-09-20');
+
+    expect(filtered.map((r) => r.entityId)).toEqual([due.id]);
+  });
+
+  it('is an empty list, never throwing, when nothing is due', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Article' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+
+    const state = useAppStore.getState();
+    const queried = queryRepository(state.importedContent, state.notes, { workspaceId: 'upsc_cse', contentTypes: ['current_affairs'] });
+    expect(() => applyDueOnlyFilter(queried, state.revisionQueue, '2026-09-20')).not.toThrow();
+    expect(applyDueOnlyFilter(queried, state.revisionQueue, '2026-09-20')).toEqual([]);
+  });
+});
+
 describe('Repository page — category/tag filtering', () => {
   beforeEach(fullReset);
 

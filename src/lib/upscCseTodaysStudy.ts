@@ -140,7 +140,10 @@ export function generateTodaysStudyItems(input: GenerateTodaysStudyInput): UpscC
       title: `${currentAffairsDueCount} Current Affairs item${currentAffairsDueCount === 1 ? '' : 's'} due for revision`,
       description: 'Current Affairs notes you marked for revision that are due today.',
       actionLabel: 'Review Current Affairs',
-      actionHref: '/repository?view=current_affairs',
+      // Phase 12 — dueOnly=1 narrows straight to the items actually due today (pages/Repository.tsx's
+      // own revisionQueue-aware filter), instead of landing on every Current Affairs item and making
+      // the user re-discover which ones this count was even about.
+      actionHref: '/repository?view=current_affairs&dueOnly=1',
     });
   }
 
