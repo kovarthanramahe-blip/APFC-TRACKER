@@ -1,4 +1,7 @@
 apply plugin: 'com.android.application'
+// Phase 2 — first Kotlin code in this project (see variables.gradle's own Phase 2 comment and
+// the root build.gradle's kotlin-gradle-plugin classpath entry).
+apply plugin: 'org.jetbrains.kotlin.android'
 
 android {
     namespace = "com.apfctracker.app"
@@ -22,6 +25,11 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    // Matches capacitor.build.gradle's own (auto-generated, "DO NOT EDIT") compileOptions below —
+    // Kotlin's JVM target must agree with the Java source/target compatibility Capacitor already sets.
+    kotlinOptions {
+        jvmTarget = "21"
+    }
 }
 
 repositories {
@@ -40,6 +48,20 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // Phase 2 — native low-latency stylus ink (see this session's architecture report for why:
+    // Repository document freehand writing remained poor on physical Android hardware even after
+    // several rounds of JS/canvas-side optimization; MiniInkCanvas/web stayed smooth throughout).
+    // All three are current STABLE releases (verified directly against developer.android.com on
+    // the date this was written), not alphas/betas. All require minSdk 29 except
+    // input-motionprediction, which only needs 21 but is used here alongside the other two.
+    implementation "androidx.ink:ink-authoring:1.0.0"
+    implementation "androidx.ink:ink-brush:1.0.0"
+    implementation "androidx.ink:ink-geometry:1.0.0"
+    implementation "androidx.ink:ink-rendering:1.0.0"
+    implementation "androidx.ink:ink-strokes:1.0.0"
+    implementation "androidx.graphics:graphics-core:1.0.4"
+    implementation "androidx.input:input-motionprediction:1.0.0"
 }
 
 apply from: 'capacitor.build.gradle'
