@@ -244,6 +244,42 @@ describe('generateUpNextItems — PhD Research item composition', () => {
     expect(phdItems.some((i) => i.id === 'phd-overdue-targets' && i.actionHref === '/phd-plan')).toBe(true);
   });
 
+  // Phase 16 — "how overdue" context, reusing lib/phdResearch.ts's real computeResearchDuration
+  // (never lib/utils.ts's wall-clock daysUntil) against each overdue target's own targetDate.
+
+  it('reports the exact number of days overdue for a single overdue target, using the real computeResearchDuration engine', () => {
+    const items = generateUpNextItems(
+      baseInput({ phdResearch: emptyPhd({ microTargets: [microTarget({ id: 'overdue1', status: 'pending', targetDate: '2026-09-10' })] }) }),
+    );
+    const overdueItem = items.find((i) => i.id === 'phd-overdue-targets');
+    // baseInput's today is '2026-09-22' — 2026-09-10 to 2026-09-22 is exactly 12 days.
+    expect(overdueItem?.context).toBe('Most overdue by 12 days');
+  });
+
+  it('reports the MAXIMUM (worst) overdue duration among several overdue targets, never the first in array order', () => {
+    const items = generateUpNextItems(
+      baseInput({
+        phdResearch: emptyPhd({
+          microTargets: [
+            // Listed least-overdue first, so a naive "first element" implementation would get this wrong.
+            microTarget({ id: 'barely-overdue', status: 'pending', targetDate: '2026-09-20' }), // 2 days overdue
+            microTarget({ id: 'very-overdue', status: 'pending', targetDate: '2026-09-01' }), // 21 days overdue
+          ],
+        }),
+      }),
+    );
+    const overdueItem = items.find((i) => i.id === 'phd-overdue-targets');
+    expect(overdueItem?.context).toBe('Most overdue by 21 days');
+  });
+
+  it('uses singular "day" for exactly 1 day overdue, never "1 days"', () => {
+    const items = generateUpNextItems(
+      baseInput({ phdResearch: emptyPhd({ microTargets: [microTarget({ id: 'overdue1', status: 'pending', targetDate: '2026-09-21' })] }) }),
+    );
+    const overdueItem = items.find((i) => i.id === 'phd-overdue-targets');
+    expect(overdueItem?.context).toBe('Most overdue by 1 day');
+  });
+
   it('surfaces unread/reading research documents and bibliography records to continue, via the real computePhdAnalytics engine', () => {
     const items = generateUpNextItems(
       baseInput({

@@ -16,6 +16,7 @@ import type { UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
 import { computePhdDashboardSnapshot } from './phdDashboard';
 import { computePhdAnalytics } from './phdAnalytics';
+import { computeResearchDuration } from './phdResearch';
 import type { PhdTopicArea } from './phdTopicArea';
 import type { MicroTarget } from './microTarget';
 import type { ImportedContent } from './contentImport';
@@ -170,10 +171,20 @@ function buildPhdItems(data: PhdCommandCentreData, today: string, max: number): 
   });
   if (dashboardSnapshot.overdueTargets.length > 0) {
     const n = dashboardSnapshot.overdueTargets.length;
+    // Phase 16 — "how overdue" context, reusing lib/phdResearch.ts's existing computeResearchDuration
+    // (already pure, already caller-supplied-`today`, already used by this same snapshot for the
+    // research-duration stat) for each overdue target's own targetDate, never lib/utils.ts's
+    // daysUntil (which reads the real wall clock and would break this module's determinism). The
+    // WORST (maximum) days-overdue across the set is reported — an aggregate, never a sort/pick of
+    // one particular target's title, matching the same style as the APFC weak-topics item's own
+    // "Lowest recent accuracy" context.
+    const daysOverdue = dashboardSnapshot.overdueTargets.map((t) => computeResearchDuration(t.targetDate!, today).totalDays);
+    const maxDaysOverdue = Math.max(...daysOverdue);
     items.push({
       id: 'phd-overdue-targets',
       workspaceId: 'phd_research',
       title: `${n} overdue micro-target${n === 1 ? '' : 's'}`,
+      context: `Most overdue by ${maxDaysOverdue} day${maxDaysOverdue === 1 ? '' : 's'}`,
       actionLabel: 'Open Research Plan',
       actionHref: '/phd-plan',
     });
