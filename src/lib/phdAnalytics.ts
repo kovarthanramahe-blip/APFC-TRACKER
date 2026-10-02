@@ -2,13 +2,15 @@ import { computeResearchDuration, type ResearchDuration } from './phdResearch';
 import type { PhdTopicArea } from './phdTopicArea';
 import { countMicroTargetsByStatus, overdueMicroTargets, upcomingMicroTargets, type MicroTarget, type MicroTargetCounts } from './microTarget';
 import type { ImportedContent, ImportedContentType } from './contentImport';
+import { countByReadingStatus, type ReadingStatusCounts } from './phdReadingStatus';
 
 // PhD Research Analytics — pure aggregation only, same discipline as lib/phdDashboard.ts: every
 // number here is composed from an already-existing, already-tested engine (computeResearchDuration,
-// countMicroTargetsByStatus, overdue/upcomingMicroTargets) or a direct, honest count of real
-// records. Nothing here fabricates hours worked, pages read, papers completed, a productivity
-// score, or a research-progress percentage — there is no real signal in this app for any of those,
-// so none of them appear anywhere in this snapshot.
+// countMicroTargetsByStatus, overdue/upcomingMicroTargets, and — Phase 9 — phdReadingStatus.ts's
+// own countByReadingStatus) or a direct, honest count of real records. Nothing here fabricates
+// hours worked, pages read, papers completed, a productivity score, or a research-progress
+// percentage — there is no real signal in this app for any of those, so none of them appear
+// anywhere in this snapshot.
 
 export interface TopicAreaAnalytics {
   topicArea: PhdTopicArea;
@@ -38,6 +40,10 @@ export interface PhdAnalyticsSnapshot {
   topicAreaCount: number;
   topicAreas: TopicAreaAnalytics[];
   materialCounts: MaterialCounts;
+  /** Reading progress over research_document + bibliography items only (the two content types
+   * lib/phdReadingStatus.ts actually tracks) — reuses countByReadingStatus verbatim, never a
+   * second pass over readingStatus itself. */
+  readingStatusCounts: ReadingStatusCounts;
   microTargetCounts: MicroTargetCounts;
   overdueTargetCount: number;
   upcomingTargetCount: number;
@@ -77,6 +83,8 @@ export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyti
   const bibliographyRecords = input.importedContent.filter((c) => c.contentType === 'bibliography').length;
   const otherImportedContent = input.importedContent.filter((c) => !RESEARCH_CONTENT_TYPES.has(c.contentType) && c.contentType !== 'note').length;
 
+  const readingStatusCounts = countByReadingStatus(input.importedContent.filter((c) => RESEARCH_CONTENT_TYPES.has(c.contentType)));
+
   const microTargetCounts = countMicroTargetsByStatus(input.microTargets);
   const totalTargets = microTargetCounts.pending + microTargetCounts.in_progress + microTargetCounts.completed;
   const completionRatePct = totalTargets > 0 ? Math.round((microTargetCounts.completed / totalTargets) * 100) : 0;
@@ -101,6 +109,7 @@ export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyti
     topicAreaCount: input.topicAreas.length,
     topicAreas,
     materialCounts: { researchDocuments, bibliographyRecords, notes: input.notesCount, otherImportedContent },
+    readingStatusCounts,
     microTargetCounts,
     overdueTargetCount: overdueMicroTargets(input.microTargets, input.today).length,
     upcomingTargetCount: upcomingMicroTargets(input.microTargets, input.today).length,

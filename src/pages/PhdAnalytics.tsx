@@ -4,13 +4,21 @@ import { GraduationCap, Hourglass, FolderKanban, Target, FileText, History as Hi
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, formatDate, cx } from '../lib/utils';
-import { Card, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { Card, Badge, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { computePhdAnalytics } from '../lib/phdAnalytics';
 import { listNotesForWorkspace } from '../lib/repository';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
+import { READING_STATUSES, READING_STATUS_LABELS } from '../lib/phdReadingStatus';
+
+const READING_STATUS_TONE: Record<(typeof READING_STATUSES)[number], 'neutral' | 'brand' | 'warning' | 'success'> = {
+  unread: 'neutral',
+  reading: 'brand',
+  read: 'warning',
+  reviewed: 'success',
+};
 
 function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
   const tones: Record<string, string> = {
@@ -135,6 +143,18 @@ export default function PhdAnalytics() {
             <StatTile label="Other Imported Content" value={`${analytics.materialCounts.otherImportedContent}`} />
           </Link>
         </div>
+        {analytics.materialCounts.researchDocuments + analytics.materialCounts.bibliographyRecords > 0 && (
+          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Reading Status</p>
+            <div className="flex flex-wrap gap-2">
+              {READING_STATUSES.map((status) => (
+                <Badge key={status} tone={READING_STATUS_TONE[status]}>
+                  {READING_STATUS_LABELS[status]}: {analytics.readingStatusCounts[status]}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Micro-target analytics */}

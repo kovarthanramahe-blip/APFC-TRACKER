@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, ListChecks, Target } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
@@ -46,20 +46,15 @@ export default function Syllabus() {
   // everything else below reads `syllabus`, never a specific workspace's data file directly.
   const syllabus = useMemo(() => getSyllabusForWorkspace(activeWorkspaceId), [activeWorkspaceId]);
 
-  // Same unified topic-status source of truth as Dashboard/Analytics (lib/topicStatus) — a topic
-  // covered here but flagged elsewhere as weak from real PYQ performance must show that here too,
-  // otherwise the checkmark alone would misleadingly read as "done". PYQ_BANK only ever contains
-  // APFC questions, so for a workspace with no PYQ practice yet (pyqAttempts always []) this
-  // naturally degrades to "no PYQ signal" for every topic — never a special case to handle here.
+  // Same unified topic-status source of truth as Dashboard/Analytics (lib/topicStatus), feeding the
+  // accuracy badge rendered per-topic below. PYQ_BANK only ever contains APFC questions, so for a
+  // workspace with no PYQ practice yet (pyqAttempts always []) this naturally degrades to "no PYQ
+  // signal" for every topic — never a special case to handle here.
   const topicStatusById = useMemo(() => {
     const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
     const statuses = computeUnifiedTopicStatus(syllabus, completedTopics, pyqPerf);
     return new Map(statuses.map((t) => [t.topicId, t]));
   }, [syllabus, completedTopics, pyqAttempts]);
-  const needsRevisionTopicIds = useMemo(
-    () => new Set([...topicStatusById.values()].filter((t) => t.status === 'needs_revision').map((t) => t.topicId)),
-    [topicStatusById],
-  );
 
   // Phase 6 — Competitive Exam Intelligence: how many PYQs exist in the bank for each topic
   // (historical coverage, independent of whether the user has attempted any of them) — reuses
@@ -240,22 +235,16 @@ export default function Syllabus() {
                                   {topic.title}
                                 </span>
                               </button>
-                              {needsRevisionTopicIds.has(topic.id) && (
-                                <span
-                                  title="Covered, but recent PYQ accuracy on this topic is weak — worth revising"
-                                  className="shrink-0 rounded-lg p-2 text-amber-500 dark:text-amber-400"
-                                >
-                                  <AlertTriangle className="h-4 w-4" />
-                                </span>
-                              )}
                               {/* Phase 6 — Competitive Exam Intelligence: PYQ coverage + performance for
                                   this topic, surfacing lib/pyqFilters.ts's getTopicCounts and
                                   lib/topicStatus.ts's already-computed pyqAttempted/pyqAccuracy (item
                                   #1/#2 of the Phase 6 spec) rather than inventing a new aggregation —
                                   only shown when the bank genuinely has questions for this topic, and
                                   the accuracy badge only once there is enough real attempt data to mean
-                                  anything (same MIN_PYQ_ATTEMPTS_FOR_SIGNAL threshold the needs_revision
-                                  warning above already uses). */}
+                                  anything (MIN_PYQ_ATTEMPTS_FOR_SIGNAL). Phase 9: this accuracy badge
+                                  alone already conveys "covered but weak" more precisely than a separate
+                                  warning icon ever could (same source, same thresholds), so no such icon
+                                  is shown here. */}
                               {hasPerformanceSignal && status && (
                                 <span
                                   title={`${status.pyqAttempted} PYQ${status.pyqAttempted === 1 ? '' : 's'} attempted, ${status.pyqAccuracy!.toFixed(0)}% accuracy`}

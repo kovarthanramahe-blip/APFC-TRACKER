@@ -124,6 +124,24 @@ describe('computePhdAnalytics — micro-target analytics', () => {
   });
 });
 
+describe('computePhdAnalytics — reading status counts', () => {
+  it('counts reading status only over research_document + bibliography items, defaulting untouched items to unread', () => {
+    const importedContent = [
+      content({ id: 'c1', contentType: 'research_document', metadata: { readingStatus: 'reviewed' } }),
+      content({ id: 'c2', contentType: 'bibliography', metadata: { readingStatus: 'reading' } }),
+      content({ id: 'c3', contentType: 'research_document' }), // untouched -> unread
+      content({ id: 'c4', contentType: 'note', metadata: { readingStatus: 'reviewed' } }), // not research material, excluded
+    ];
+    const snapshot = computePhdAnalytics(baseInput({ importedContent }));
+    expect(snapshot.readingStatusCounts).toEqual({ unread: 1, reading: 1, read: 0, reviewed: 1 });
+  });
+
+  it('reports all-zero reading status counts when there is no research material', () => {
+    const snapshot = computePhdAnalytics(baseInput());
+    expect(snapshot.readingStatusCounts).toEqual({ unread: 0, reading: 0, read: 0, reviewed: 0 });
+  });
+});
+
 describe('computePhdAnalytics — activity from real timestamps only', () => {
   it('groups completed-target and imported-content activity by real calendar day', () => {
     const microTargets = [target({ id: 't1', status: 'completed', completedAt: '2026-09-20T10:00:00.000Z' })];
