@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
-import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check, BookOpen } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
@@ -32,6 +32,8 @@ import type { ImportedContentMetadata } from '../lib/contentImport';
 import { DocumentAnnotator, type DocumentAnnotatorHandle } from '../components/annotations/DocumentAnnotator';
 import { AnnotationIndex } from '../components/annotations/AnnotationIndex';
 import type { Annotation } from '../lib/annotations';
+import { ReadingStatusPicker } from '../components/phdResearch/ReadingStatusPicker';
+import { getReadingStatus, READING_STATUS_LABELS, type ReadingStatus } from '../lib/phdReadingStatus';
 
 // Repository Detail / Preview View — a focused, read-only page for a single repository entity,
 // reached from pages/Repository.tsx's own "View" action on each result card. It reuses that same
@@ -325,6 +327,18 @@ export default function RepositoryDetail() {
     recordRevisionIncorrect(entry.entityId, getLocalDateString());
   }
 
+  // PhD reading intelligence (Phase 11) — research_document/bibliography items already carry a
+  // readingStatus (lib/phdReadingStatus.ts), set via the SAME ReadingStatusPicker control already
+  // used in pages/PhdResearch.tsx and pages/WorkingBibliography.tsx; this is just that control,
+  // wired through the exact onChange pattern those pages already use (merge readingStatus into the
+  // item's existing metadata via updateImportedContent) so the Knowledge/Repository context can act
+  // on it too, without a second reading-status engine.
+  const isReadableResearchMaterial = importedItem?.contentType === 'research_document' || importedItem?.contentType === 'bibliography';
+  function handleReadingStatusChange(status: ReadingStatus) {
+    if (!importedItem) return;
+    updateImportedContent(importedItem.id, { metadata: { ...importedItem.metadata, readingStatus: status } });
+  }
+
   return (
     <div>
       <Link to="/repository" className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
@@ -454,6 +468,20 @@ export default function RepositoryDetail() {
               Queued for revision — Box {revisionItem.box}, next review {formatDate(revisionItem.dueDate)}.
             </p>
           )}
+        </Card>
+      )}
+
+      {isReadableResearchMaterial && importedItem && (
+        <Card className="mb-5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <BookOpen className="h-3.5 w-3.5" /> Reading Status
+            </p>
+            <ReadingStatusPicker item={importedItem} onChange={handleReadingStatusChange} />
+          </div>
+          <p className="mt-2 text-sm text-slate-400">
+            Currently marked <span className="font-medium text-slate-600 dark:text-slate-300">{READING_STATUS_LABELS[getReadingStatus(importedItem)]}</span>.
+          </p>
         </Card>
       )}
 

@@ -18,6 +18,7 @@ import { SYLLABUS } from '../data/syllabus';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { createInkAnnotation, createHighlighterInkAnnotation, createStickyNote, createBookmark, annotationsForDocument } from '../lib/annotations';
+import { getReadingStatus } from '../lib/phdReadingStatus';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see every other *.test.ts file for the established convention). These tests exercise exactly
@@ -381,6 +382,90 @@ describe('Repository Detail — Current Affairs content linking (reuses the exis
     const resolved = resolveEntity('imported_content', pyq.id);
     expect(resolved).toBeDefined();
     expect(repositoryContentTypeSupports(resolved!.entry.contentType, 'linkable')).toBe(false);
+  });
+});
+
+// PhD Reading Status in Repository (Phase 11) — the same lib/phdReadingStatus.ts engine and the
+// same ReadingStatusPicker onChange pattern pages/PhdResearch.tsx/pages/WorkingBibliography.tsx
+// already use, now also reachable from this page for research_document/bibliography items. No new
+// engine: these tests exercise exactly getReadingStatus and the exact updateImportedContent merge
+// call the picker's onChange makes.
+
+describe('Repository Detail — reading status (reuses lib/phdReadingStatus.ts, same as PhD Research/Working Bibliography)', () => {
+  beforeEach(fullReset);
+
+  it('a research_document with no readingStatus set defaults to "unread", same as everywhere else this field is read', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    expect(getReadingStatus(item)).toBe('unread');
+  });
+
+  it('the exact updateImportedContent call the picker\'s onChange makes sets readingStatus while preserving every other metadata field untouched', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Bib record' }), {
+      workspaceId: 'phd_research',
+      contentType: 'bibliography',
+      metadata: { tags: ['fieldwork'], category: 'Sources', topicAreaId: 'area-1' },
+    });
+    useAppStore.getState().addImportedContent(doc);
+    const before = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+
+    // Mirrors pages/RepositoryDetail.tsx's own handleReadingStatusChange exactly.
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: { ...before.metadata, readingStatus: 'reading' } });
+
+    const after = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    expect(getReadingStatus(after)).toBe('reading');
+    expect(after.metadata?.tags).toEqual(['fieldwork']);
+    expect(after.metadata?.category).toBe('Sources');
+    expect(after.metadata?.topicAreaId).toBe('area-1');
+  });
+
+  it('research_document and bibliography are both the content types the detail page shows the picker for — exactly isReadableResearchMaterial\'s own condition', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    const bib = confirmImportedContent(preview({ title: 'Bib' }), { workspaceId: 'phd_research', contentType: 'bibliography' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().addImportedContent(bib);
+
+    const docEntry = resolveEntity('imported_content', doc.id)!.entry;
+    const bibEntry = resolveEntity('imported_content', bib.id)!.entry;
+    expect(docEntry.contentType === 'research_document' || docEntry.contentType === 'bibliography').toBe(true);
+    expect(bibEntry.contentType === 'research_document' || bibEntry.contentType === 'bibliography').toBe(true);
+  });
+
+  it('a non-PhD-research content type (e.g. current_affairs, which already has its own Revision card) is never gated into the reading-status condition', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+
+    const entry = resolveEntity('imported_content', article.id)!.entry;
+    expect(entry.contentType === 'research_document' || entry.contentType === 'bibliography').toBe(false);
+  });
+
+  it('a Note is never gated into the reading-status condition (Notes have no readingStatus field at all)', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+
+    const entry = resolveEntity('note', 'n1')!.entry;
+    expect(entry.contentType === 'research_document' || entry.contentType === 'bibliography').toBe(false);
+  });
+
+  it('a readingStatus edit survives an export -> reset -> import round-trip (page reload), same as every other metadata edit', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Doc' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: { readingStatus: 'reviewed' } });
+
+    const json = exportAllData();
+    fullReset();
+    importAllData(json);
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+
+    const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
+    expect(getReadingStatus(item)).toBe('reviewed');
   });
 });
 
