@@ -44,6 +44,15 @@ export interface PhdAnalyticsSnapshot {
    * lib/phdReadingStatus.ts actually tracks) — reuses countByReadingStatus verbatim, never a
    * second pass over readingStatus itself. */
   readingStatusCounts: ReadingStatusCounts;
+  /** Phase 10 — how many research_document / bibliography items are 'unread' or 'reading' (i.e.
+   * genuinely have something left to continue) for EACH type separately, so the Reading Status
+   * display can link to the one page that actually lets the user act on it (pages/PhdResearch.tsx
+   * for research_document, pages/WorkingBibliography.tsx for bibliography — the two pages with the
+   * ReadingStatusPicker control; a combined count can't tell which page to send the user to). Never
+   * a second status-counting engine — both are countByReadingStatus over a type-filtered subset of
+   * the SAME importedContent readingStatusCounts already counts. */
+  researchDocumentsToContinueCount: number;
+  bibliographyToContinueCount: number;
   microTargetCounts: MicroTargetCounts;
   overdueTargetCount: number;
   upcomingTargetCount: number;
@@ -84,6 +93,10 @@ export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyti
   const otherImportedContent = input.importedContent.filter((c) => !RESEARCH_CONTENT_TYPES.has(c.contentType) && c.contentType !== 'note').length;
 
   const readingStatusCounts = countByReadingStatus(input.importedContent.filter((c) => RESEARCH_CONTENT_TYPES.has(c.contentType)));
+  const researchDocumentReadingCounts = countByReadingStatus(input.importedContent.filter((c) => c.contentType === 'research_document'));
+  const bibliographyReadingCounts = countByReadingStatus(input.importedContent.filter((c) => c.contentType === 'bibliography'));
+  const researchDocumentsToContinueCount = researchDocumentReadingCounts.unread + researchDocumentReadingCounts.reading;
+  const bibliographyToContinueCount = bibliographyReadingCounts.unread + bibliographyReadingCounts.reading;
 
   const microTargetCounts = countMicroTargetsByStatus(input.microTargets);
   const totalTargets = microTargetCounts.pending + microTargetCounts.in_progress + microTargetCounts.completed;
@@ -110,6 +123,8 @@ export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyti
     topicAreas,
     materialCounts: { researchDocuments, bibliographyRecords, notes: input.notesCount, otherImportedContent },
     readingStatusCounts,
+    researchDocumentsToContinueCount,
+    bibliographyToContinueCount,
     microTargetCounts,
     overdueTargetCount: overdueMicroTargets(input.microTargets, input.today).length,
     upcomingTargetCount: upcomingMicroTargets(input.microTargets, input.today).length,

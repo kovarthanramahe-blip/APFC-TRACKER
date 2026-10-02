@@ -153,6 +153,24 @@ export default function PhdAnalytics() {
                 </Badge>
               ))}
             </div>
+            {/* Phase 10 — turn the counts above into a direct next action: each page link goes to
+                the ONE place that actually has a reading-status control for that content type
+                (ReadingStatusPicker — pages/PhdResearch.tsx / pages/WorkingBibliography.tsx), so
+                "2 unread" is never just a number with nowhere to act on it. */}
+            {(analytics.researchDocumentsToContinueCount > 0 || analytics.bibliographyToContinueCount > 0) && (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                {analytics.researchDocumentsToContinueCount > 0 && (
+                  <Link to="/phd-research" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                    Continue Research Documents ({analytics.researchDocumentsToContinueCount})
+                  </Link>
+                )}
+                {analytics.bibliographyToContinueCount > 0 && (
+                  <Link to="/phd-research/bibliography" className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                    Continue Working Bibliography ({analytics.bibliographyToContinueCount})
+                  </Link>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>

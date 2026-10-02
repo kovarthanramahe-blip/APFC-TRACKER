@@ -142,6 +142,27 @@ describe('computePhdAnalytics — reading status counts', () => {
   });
 });
 
+describe('computePhdAnalytics — per-type "to continue" counts (Phase 10)', () => {
+  it('counts unread + reading items separately per content type, so each links to its own page', () => {
+    const importedContent = [
+      content({ id: 'c1', contentType: 'research_document', metadata: { readingStatus: 'unread' } }),
+      content({ id: 'c2', contentType: 'research_document', metadata: { readingStatus: 'reading' } }),
+      content({ id: 'c3', contentType: 'research_document', metadata: { readingStatus: 'reviewed' } }), // not "to continue"
+      content({ id: 'c4', contentType: 'bibliography', metadata: { readingStatus: 'read' } }), // not "to continue"
+      content({ id: 'c5', contentType: 'bibliography' }), // untouched -> unread
+    ];
+    const snapshot = computePhdAnalytics(baseInput({ importedContent }));
+    expect(snapshot.researchDocumentsToContinueCount).toBe(2);
+    expect(snapshot.bibliographyToContinueCount).toBe(1);
+  });
+
+  it('is 0 for a type with no material, never undefined/NaN', () => {
+    const snapshot = computePhdAnalytics(baseInput());
+    expect(snapshot.researchDocumentsToContinueCount).toBe(0);
+    expect(snapshot.bibliographyToContinueCount).toBe(0);
+  });
+});
+
 describe('computePhdAnalytics — activity from real timestamps only', () => {
   it('groups completed-target and imported-content activity by real calendar day', () => {
     const microTargets = [target({ id: 't1', status: 'completed', completedAt: '2026-09-20T10:00:00.000Z' })];
