@@ -3,7 +3,7 @@ import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
 import { computePyqPerformance } from './pyqPerformance';
 import { computeUnifiedTopicStatus } from './topicStatus';
-import { selectWeakTopicPracticeIds } from './weakTopicPractice';
+import { selectWeakTopics } from './weakTopicPractice';
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from './pyqFilters';
 import { getQueueCounts, type RevisionQueue } from './revisionQueue';
 import type { PYQAttempt } from './types';
@@ -105,15 +105,24 @@ function buildApfcItems(data: ApfcCommandCentreData, today: string, max: number)
     });
   }
 
-  // Weak-Topic Practice — exactly pages/Dashboard.tsx's own weakTopicPracticeIds computation.
+  // Weak-Topic Practice — reuses lib/weakTopicPractice.ts's own selectWeakTopics (the real
+  // UnifiedTopicStatus[], already in urgency order), NOT selectWeakTopicPracticeIds (which returns
+  // PYQ QUESTION ids, capped at DEFAULT_WEAK_TOPIC_PRACTICE_CAP — a different, larger number than
+  // the topic count, and the wrong thing to label "N weak topics"). The practice session itself
+  // still lives entirely on /pyq-test?mode=weak_topics, which does its own PYQ selection — this
+  // only needs the topic list for an honest count and each topic's own already-computed
+  // pyqAccuracy, never a second accuracy calculation.
   const pyqPerf = computePyqPerformance(PYQ_BANK, [...data.pyqAttempts]);
   const topicStatuses = computeUnifiedTopicStatus(SYLLABUS, data.completedTopics, pyqPerf);
-  const weakTopicIds = selectWeakTopicPracticeIds(topicStatuses, PYQ_BANK);
-  if (weakTopicIds.length > 0) {
+  const weakTopics = selectWeakTopics(topicStatuses);
+  if (weakTopics.length > 0) {
+    const knownAccuracies = weakTopics.map((t) => t.pyqAccuracy).filter((a): a is number => a !== null);
+    const context = knownAccuracies.length > 0 ? `Lowest recent accuracy: ${Math.round(Math.min(...knownAccuracies))}%` : undefined;
     items.push({
       id: 'apfc-weak-topics',
       workspaceId: 'apfc',
-      title: `${weakTopicIds.length} weak topic${weakTopicIds.length === 1 ? '' : 's'} to practice`,
+      title: `${weakTopics.length} weak topic${weakTopics.length === 1 ? '' : 's'} to practice`,
+      context,
       actionLabel: 'Practice Weak Topics',
       actionHref: '/pyq-test?mode=weak_topics',
     });

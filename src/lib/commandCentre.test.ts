@@ -8,6 +8,7 @@ import {
 } from './commandCentre';
 import { createRevisionQueue, type RevisionQueue } from './revisionQueue';
 import type { PYQAttempt } from './types';
+import { PYQ_BANK } from '../data/pyq';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
@@ -128,6 +129,86 @@ describe('generateUpNextItems — APFC item composition', () => {
     const dueQueue: RevisionQueue = { q1: { pyqId: 'q1', box: 1, dueDate: '2026-09-20', lastReviewedDate: '2026-09-10', reviewCount: 1 } };
     const items = generateUpNextItems(baseInput({ apfc: emptyApfc({ bookmarkedPyqIds: ['q1'], revisionQueue: dueQueue }), maxPerWorkspace: 1 }));
     expect(items.filter((i) => i.workspaceId === 'apfc').length).toBeLessThanOrEqual(1);
+  });
+
+  // Phase 15 — the weak-topics item must count real TOPICS (lib/weakTopicPractice.ts's
+  // selectWeakTopics), never the PYQ QUESTION ids selectWeakTopicPracticeIds returns for the actual
+  // practice session — a single weak topic can carry many real PYQs, so the two numbers genuinely
+  // differ. `en-1` ("Reading Comprehension") is real production data with 18+ real PYQs, used here
+  // (found dynamically, never hardcoded) precisely because it demonstrates that divergence.
+  function realTopicWithAtLeastNPyqs(n: number): { topicId: string; questions: typeof PYQ_BANK } {
+    const byTopic = new Map<string, typeof PYQ_BANK>();
+    for (const q of PYQ_BANK) byTopic.set(q.topicId, [...(byTopic.get(q.topicId) ?? []), q]);
+    const found = [...byTopic.entries()].find(([, qs]) => qs.length >= n);
+    if (!found) throw new Error(`No real syllabus topic in PYQ_BANK has at least ${n} questions — fixture assumption broken.`);
+    return { topicId: found[0], questions: found[1].slice(0, n) };
+  }
+
+  it('counts the real number of weak TOPICS, not the (larger) number of associated PYQ question ids, for a topic with many real PYQs', () => {
+    const { topicId, questions } = realTopicWithAtLeastNPyqs(3);
+    // One correct, two wrong — real accuracy ~33%, well under WEAK_PYQ_ACCURACY_THRESHOLD (60), so
+    // this single topic is genuinely 'needs_revision' with >=3 real PYQs behind it.
+    const answers: Record<string, string> = {};
+    questions.forEach((q, i) => {
+      answers[q.id] = i === 0 ? q.correctOptionId : q.options.find((o) => o.id !== q.correctOptionId)!.id;
+    });
+    const weakAttempt: PYQAttempt = {
+      id: 'weak-attempt',
+      submittedAt: '2026-09-01T00:00:00.000Z',
+      year: 'all',
+      subject: 'all',
+      topicId: 'all',
+      questionIds: questions.map((q) => q.id),
+      answers,
+      correctCount: 1,
+      wrongCount: questions.length - 1,
+      unansweredCount: 0,
+      score: 1,
+      accuracy: 100 / questions.length,
+    };
+
+    const items = generateUpNextItems(baseInput({ apfc: emptyApfc({ completedTopics: { [topicId]: true }, pyqAttempts: [weakAttempt] }) }));
+    const weakTopicItem = items.find((i) => i.id === 'apfc-weak-topics');
+    expect(weakTopicItem).toBeDefined();
+    // Exactly 1 real weak topic, never the question count (3, or up to 20 for a bigger topic).
+    expect(weakTopicItem!.title).toBe('1 weak topic to practice');
+  });
+
+  it('adds a "Lowest recent accuracy" context using the real, already-computed pyqAccuracy — never a fabricated or re-derived number', () => {
+    const { topicId, questions } = realTopicWithAtLeastNPyqs(3);
+    const answers: Record<string, string> = {};
+    questions.forEach((q, i) => {
+      answers[q.id] = i === 0 ? q.correctOptionId : q.options.find((o) => o.id !== q.correctOptionId)!.id;
+    });
+    const weakAttempt: PYQAttempt = {
+      id: 'weak-attempt',
+      submittedAt: '2026-09-01T00:00:00.000Z',
+      year: 'all',
+      subject: 'all',
+      topicId: 'all',
+      questionIds: questions.map((q) => q.id),
+      answers,
+      correctCount: 1,
+      wrongCount: questions.length - 1,
+      unansweredCount: 0,
+      score: 1,
+      accuracy: 100 / questions.length,
+    };
+
+    const items = generateUpNextItems(baseInput({ apfc: emptyApfc({ completedTopics: { [topicId]: true }, pyqAttempts: [weakAttempt] }) }));
+    const weakTopicItem = items.find((i) => i.id === 'apfc-weak-topics');
+    const expectedAccuracy = Math.round((1 / questions.length) * 100);
+    expect(weakTopicItem!.context).toBe(`Lowest recent accuracy: ${expectedAccuracy}%`);
+  });
+
+  it('never adds an accuracy context when every selected weak topic has null pyqAccuracy (covered, but zero PYQ attempts — honestly "needs practice", not a fabricated 0%)', () => {
+    const { topicId } = realTopicWithAtLeastNPyqs(1);
+    // Covered, but pyqAttempts is empty entirely — this topic is 'needs_practice' (covered + <3
+    // attempts), which selectWeakTopics still includes, but with pyqAccuracy === null (never 0).
+    const items = generateUpNextItems(baseInput({ apfc: emptyApfc({ completedTopics: { [topicId]: true }, pyqAttempts: [] }) }));
+    const weakTopicItem = items.find((i) => i.id === 'apfc-weak-topics');
+    expect(weakTopicItem).toBeDefined();
+    expect(weakTopicItem!.context).toBeUndefined();
   });
 });
 
