@@ -18,6 +18,7 @@ import {
 } from '../lib/importedContentRepository';
 import { getIncomingRelationships, getOutgoingRelationships } from '../lib/contentRelationships';
 import { countRelatedContent } from '../lib/relatedContentSummary';
+import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 
 // This page has no rendering test here (the project has no React Testing Library / DOM test
 // environment — see StudyPlan.test.ts and every other *.test.ts file in this repo, which all test
@@ -421,6 +422,21 @@ describe('research document — linked sources / bibliography display + unlinkin
     expect(researchDocuments.map((d) => d.id)).toEqual([doc.id]);
     expect(queryImportedContent(researchDocuments, { search: 'Fieldwork' }).map((d) => d.id)).toEqual([doc.id]);
   });
+
+  // Phase 13 — Research Knowledge Relationships: each linked source row's own "Open" arrow
+  // (LinkedSourcesModal) sends the user to the SAME /repository/:entityType/:id route
+  // pages/RepositoryDetail.tsx already serves, via the same repositoryDetailPathFor helper every
+  // other "open this exact item" link in the app already uses — never a second detail surface.
+  it('a linked bibliography source resolves to a real, type-qualified Repository Detail path', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Chapter' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    const source = addBibliographyRecord('Key Reference');
+    useAppStore.getState().addContentRelationship({ source: { id: source.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
+
+    const incoming = getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id, 'imported_content')[0];
+    expect(repositoryDetailPathFor('imported_content', incoming.sourceId)).toBe(`/repository/imported_content/${source.id}`);
+  });
 });
 
 // Notes <-> Research Repository Linking — a research document can ALSO explicitly link to a Note
@@ -484,6 +500,19 @@ describe('research document — linked notes (create, display, unlink)', () => {
 
     expect(getIncomingRelationships(useAppStore.getState().contentRelationships, doc.id, 'imported_content').filter((r) => r.sourceType === 'imported_content')).toHaveLength(1);
     expect(getOutgoingRelationships(useAppStore.getState().contentRelationships, doc.id, 'imported_content').filter((r) => r.targetType === 'note')).toHaveLength(1);
+  });
+
+  // Phase 13 — same "Open" arrow addition as linked bibliography sources above, for a linked note
+  // (components/phdResearch/LinkedNotesModal.tsx, shared by this page and Working Bibliography).
+  it('a linked note resolves to a real, type-qualified Repository Detail path', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(researchPreview({ title: 'Chapter' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+    addNote('n1', 'Relevant Note');
+    useAppStore.getState().addContentRelationship({ source: { id: doc.id, type: 'imported_content' }, target: { id: 'n1', type: 'note' }, type: 'related_to' });
+
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, doc.id, 'imported_content').filter((r) => r.targetType === 'note')[0];
+    expect(repositoryDetailPathFor('note', outgoing.targetId)).toBe('/repository/note/n1');
   });
 });
 

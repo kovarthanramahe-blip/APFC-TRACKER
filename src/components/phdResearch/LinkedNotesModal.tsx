@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { X, Link2, Unlink } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { X, Link2, Unlink, ArrowRight } from 'lucide-react';
 import { Badge, Button } from '../ui/Primitives';
 import type { Note } from '../../lib/types';
 import {
@@ -9,6 +10,7 @@ import {
   type ContentRelationship,
   type RelationshipType,
 } from '../../lib/contentRelationships';
+import { repositoryDetailPathFor } from '../../lib/repositoryNavigation';
 
 // Notes <-> Research Repository Linking — shared by pages/WorkingBibliography.tsx (a bibliography
 // record's "Linked Notes") and pages/PhdResearch.tsx (a research document's "Linked Notes"): both
@@ -18,6 +20,10 @@ import {
 // selected Note its target) — the Notes page itself only displays and unlinks (see
 // pages/Notes.tsx's NoteEditor), never creates, matching exactly what this stage scoped each side
 // to. Never infers a link from a title, tag, or content match — only an explicit pick below.
+//
+// Phase 13 — each linked row's own "Open" arrow reuses pages/RepositoryDetail.tsx's existing
+// /repository/:entityType/:id route (repositoryDetailPathFor) to actually view the linked note,
+// not just see its title and unlink it — no new navigation/detail surface for notes is introduced.
 export function LinkedNotesModal({
   sourceId,
   sourceLabel,
@@ -82,14 +88,24 @@ export function LinkedNotesModal({
                       {RELATIONSHIP_TYPE_LABELS[relationship.type]}
                     </Badge>
                   </div>
-                  <button
-                    onClick={() => onUnlink(relationship.id)}
-                    aria-label="Unlink"
-                    title="Unlink"
-                    className="shrink-0 rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                  >
-                    <Unlink className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Link
+                      to={repositoryDetailPathFor('note', note.id)}
+                      aria-label={`Open ${note.title || 'this note'}`}
+                      title="Open"
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                    <button
+                      onClick={() => onUnlink(relationship.id)}
+                      aria-label="Unlink"
+                      title="Unlink"
+                      className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    >
+                      <Unlink className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

@@ -27,6 +27,7 @@ import {
 import { getContentTags, getContentCategory, parseTagsInput } from '../lib/importedContentRepository';
 import { getOutgoingRelationships, getIncomingRelationships, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
 import { countRelatedContent } from '../lib/relatedContentSummary';
+import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and PhdResearch.test.ts for the established convention). These tests
@@ -482,6 +483,20 @@ describe('bibliography -> research document linking', () => {
     addResearchDocument('Some Document');
     addManualRecord({ title: 'Some Source' });
     expect(useAppStore.getState().contentRelationships).toEqual([]);
+  });
+
+  // Phase 13 — Research Knowledge Relationships: each linked document row's own "Open" arrow
+  // (LinkedDocumentsModal) sends the user to the SAME /repository/:entityType/:id route
+  // pages/RepositoryDetail.tsx already serves, via the same repositoryDetailPathFor helper every
+  // other "open this exact item" link in the app already uses — never a second detail surface.
+  it('a linked research document resolves to a real, type-qualified Repository Detail path', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = addResearchDocument('Chapter 1 Draft');
+    const record = addManualRecord({ title: 'Key Source' });
+    useAppStore.getState().addContentRelationship({ source: { id: record.id, type: 'imported_content' }, target: { id: doc.id, type: 'imported_content' }, type: 'cites' });
+
+    const outgoing = getOutgoingRelationships(useAppStore.getState().contentRelationships, record.id, 'imported_content')[0];
+    expect(repositoryDetailPathFor('imported_content', outgoing.targetId)).toBe(`/repository/imported_content/${doc.id}`);
   });
 });
 

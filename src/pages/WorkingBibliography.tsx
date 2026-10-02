@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { GraduationCap, Upload, Plus, X, BookMarked, Trash2, Eye, Pencil, Search, Tag, SlidersHorizontal, ExternalLink, Link2, Unlink, NotebookPen, Copy, Archive } from 'lucide-react';
+import { Link as RouterLink } from 'react-router-dom';
+import { GraduationCap, Upload, Plus, X, BookMarked, Trash2, Eye, Pencil, Search, Tag, SlidersHorizontal, ExternalLink, Link2, Unlink, NotebookPen, Copy, Archive, ArrowRight } from 'lucide-react';
 import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
@@ -24,6 +25,7 @@ import {
 import { sha256Hex } from '../lib/fileHash';
 import { findDuplicates, type DuplicateMatchResult } from '../lib/importDuplicates';
 import { collectImportedContentTags, collectImportedContentCategories, getContentTags, getContentCategory, getContentFolderId, parseTagsInput } from '../lib/importedContentRepository';
+import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { PinToggle } from '../components/organisation/PinToggle';
 import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
 import { BulkActionBar } from '../components/organisation/BulkActionBar';
@@ -1148,6 +1150,10 @@ function BibliographyFormModal({
 // scoped each page to. The relationship is always created with THIS record as its source and the
 // chosen research document as its target — never inferred from filenames/titles/DOI/text, only
 // from an explicit pick in the select below.
+//
+// Phase 13 — each linked row's own "Open" arrow reuses pages/RepositoryDetail.tsx's existing
+// /repository/:entityType/:id route (repositoryDetailPathFor), so seeing a cited research document
+// also lets you actually go read it, not just unlink it.
 function LinkedDocumentsModal({
   record,
   researchDocuments,
@@ -1209,14 +1215,24 @@ function LinkedDocumentsModal({
                       {RELATIONSHIP_TYPE_LABELS[relationship.type]}
                     </Badge>
                   </div>
-                  <button
-                    onClick={() => onUnlink(relationship.id)}
-                    aria-label="Unlink"
-                    title="Unlink"
-                    className="shrink-0 rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                  >
-                    <Unlink className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <RouterLink
+                      to={repositoryDetailPathFor('imported_content', document.id)}
+                      aria-label={`Open ${document.title}`}
+                      title="Open"
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </RouterLink>
+                    <button
+                      onClick={() => onUnlink(relationship.id)}
+                      aria-label="Unlink"
+                      title="Unlink"
+                      className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    >
+                      <Unlink className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
