@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
-import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
@@ -29,6 +28,12 @@ import androidx.input.motionprediction.MotionEventPredictor
  * `draw(stroke, canvas, matrix)`, a lambda listener, `Stroke.points`) that do not exist on this
  * library version and would not have compiled.
  *
+ * Phase 17 regression experiment: the documentBoundsPx coordinate-mapping fix and the parent
+ * scroll-lock (requestDisallowInterceptTouchEvent) were removed here — neither was ever confirmed
+ * against an actual successful build/device test, only the API surface named above was. This
+ * revision returns to the proven primitive behaviour: strokes normalize against this overlay's own
+ * on-screen viewport bounds, and no ancestor touch interception is modified.
+ *
  * Architecture:
  * - Native Jetpack Ink rendering for stylus/eraser-tip input (InProgressStrokesView = wet ink,
  *   CanvasStrokeRenderer-drawn finishedStrokesView = dry ink).
@@ -36,19 +41,11 @@ import androidx.input.motionprediction.MotionEventPredictor
  *   false for it before either child view or this ViewGroup's own handling ever sees it).
  * - Finished strokes are retained in the native dry-ink layer and reported to NativeInkPlugin,
  *   which converts and forwards them to the existing JS annotation persistence path.
- * - `documentBoundsPx` (set by NativeInkPlugin.setDocumentBounds, driven by
- *   AnnotationLayer.tsx's own wrapper bounding rect) is what a finished stroke's points are
- *   normalized against — the SAME coordinate space the JS annotation layer already uses (the
- *   document's own scrollable content box), not this overlay's on-screen viewport bounds. This
- *   replaces the earlier, deliberately-deferred "coordinate limitation" with a real fix: see
- *   NativeInkPlugin.kt's emitStrokeFinished.
  *
  * `onInterceptTouchEvent()` was tried in an earlier hand-edited version of this file and removed:
  * dispatchTouchEvent is fully overridden here and never calls super.dispatchTouchEvent(), so
  * onInterceptTouchEvent is never actually invoked by the framework for this ViewGroup — adding it
- * back would be dead code, not a real fix. Parent scroll-lock (see lockParentTouchHandling below)
- * is instead called directly from dispatchTouchEvent's own DOWN/UP/CANCEL branches, where it is
- * actually reachable.
+ * back would be dead code, not a real fix.
  */
 class NativeInkOverlayView(context: Context) : FrameLayout(context) {
 
@@ -74,16 +71,6 @@ class NativeInkOverlayView(context: Context) : FrameLayout(context) {
 
     /** Set by NativeInkPlugin right after construction; invoked once per finished stroke. */
     var onStrokeCommitted: ((Stroke) -> Unit)? = null
-
-    /**
-     * The document content box's own on-screen bounds, in the same pixel space this View's
-     * MotionEvents report coordinates in — set by NativeInkPlugin.setDocumentBounds, which JS
-     * drives from AnnotationLayer.tsx's wrapper bounding rect (converted to device pixels via
-     * devicePixelRatio). Null until JS has reported it at least once (e.g. immediately after the
-     * overlay attaches, before the first resize/layout event fires) — emitStrokeFinished falls
-     * back to this overlay's own viewport bounds in that case, exactly as before.
-     */
-    var documentBoundsPx: RectF? = null
 
     /** Mutable so the JS toolbar's tool/colour/thickness/opacity selection can reach the native
      * brush via NativeInkPlugin.setBrushConfig -> updateBrush, without touching the stroke
@@ -140,27 +127,6 @@ class NativeInkOverlayView(context: Context) : FrameLayout(context) {
         finishedStrokesView.invalidate()
     }
 
-    /** Walks every ancestor to disallow touch interception for the duration of a stylus gesture,
-     * so a scroll container above this overlay in the view hierarchy cannot claim the gesture as a
-     * page scroll mid-stroke. Called from dispatchTouchEvent's own DOWN/UP/CANCEL branches below,
-     * where it is actually reachable (see this class's own header for why onInterceptTouchEvent is
-     * deliberately NOT used here). */
-    private fun lockParentTouchHandling() {
-        var currentParent = parent
-        while (currentParent != null) {
-            currentParent.requestDisallowInterceptTouchEvent(true)
-            currentParent = currentParent.parent
-        }
-    }
-
-    private fun unlockParentTouchHandling() {
-        var currentParent = parent
-        while (currentParent != null) {
-            currentParent.requestDisallowInterceptTouchEvent(false)
-            currentParent = currentParent.parent
-        }
-    }
-
     // Overriding dispatchTouchEvent (not onTouchEvent) so a non-stylus pointer can be rejected
     // BEFORE either child view (or this ViewGroup's own touch handling) ever sees it: returning
     // false here is what lets Android's normal touch dispatch offer the event to the next view
@@ -178,7 +144,6 @@ class NativeInkOverlayView(context: Context) : FrameLayout(context) {
                 val pointerId = event.getPointerId(pointerIndex)
                 val strokeId = inProgressStrokesView.startStroke(event, pointerId, brush, identityMatrix)
                 pointerIdToStrokeId[pointerId] = strokeId
-                lockParentTouchHandling()
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
@@ -200,7 +165,6 @@ class NativeInkOverlayView(context: Context) : FrameLayout(context) {
                 val pointerId = event.getPointerId(pointerIndex)
                 val strokeId = pointerIdToStrokeId.remove(pointerId) ?: return false
                 inProgressStrokesView.finishStroke(event, pointerId, strokeId)
-                if (pointerIdToStrokeId.isEmpty()) unlockParentTouchHandling()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -209,7 +173,6 @@ class NativeInkOverlayView(context: Context) : FrameLayout(context) {
                     inProgressStrokesView.cancelStroke(strokeId, event)
                 }
                 pointerIdToStrokeId.clear()
-                unlockParentTouchHandling()
                 return true
             }
         }

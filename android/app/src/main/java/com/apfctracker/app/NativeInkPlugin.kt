@@ -1,7 +1,6 @@
 package com.apfctracker.app
 
 import android.graphics.Color
-import android.graphics.RectF
 import android.view.ViewGroup
 import androidx.ink.strokes.Stroke
 import com.getcapacitor.JSArray
@@ -15,19 +14,21 @@ import com.getcapacitor.annotation.CapacitorPlugin
  * Capacitor bridge for the native Jetpack Ink overlay (see NativeInkOverlayView's own header for
  * the verified-against-real-build API notes).
  *
- * Six methods, one event:
+ * Five methods, one event:
  * - enableNativeInk() / disableNativeInk() / clearNativeInk() — overlay lifecycle.
  * - setBrushConfig({ color, size, opacity }) — lets the JS annotation toolbar's tool/colour/
  *   thickness/opacity selection reach the native brush, without touching the stroke lifecycle.
- * - setDocumentBounds({ left, top, width, height, devicePixelRatio }) — lets JS
- *   (AnnotationLayer.tsx) tell the native side where the document's own scrollable content box
- *   currently sits on screen, in CSS pixels, so a finished stroke's points can be normalized
- *   against that same coordinate space instead of this overlay's own viewport bounds. This is the
- *   real fix for the coordinate-offset gap that was previously left as a known, deliberate
- *   limitation.
  * - nativeInkStrokeFinished event — a finished stroke, converted to normalized points and
  *   delivered to JS, which commits it through the EXISTING annotation persistence path
  *   (DocumentAnnotator.tsx's handleNativeInkStroke), not a second, parallel one.
+ *
+ * Phase 17 regression experiment: setDocumentBounds and the documentBoundsPx coordinate mapping
+ * it fed were removed here — that mapping was never confirmed against an actual successful build/
+ * device test. emitStrokeFinished has returned to the proven primitive behaviour: normalizing
+ * against this overlay's own on-screen viewport bounds. JS still calls NativeInk.setDocumentBounds
+ * (DocumentAnnotator.tsx is explicitly out of scope for this experiment); that call now simply has
+ * no native-side implementation and rejects, caught by the existing .catch() already in that JS
+ * call site — the same graceful-failure path already exercised when a native method isn't present.
  *
  * The overlay is added/removed from the Capacitor WebView's own parent ViewGroup entirely (not
  * just hidden) on enable/disable, so normal WebView interaction is unaffected whenever native ink
@@ -86,25 +87,6 @@ class NativeInkPlugin : Plugin() {
         }
     }
 
-    /** Called by AnnotationLayer.tsx (via DocumentAnnotator.tsx) whenever the document content
-     * box's own bounding rect changes — mount, resize, or scroll settling. `left`/`top`/`width`/
-     * `height` are CSS pixels (exactly what element.getBoundingClientRect() returns);
-     * `devicePixelRatio` converts them into the same physical-pixel space this overlay's own
-     * MotionEvents report coordinates in. Both this overlay and the WebView are MATCH_PARENT
-     * siblings of the same parent ViewGroup, so no additional offset between them is needed. */
-    @PluginMethod
-    fun setDocumentBounds(call: PluginCall) {
-        val left = call.getFloat("left") ?: 0f
-        val top = call.getFloat("top") ?: 0f
-        val width = call.getFloat("width") ?: 0f
-        val height = call.getFloat("height") ?: 0f
-        val dpr = (call.getFloat("devicePixelRatio") ?: 1f).let { if (it > 0f) it else 1f }
-        activity.runOnUiThread {
-            overlay?.documentBoundsPx = RectF(left * dpr, top * dpr, (left + width) * dpr, (top + height) * dpr)
-            call.resolve()
-        }
-    }
-
     private fun attachOverlay() {
         if (overlay != null) return
         val webView = bridge.webView ?: return
@@ -127,29 +109,12 @@ class NativeInkPlugin : Plugin() {
      * annotation path consumes. IMPORTANT (verified against a real build): Jetpack Ink 1.0.0
      * exposes Stroke.inputs, not Stroke.points.
      *
-     * Coordinate fix: normalizes against the document content box (overlay.documentBoundsPx, set
-     * by setDocumentBounds above) when it's known, falling back to this overlay's own on-screen
-     * viewport bounds only if JS hasn't reported the document box yet (e.g. the very first stroke
-     * before any layout effect has fired) — this preserves the old behaviour as a safety net
-     * rather than silently producing a divide-by-zero or a stroke normalized against a zero-size
-     * box. */
+     * Phase 17 regression experiment: normalizes against this overlay's own on-screen viewport
+     * bounds (overlay.width/overlay.height) — the proven primitive behaviour — rather than a
+     * document-content-box mapping. */
     private fun emitStrokeFinished(stroke: Stroke, overlay: NativeInkOverlayView) {
-        val bounds = overlay.documentBoundsPx
-        val left: Float
-        val top: Float
-        val width: Float
-        val height: Float
-        if (bounds != null && bounds.width() > 0f && bounds.height() > 0f) {
-            left = bounds.left
-            top = bounds.top
-            width = bounds.width()
-            height = bounds.height()
-        } else {
-            left = 0f
-            top = 0f
-            width = overlay.width.toFloat()
-            height = overlay.height.toFloat()
-        }
+        val width = overlay.width.toFloat()
+        val height = overlay.height.toFloat()
         if (width <= 0f || height <= 0f) return
 
         val pointsArray = JSArray()
@@ -157,8 +122,8 @@ class NativeInkPlugin : Plugin() {
         for (index in 0 until inputs.size) {
             val point = inputs[index]
             val p = JSObject()
-            p.put("x", ((point.x - left) / width).toDouble())
-            p.put("y", ((point.y - top) / height).toDouble())
+            p.put("x", (point.x / width).toDouble())
+            p.put("y", (point.y / height).toDouble())
             p.put("pressure", point.pressure.toDouble())
             pointsArray.put(p)
         }
