@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Compass, ArrowRight, Sparkles } from 'lucide-react';
+import { Compass, ArrowRight, Sparkles, Bot } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getLocalDateString, cx } from '../lib/utils';
-import { Card, PageHeader } from '../components/ui/Primitives';
+import { Card, PageHeader, Button, Badge } from '../components/ui/Primitives';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import {
@@ -13,6 +13,10 @@ import {
   type UpscCseCommandCentreData,
   type PhdCommandCentreData,
 } from '../lib/commandCentre';
+// Phase 11 — the smallest sensible JARVIS entry point on this page (see AskJarvis below). This
+// is deliberately NOT a second dashboard and never touches generateUpNextItems/the Up Next list
+// above: it is its own, separate, optional request/response box a person may ignore entirely.
+import { runJarvisRequest, type JarvisRuntimeResult } from '../lib/jarvis/runtime';
 
 // Command Centre (Phase 14) — a single, workspace-agnostic "what should I do next?" entry point,
 // reachable from every workspace's own nav (components/layout/nav.ts). This page itself computes
@@ -116,6 +120,14 @@ export default function CommandCentre() {
         description="A quick, cross-workspace look at what's actually due — APFC, UPSC CSE and PhD Research together, never a replacement for any one workspace's own dashboard."
       />
 
+      {/* Phase 11.2 — moved above the Up Next list (was previously the last thing on the page,
+          below it and its own caption). On a real device with several Up Next items, that
+          position pushed Ask JARVIS below the initial viewport, making it invisible without
+          scrolling in a plain screenshot — this is a visibility/placement fix, not a change to
+          whether it renders (it was always unconditionally in the tree). Up Next's own
+          rendering/navigation below is otherwise untouched. */}
+      <AskJarvis />
+
       {items.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-20 px-6 text-center">
           <Sparkles className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
@@ -158,5 +170,79 @@ export default function CommandCentre() {
         Each workspace keeps its own full dashboard — this is just a short list of what's actually due right now.
       </p>
     </div>
+  );
+}
+
+const PROVENANCE_LABEL: Record<JarvisRuntimeResult['provenance']['source'], string> = {
+  deterministic: 'Deterministic',
+  android_local_ai: 'Android on-device AI',
+  android_native_stub: 'Android bridge (stub, not a real model)',
+  no_provider_available: 'No AI available',
+};
+
+const PROVENANCE_TONE: Record<JarvisRuntimeResult['provenance']['source'], 'brand' | 'success' | 'warning' | 'neutral'> = {
+  deterministic: 'brand',
+  android_local_ai: 'success',
+  android_native_stub: 'warning',
+  no_provider_available: 'neutral',
+};
+
+/**
+ * Phase 11's own, smallest sensible JARVIS entry point — a plain request/response box, entirely
+ * separate from the deterministic Up Next list above (which never calls this or anything in
+ * lib/jarvis/runtime.ts). Always goes through runJarvisRequest(), which always calls the existing
+ * deterministic handleJarvisRequest() first; this component only renders whatever comes back, and
+ * never claims AI involvement runJarvisRequest() itself didn't report via `provenance`.
+ */
+function AskJarvis() {
+  const [query, setQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [result, setResult] = useState<JarvisRuntimeResult | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    const trimmed = query.trim();
+    if (!trimmed || isLoading) return;
+    setIsLoading(true);
+    try {
+      // 'global' — this page is explicitly cross-workspace already (see this file's own header);
+      // never the per-workspace WorkspaceKind the rest of the store uses.
+      const response = await runJarvisRequest({ context: { workspace: 'global', timestamp: new Date().toISOString() }, query: trimmed });
+      setResult(response);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <Card elevated className="mb-6 border border-brand-500/20 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Bot className="h-4 w-4 shrink-0 text-brand-500" aria-hidden="true" />
+        <h3 className="font-display text-sm font-semibold text-slate-700 dark:text-slate-200">Ask JARVIS</h3>
+      </div>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="e.g. what should I study next?"
+          aria-label="Ask JARVIS a question"
+          className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+        />
+        <Button type="submit" variant="secondary" disabled={isLoading || !query.trim()}>
+          {isLoading ? 'Asking…' : 'Ask'}
+        </Button>
+      </form>
+
+      {result && (
+        <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+          <div className="mb-1.5">
+            <Badge tone={PROVENANCE_TONE[result.provenance.source]}>{PROVENANCE_LABEL[result.provenance.source]}</Badge>
+          </div>
+          <p>{result.response.responseText}</p>
+          {result.provenance.degraded && result.provenance.degradedReason && <p className="mt-1.5 text-xs text-slate-400">{result.provenance.degradedReason}</p>}
+        </div>
+      )}
+    </Card>
   );
 }

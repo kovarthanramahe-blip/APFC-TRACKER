@@ -1,13 +1,16 @@
 apply plugin: 'com.android.application'
-// Phase 2 — first Kotlin code in this project (see variables.gradle's own Phase 2 comment and
+// Phase 2 â€” first Kotlin code in this project (see variables.gradle's own Phase 2 comment and
 // the root build.gradle's kotlin-gradle-plugin classpath entry).
 apply plugin: 'org.jetbrains.kotlin.android'
 
 android {
     namespace = "com.apfctracker.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    // Phase 10 â€” pins the NDK used to build the JNI bridge-validation stub (app/src/main/cpp).
+    // See variables.gradle's own Phase 10 comment for why r27d LTS was chosen.
+    ndkVersion = rootProject.ext.ndkVersion
     defaultConfig {
-        applicationId "com.apfctracker.app"
+        applicationId "com.apfctracker.jarvis"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -18,6 +21,25 @@ android {
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+        // Phase 10 â€” only arm64-v8a is built, matching the two real target devices (Snapdragon
+        // 8 Gen 3, Snapdragon 870 â€” both 64-bit ARM) this and the following JARVIS phases target;
+        // never armeabi-v7a/x86, which would only grow APK size for devices nothing here targets.
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags ""
+            }
+        }
+    }
+    // Phase 10 â€” builds ONLY the JNI bridge-validation stub (native_llama_bridge.cpp). llama.cpp
+    // itself is not vendored/linked here â€” see CMakeLists.txt's own header.
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
     buildTypes {
         release {
@@ -25,7 +47,7 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-    // Matches capacitor.build.gradle's own (auto-generated, "DO NOT EDIT") compileOptions below —
+    // Matches capacitor.build.gradle's own (auto-generated, "DO NOT EDIT") compileOptions below â€”
     // Kotlin's JVM target must agree with the Java source/target compatibility Capacitor already sets.
     kotlinOptions {
         jvmTarget = "21"
@@ -49,7 +71,7 @@ dependencies {
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 
-    // Phase 2 — native low-latency stylus ink (see this session's architecture report for why:
+    // Phase 2 â€” native low-latency stylus ink (see this session's architecture report for why:
     // Repository document freehand writing remained poor on physical Android hardware even after
     // several rounds of JS/canvas-side optimization; MiniInkCanvas/web stayed smooth throughout).
     // All three are current STABLE releases (verified directly against developer.android.com on
