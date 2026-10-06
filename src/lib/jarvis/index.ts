@@ -219,6 +219,15 @@ export { createAndroidLocalLlamaProvider, getAndroidLocalLlamaHealth } from './a
 export type { JarvisLocalLlamaTelemetryEvent, BuildTelemetryEventInput } from './ai/android/localLlamaTelemetry';
 export { buildTelemetryEvent } from './ai/android/localLlamaTelemetry';
 
+// Phase 13A — Local LLM lifecycle state + the llama.cpp/GGUF-style model-backend boundary (see
+// ai/android/localLlmLifecycle.ts and ai/android/localLlmModelBackend.ts's own headers: additive
+// only, deliberately not wired into runtime.ts's own routing/provenance in this phase).
+export type { JarvisLocalLlmLifecycleState, JarvisLocalLlmLifecycleTracker } from './ai/android/localLlmLifecycle';
+export { createLocalLlmLifecycleTracker } from './ai/android/localLlmLifecycle';
+
+export type { LocalLlmModelFormat, LocalLlmModelDescriptor, LocalLlmBackendAvailability, LocalLlmModelBackend } from './ai/android/localLlmModelBackend';
+export { noModelBackendConfigured } from './ai/android/localLlmModelBackend';
+
 // Phase 11 — application runtime composition layer (see runtime.ts's own header: pure
 // composition of Phases 1-10, never a rewrite of handleJarvisRequest() or a second orchestrator).
 export type { JarvisRuntimeProvenanceSource, JarvisRuntimeProvenance, JarvisRuntimeResult, RunJarvisRequestInput } from './runtime';
