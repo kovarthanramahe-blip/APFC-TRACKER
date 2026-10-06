@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleJarvisRequest } from './orchestrator';
-import type { JarvisContext } from './types';
+import { createToolRegistry } from './toolRegistry';
+import { apfcStudyStateTool, upscStudyStateTool, phdResearchStateTool, type ApfcStudyStateInput, type UpscStudyStateInput, type PhdResearchStateInput } from './applicationTools';
+import type { JarvisContext, JarvisTool } from './types';
 import type { LocalLlamaRuntimePlugin, LocalLlamaStreamWireEvent } from './ai/android/localLlamaCapacitorPlugin';
 
 const CONTEXT: JarvisContext = { workspace: 'upsc', timestamp: '2026-01-01T00:00:00Z' };
@@ -236,5 +238,146 @@ describe('runJarvisRequest — provenance is always explicit', () => {
       expect(typeof result.provenance.source).toBe('string');
       expect(typeof result.provenance.degraded).toBe('boolean');
     }
+  });
+});
+
+// ================================================================================================
+// Phase 11.4 — wiring the EXISTING Phase 2 application tools / Phase 3 context engine into the
+// EXISTING Phase 11 runtime (via the EXISTING Phase 1 tool registry). No new tool, no new provider,
+// no rewrite of handleJarvisRequest()/resolveJarvisRoute() — see runtime.ts's own Phase 11.4
+// section for the one, narrow integration point these tests pin.
+// ================================================================================================
+describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches the real, existing tools', () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(() => vi.doUnmock('./ai/android/localLlamaCapacitorPlugin'));
+
+  const TODAY = '2026-01-01';
+  const TIMESTAMP = '2026-01-01T00:00:00Z';
+
+  const APFC_INPUT: ApfcStudyStateInput = { completedTopics: {}, pyqAttempts: [], bookmarkedPyqIds: [], revisionQueue: {}, today: TODAY };
+  const UPSC_INPUT: UpscStudyStateInput = { coverage: {}, attempts: [], bookmarkedPyqIds: [], revisionQueue: {}, importedContent: [], today: TODAY };
+  const PHD_INPUT: PhdResearchStateInput = { researchStartDate: '2025-01-01', topicAreas: [], microTargets: [], importedContent: [], notesCount: 0, today: TODAY };
+
+  it('registers the Phase 2 application tools by default — the apfc workspace\'s real apfc.study_state tool actually runs and grounds the response, never the "No tools are registered" canned text', async () => {
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const toolContext: JarvisContext = { workspace: 'apfc', timestamp: TIMESTAMP };
+    const expectedToolResult = await apfcStudyStateTool.run(APFC_INPUT, toolContext);
+    expect(expectedToolResult.status).toBe('ok');
+    const expectedData = expectedToolResult.status === 'ok' ? expectedToolResult.data : null;
+
+    const result = await runJarvisRequest({
+      context: toolContext,
+      query: 'what should i study next',
+      toolInputs: { 'apfc.study_state': APFC_INPUT },
+    });
+
+    expect(result.response.responseText).toContain(`${expectedData!.dueRevisionCount} PYQ`);
+    expect(result.response.responseText).not.toContain('No tools are registered yet');
+    expect(result.response.requiresFurtherProcessing).toBe(false);
+    expect(result.provenance).toEqual({ source: 'deterministic', degraded: false, routeTarget: 'deterministic_tool' });
+  });
+
+  it('selects the upsc.study_state tool for the upsc workspace, grounded in the real generateTodaysStudyItems output', async () => {
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const toolContext: JarvisContext = { workspace: 'upsc', timestamp: TIMESTAMP };
+    const expectedToolResult = await upscStudyStateTool.run(UPSC_INPUT, toolContext);
+    expect(expectedToolResult.status).toBe('ok');
+    const expectedData = expectedToolResult.status === 'ok' ? expectedToolResult.data : null;
+
+    const result = await runJarvisRequest({
+      context: toolContext,
+      query: 'what should i study next',
+      toolInputs: { 'upsc.study_state': UPSC_INPUT, 'upsc.current_affairs_revision': { importedContent: [], revisionQueue: {}, today: TODAY } },
+    });
+
+    expect(result.response.responseText).toContain(`${expectedData!.items.length} Today's Study item`);
+    expect(result.response.requiresFurtherProcessing).toBe(false);
+    expect(result.provenance.routeTarget).toBe('deterministic_tool');
+  });
+
+  it('selects the phd.research_state tool for the phd workspace, grounded in the real dashboard/analytics output', async () => {
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const toolContext: JarvisContext = { workspace: 'phd', timestamp: TIMESTAMP };
+    const expectedToolResult = await phdResearchStateTool.run(PHD_INPUT, toolContext);
+    expect(expectedToolResult.status).toBe('ok');
+    const expectedData = expectedToolResult.status === 'ok' ? expectedToolResult.data : null;
+
+    const result = await runJarvisRequest({
+      context: toolContext,
+      query: 'what should i study next',
+      toolInputs: { 'phd.research_state': PHD_INPUT },
+    });
+
+    expect(result.response.responseText).toContain(`${expectedData!.overdueMicroTargetCount} overdue micro-target`);
+    expect(result.response.requiresFurtherProcessing).toBe(false);
+    expect(result.provenance.routeTarget).toBe('deterministic_tool');
+  });
+
+  it('an empty registry still produces the existing deterministic fallback, never throwing — "no relevant tool exists" stays safe', async () => {
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const toolContext: JarvisContext = { workspace: 'apfc', timestamp: TIMESTAMP };
+    const query = 'what should i study next';
+
+    const result = await runJarvisRequest({
+      context: toolContext,
+      query,
+      toolInputs: { 'apfc.study_state': APFC_INPUT },
+      registry: createToolRegistry(), // deliberately empty — nothing registered
+    });
+
+    expect(result.response).toEqual(handleJarvisRequest(toolContext, query));
+    expect(result.provenance).toEqual({ source: 'deterministic', degraded: false, routeTarget: 'deterministic_tool' });
+  });
+
+  it('a tool that throws is handled safely — falls back to the existing deterministic canned response, never propagating the error', async () => {
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const brokenTool: JarvisTool<ApfcStudyStateInput, never> = {
+      id: 'apfc.study_state',
+      name: 'Deliberately Broken APFC Study State',
+      description: 'Always throws — proves a failing tool never crashes runJarvisRequest and never fabricates an answer.',
+      workspaces: ['apfc'],
+      access: 'read',
+      run: async () => {
+        throw new Error('boom');
+      },
+    };
+    const brokenRegistry = createToolRegistry();
+    expect(brokenRegistry.register(brokenTool).status).toBe('ok');
+
+    const toolContext: JarvisContext = { workspace: 'apfc', timestamp: TIMESTAMP };
+    const query = 'what should i study next';
+
+    const result = await runJarvisRequest({
+      context: toolContext,
+      query,
+      toolInputs: { 'apfc.study_state': APFC_INPUT },
+      registry: brokenRegistry,
+    });
+
+    expect(result.response).toEqual(handleJarvisRequest(toolContext, query));
+    expect(result.provenance).toEqual({ source: 'deterministic', degraded: false, routeTarget: 'deterministic_tool' });
+  });
+
+  it('required context being unavailable (no toolInputs supplied) reproduces the EXACT pre-Phase-11.4 behaviour — existing Phase 1-11 behaviour stays intact', async () => {
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const toolContext: JarvisContext = { workspace: 'apfc', timestamp: TIMESTAMP };
+    const query = 'what should i study next';
+
+    const result = await runJarvisRequest({ context: toolContext, query });
+
+    expect(result.response).toEqual(handleJarvisRequest(toolContext, query));
+    expect(result.provenance).toEqual({ source: 'deterministic', degraded: false, routeTarget: 'deterministic_tool' });
   });
 });

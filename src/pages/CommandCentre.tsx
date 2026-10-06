@@ -4,7 +4,7 @@ import { Compass, ArrowRight, Sparkles, Bot } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getLocalDateString, cx } from '../lib/utils';
 import { Card, PageHeader, Button, Badge } from '../components/ui/Primitives';
-import { getWorkspaceMeta } from '../lib/workspace';
+import { getWorkspaceMeta, type WorkspaceKind } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import {
   generateUpNextItems,
@@ -17,6 +17,12 @@ import {
 // is deliberately NOT a second dashboard and never touches generateUpNextItems/the Up Next list
 // above: it is its own, separate, optional request/response box a person may ignore entirely.
 import { runJarvisRequest, type JarvisRuntimeResult } from '../lib/jarvis/runtime';
+// Phase 11.4 — wires AskJarvis's own request up to the EXISTING Phase 2 application tools, through
+// the EXISTING Phase 3 context engine (see runtime.ts's own Phase 11.4 section). toJarvisWorkspace
+// is the ONE existing conversion between this app's WorkspaceKind and JARVIS's own JarvisWorkspace
+// (see applicationTools.ts's own header) — never duplicated here.
+import { toJarvisWorkspace } from '../lib/jarvis/applicationTools';
+import type { JarvisContextToolInputs } from '../lib/jarvis/contextEngine';
 
 // Command Centre (Phase 14) — a single, workspace-agnostic "what should I do next?" entry point,
 // reachable from every workspace's own nav (components/layout/nav.ts). This page itself computes
@@ -126,7 +132,7 @@ export default function CommandCentre() {
           scrolling in a plain screenshot — this is a visibility/placement fix, not a change to
           whether it renders (it was always unconditionally in the tree). Up Next's own
           rendering/navigation below is otherwise untouched. */}
-      <AskJarvis />
+      <AskJarvis activeWorkspaceId={activeWorkspaceId} today={today} apfcData={apfcData} upscCseData={upscCseData} phdData={phdData} />
 
       {items.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-20 px-6 text-center">
@@ -187,14 +193,30 @@ const PROVENANCE_TONE: Record<JarvisRuntimeResult['provenance']['source'], 'bran
   no_provider_available: 'neutral',
 };
 
+interface AskJarvisProps {
+  activeWorkspaceId: WorkspaceKind;
+  today: string;
+  apfcData: ApfcCommandCentreData;
+  upscCseData: UpscCseCommandCentreData;
+  phdData: PhdCommandCentreData;
+}
+
 /**
  * Phase 11's own, smallest sensible JARVIS entry point — a plain request/response box, entirely
  * separate from the deterministic Up Next list above (which never calls this or anything in
  * lib/jarvis/runtime.ts). Always goes through runJarvisRequest(), which always calls the existing
  * deterministic handleJarvisRequest() first; this component only renders whatever comes back, and
  * never claims AI involvement runJarvisRequest() itself didn't report via `provenance`.
+ *
+ * Phase 11.4 — `activeWorkspaceId`/`today`/`apfcData`/`upscCseData`/`phdData` are the SAME values
+ * this page already resolved above for generateUpNextItems (live for the active workspace), passed
+ * straight through — never a second, parallel read of the store. These let runJarvisRequest's own
+ * Phase 2/3 tool-grounding actually ground a "what should I study next"-style request in the
+ * user's real application state for whichever workspace is currently active, instead of the
+ * previous hardcoded `workspace: 'global'` (under which no workspace-specific study tool is ever
+ * relevant — see contextEngine.ts's own resolveRelevantToolIds).
  */
-function AskJarvis() {
+function AskJarvis({ activeWorkspaceId, today, apfcData, upscCseData, phdData }: AskJarvisProps) {
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<JarvisRuntimeResult | null>(null);
@@ -205,17 +227,41 @@ function AskJarvis() {
     if (!trimmed || isLoading) return;
     setIsLoading(true);
     try {
-      // 'global' — this page is explicitly cross-workspace already (see this file's own header);
-      // never the per-workspace WorkspaceKind the rest of the store uses.
-      const response = await runJarvisRequest({ context: { workspace: 'global', timestamp: new Date().toISOString() }, query: trimmed });
+      const workspace = toJarvisWorkspace(activeWorkspaceId);
+      // Only the ACTIVE workspace's own tool input is ever included — exactly the data this page
+      // already has live (see this file's own header on live vs. archived inactiveWorkspaceOwnedData
+      // fields), never a guess at, or a snapshot of, a workspace that isn't currently active.
+      const toolInputs: JarvisContextToolInputs = {
+        'global.workspace_state': { activeWorkspaceId },
+        ...(workspace === 'apfc' ? { 'apfc.study_state': { ...apfcData, today } } : {}),
+        ...(workspace === 'upsc'
+          ? {
+              'upsc.study_state': { ...upscCseData, today },
+              'upsc.current_affairs_revision': { importedContent: upscCseData.importedContent, revisionQueue: upscCseData.revisionQueue, today },
+            }
+          : {}),
+        ...(workspace === 'phd' ? { 'phd.research_state': { ...phdData, today } } : {}),
+      };
+      const response = await runJarvisRequest({ context: { workspace, timestamp: new Date().toISOString() }, query: trimmed, toolInputs });
       setResult(response);
     } finally {
       setIsLoading(false);
     }
   }
 
+  // Phase 11.2.1 — Card's own `elevated` prop (Primitives.tsx) swaps in a `.surface-elevated` CSS
+  // class that is never defined anywhere in this codebase (confirmed by exhaustive grep across
+  // src/index.css and every other file) — a pre-existing design-system gap, also silently affecting
+  // UpscCseDashboard.tsx's own unrelated elevated-Card usage, that this investigation found but
+  // did not introduce. Using it here left this Card's own background/border/blur fill not actually
+  // painted (its heading/input/button remained visible regardless, since each has its own,
+  // independently-defined styling) — a real, confirmed defect, but not the explanation for the
+  // reported total invisibility; see this phase's own report. Reverting to the plain, proven
+  // `.surface` styling (defined in index.css, used correctly everywhere else on this exact page)
+  // is the smallest fix that removes reliance on the undefined class without touching the shared
+  // Primitives.tsx/index.css design-system files other, unrelated pages also depend on.
   return (
-    <Card elevated className="mb-6 border border-brand-500/20 p-4">
+    <Card className="mb-6 border border-brand-500/20 p-4">
       <div className="mb-3 flex items-center gap-2">
         <Bot className="h-4 w-4 shrink-0 text-brand-500" aria-hidden="true" />
         <h3 className="font-display text-sm font-semibold text-slate-700 dark:text-slate-200">Ask JARVIS</h3>

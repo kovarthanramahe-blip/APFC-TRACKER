@@ -12,11 +12,17 @@ import { dirname, join } from 'node:path';
 // source-verifiable structural claims this fix depends on: that <AskJarvis /> is unconditionally
 // rendered, and renders BEFORE the Up Next list — never relying on a human to notice it only by
 // scrolling down past however many Up Next items happen to exist that day.
+//
+// Phase 11.4 — the call site gained props (activeWorkspaceId/today/apfcData/upscCseData/phdData,
+// so AskJarvis can ground its own request in the real Phase 2 tools for whichever workspace is
+// active — see runtime.ts's own Phase 11.4 section), so the exact literal '<AskJarvis />' no
+// longer appears; the checks below match the opening tag by its name instead, keeping the exact
+// same guarantees (unconditional, before Up Next, exactly once) regardless of which props it carries.
 const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'CommandCentre.tsx'), 'utf-8');
 
 describe('CommandCentre.tsx — Ask JARVIS is a real, always-visible entry point (Phase 11.2 fix)', () => {
-  it('renders <AskJarvis /> unconditionally inside the page\'s own return, never behind an if/ternary/&& guard', () => {
-    const askJarvisCall = source.indexOf('<AskJarvis />');
+  it('renders <AskJarvis ... /> unconditionally inside the page\'s own return, never behind an if/ternary/&& guard', () => {
+    const askJarvisCall = source.indexOf('<AskJarvis ');
     expect(askJarvisCall).toBeGreaterThan(-1);
 
     // The JSX immediately preceding the call, on the same logical block, must not be an open
@@ -27,17 +33,31 @@ describe('CommandCentre.tsx — Ask JARVIS is a real, always-visible entry point
     expect(precedingContext).not.toMatch(/\?\s*$/);
   });
 
-  it('places <AskJarvis /> BEFORE the Up Next list\'s own rendering, so it is always above the fold regardless of how many Up Next items exist', () => {
-    const askJarvisIndex = source.indexOf('<AskJarvis />');
+  it('places <AskJarvis ... /> BEFORE the Up Next list\'s own rendering, so it is always above the fold regardless of how many Up Next items exist', () => {
+    const askJarvisIndex = source.indexOf('<AskJarvis ');
     const upNextListIndex = source.indexOf('items.length === 0');
     expect(askJarvisIndex).toBeGreaterThan(-1);
     expect(upNextListIndex).toBeGreaterThan(-1);
     expect(askJarvisIndex).toBeLessThan(upNextListIndex);
   });
 
-  it('renders <AskJarvis /> exactly once on the page (no duplicate entry point)', () => {
-    const occurrences = source.match(/<AskJarvis \/>/g) ?? [];
+  it('renders <AskJarvis ... /> exactly once on the page (no duplicate entry point)', () => {
+    const occurrences = source.match(/<AskJarvis\b[^>]*\/>/g) ?? [];
     expect(occurrences).toHaveLength(1);
+  });
+
+  it('passes the SAME activeWorkspaceId/today/apfcData/upscCseData/phdData this page already resolved for generateUpNextItems — never a second, parallel read of the store', () => {
+    const askJarvisCallTag = source.match(/<AskJarvis\b[^>]*\/>/)?.[0] ?? '';
+    for (const prop of ['activeWorkspaceId', 'today', 'apfcData', 'upscCseData', 'phdData']) {
+      expect(askJarvisCallTag).toMatch(new RegExp(`${prop}=\\{${prop}\\}`));
+    }
+  });
+
+  it('never gives AskJarvis\'s own Card the `elevated` prop — it maps to `.surface-elevated`, a class confirmed undefined anywhere in this codebase, which silently drops that Card\'s background/border/blur fill', () => {
+    const askJarvisBody = source.slice(source.indexOf('function AskJarvis'));
+    const cardTag = askJarvisBody.match(/<Card\b[^>]*>/);
+    expect(cardTag).not.toBeNull();
+    expect(cardTag?.[0]).not.toMatch(/\belevated\b/);
   });
 });
 

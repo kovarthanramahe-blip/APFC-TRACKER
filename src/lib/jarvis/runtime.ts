@@ -55,6 +55,13 @@ import { JarvisAiProviderError } from './ai/provider';
 import { textMessage } from './ai/types';
 import { createAndroidLocalLlamaProvider, getAndroidLocalLlamaHealth } from './ai/android/androidLocalLlamaProvider';
 import { createNativeLlamaRuntime } from './ai/android/nativeLlamaRuntime';
+// Phase 11.4 — wires the EXISTING Phase 1 tool registry (toolRegistry.ts) and Phase 2 application
+// tools (applicationTools.ts) into this file, through the EXISTING Phase 3 context engine
+// (contextEngine.ts). No new tool, registry, or orchestration logic is introduced — see
+// groundDeterministicToolResponse below for the one, narrow integration point this adds.
+import { createToolRegistry, type JarvisToolRegistry } from './toolRegistry';
+import { createApplicationTools } from './applicationTools';
+import { buildJarvisContext, type JarvisContextToolInputs, type JarvisContextSections } from './contextEngine';
 // A direct, real import — not merely re-exported through index.ts — so a bundler has an actual
 // reachable dependency edge from this file to the Capacitor bridge (this phase's own brief, point
 // 5) once this module itself is imported from the application (CommandCentre.tsx).
@@ -99,7 +106,35 @@ export interface RunJarvisRequestInput {
    * "no web research requested", exactly like calling resolveJarvisRoute directly would. */
   webResearchExplicitlyRequested?: boolean;
   hasDocumentContext?: boolean;
+  /** Phase 2 tool inputs for whichever tools are relevant to this request's (workspace, intent) —
+   * see contextEngine.ts's own resolveRelevantToolIds. Omitted entirely (the default) is
+   * architecturally identical to "no relevant tool exists": the deterministic orchestrator's own
+   * response is returned untouched, exactly as this file behaved before this phase. Never
+   * required, never defaulted/guessed by this file — a caller (e.g. CommandCentre.tsx's AskJarvis)
+   * builds this from application state it already has, same as it already does for
+   * generateUpNextItems. */
+  toolInputs?: JarvisContextToolInputs;
+  /** Overrides this file's own default Phase 2 tool registry (see defaultToolRegistry below). Real
+   * callers never need this; it exists so tests can prove behaviour against an empty registry or a
+   * deliberately failing tool without touching the default registration this file owns. */
+  registry?: JarvisToolRegistry;
 }
+
+/** The Phase 2 application tools, registered once into a Phase 1 registry this file owns by
+ * default — the smallest correct integration point for "register the existing application tools
+ * with the existing tool registry": no new tool is created, toolRegistry.ts and applicationTools.ts
+ * are both used exactly as they already existed, and registration can never silently fail (these
+ * five fixed ids are unique by construction — see applicationTools.ts's own createApplicationTools).
+ */
+function createDefaultJarvisToolRegistry(): JarvisToolRegistry {
+  const registry = createToolRegistry();
+  for (const tool of createApplicationTools()) {
+    registry.register(tool);
+  }
+  return registry;
+}
+
+const defaultToolRegistry = createDefaultJarvisToolRegistry();
 
 function deterministicResult(response: JarvisResponse, extra: Omit<JarvisRuntimeProvenance, 'source' | 'degraded'> & { degraded?: boolean } = {}): JarvisRuntimeResult {
   return { response, provenance: { source: 'deterministic', degraded: false, ...extra } };
@@ -107,6 +142,88 @@ function deterministicResult(response: JarvisResponse, extra: Omit<JarvisRuntime
 
 function unavailableResult(response: JarvisResponse, routeTarget: JarvisRouteDecision['target'], reason: string, providerHealth?: JarvisAiProviderHealthStatus): JarvisRuntimeResult {
   return { response, provenance: { source: 'no_provider_available', routeTarget, degraded: true, degradedReason: reason, providerHealth } };
+}
+
+// ================================================================================================
+// Phase 11.4 — grounding a 'deterministic_tool' route in the real Phase 2/3 tools
+// ================================================================================================
+//
+// resolveJarvisRoute() already sends every 'study_next' intent to 'deterministic_tool' (see
+// routingPolicy.ts) — that target existed since Phase 6, but nothing in this file ever actually ran
+// a tool for it: it only re-returned handleJarvisRequest()'s own canned acknowledgement text. This
+// is the one, narrow addition that does: whenever a caller supplies `toolInputs`, it asks the
+// EXISTING Phase 3 context engine (buildJarvisContext) to run the EXISTING Phase 2 tools relevant to
+// `intent`/`workspace`, and — only if that produced a real, grounded study/research section —
+// replaces the canned text with a short summary of that section. 'study_next' is the only intent
+// this handles because it is the only intent resolveJarvisRoute() ever maps to 'deterministic_tool'
+// today; a future intent added there is simply not grounded here yet, same as if toolInputs were
+// omitted.
+const STUDY_NEXT_MODE = 'study';
+
+/** True only when a real, workspace-specific study/research section came back — `workspace` alone
+ * (always attempted; see contextEngine.ts's ALWAYS_RELEVANT) says which workspace is active, not
+ * anything about what is due to study, so it never counts on its own. */
+function hasGroundedStudySection(sections: JarvisContextSections): boolean {
+  return Boolean(sections.apfcStudy || sections.upscStudy || sections.phdResearch);
+}
+
+/** Composes a short, human-readable summary strictly from already-computed section fields — never
+ * a new calculation, never a number not already present on `sections` (the data-integrity rule
+ * applicationTools.ts's own header states, carried through here). */
+function describeGroundedStudyState(sections: JarvisContextSections): string {
+  const parts: string[] = [];
+
+  if (sections.apfcStudy) {
+    const s = sections.apfcStudy;
+    const accuracy = s.lowestWeakTopicAccuracyPct !== null ? ` (lowest recent accuracy ${s.lowestWeakTopicAccuracyPct}%)` : '';
+    parts.push(`${s.dueRevisionCount} PYQ${s.dueRevisionCount === 1 ? '' : 's'} due for revision and ${s.weakTopicCount} weak topic${s.weakTopicCount === 1 ? '' : 's'}${accuracy}`);
+  }
+  if (sections.upscStudy) {
+    const s = sections.upscStudy;
+    const currentAffairs = s.currentAffairsDueCount > 0 ? `, including ${s.currentAffairsDueCount} Current Affairs item${s.currentAffairsDueCount === 1 ? '' : 's'} due for revision` : '';
+    parts.push(`${s.todaysStudyItemCount} Today's Study item${s.todaysStudyItemCount === 1 ? '' : 's'}${currentAffairs}`);
+  }
+  if (sections.phdResearch) {
+    const s = sections.phdResearch;
+    const overdue = s.mostOverdueDays !== null ? ` (up to ${s.mostOverdueDays} day${s.mostOverdueDays === 1 ? '' : 's'} overdue)` : '';
+    parts.push(
+      `${s.overdueMicroTargetCount} overdue micro-target${s.overdueMicroTargetCount === 1 ? '' : 's'}${overdue}, ${s.researchDocumentsToContinueCount} research document${s.researchDocumentsToContinueCount === 1 ? '' : 's'} and ${s.bibliographyToContinueCount} bibliography item${s.bibliographyToContinueCount === 1 ? '' : 's'} still to continue`,
+    );
+  }
+
+  return `Based on your actual study state: ${parts.join('; ')}.`;
+}
+
+/**
+ * Attempts to ground a 'deterministic_tool'-routed response in the real Phase 2 tools, returning
+ * `null` whenever grounding doesn't apply — no toolInputs supplied, a non-study_next intent, every
+ * relevant tool unavailable/unregistered, or every relevant tool failing — so the caller can fall
+ * back to the exact same canned deterministic response this file has always returned in that case.
+ * Never throws: buildJarvisContext already records each tool's own failure into `sources` rather
+ * than throwing (see contextEngine.ts), and the try/catch below is only a last-resort guard against
+ * something it did not anticipate.
+ */
+async function groundDeterministicToolResponse(response: JarvisResponse, input: RunJarvisRequestInput): Promise<string | null> {
+  if (response.intent !== 'study_next' || !input.toolInputs) {
+    return null;
+  }
+
+  try {
+    const snapshot = await buildJarvisContext({
+      workspace: input.context.workspace,
+      mode: STUDY_NEXT_MODE,
+      route: input.context.route,
+      timestamp: input.context.timestamp,
+      registry: input.registry ?? defaultToolRegistry,
+      toolInputs: input.toolInputs,
+    });
+    if (!hasGroundedStudySection(snapshot.sections)) {
+      return null;
+    }
+    return describeGroundedStudyState(snapshot.sections);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -133,7 +250,11 @@ export async function runJarvisRequest(input: RunJarvisRequestInput): Promise<Ja
   });
 
   if (routeDecision.target === 'deterministic_tool') {
-    return deterministicResult(response, { routeTarget: routeDecision.target });
+    const groundedText = await groundDeterministicToolResponse(response, input);
+    if (groundedText === null) {
+      return deterministicResult(response, { routeTarget: routeDecision.target });
+    }
+    return deterministicResult({ ...response, responseText: groundedText, requiresFurtherProcessing: false }, { routeTarget: routeDecision.target });
   }
 
   // Only the Android on-device provider is composed in this phase (this phase's own brief, point
