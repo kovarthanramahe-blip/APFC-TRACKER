@@ -60,8 +60,12 @@ import { createNativeLlamaRuntime } from './ai/android/nativeLlamaRuntime';
 // (contextEngine.ts). No new tool, registry, or orchestration logic is introduced — see
 // groundDeterministicToolResponse below for the one, narrow integration point this adds.
 import { createToolRegistry, type JarvisToolRegistry } from './toolRegistry';
-import { createApplicationTools } from './applicationTools';
+import { createApplicationTools, type UpscStudyStateData } from './applicationTools';
 import { buildJarvisContext, type JarvisContextToolInputs, type JarvisContextSections } from './contextEngine';
+// Phase 12 — the deterministic decision/recommendation layer on top of the above (see
+// decisionEngine.ts's own header for the full priority-model trace). No new tool, no new
+// registry, no AI/network call — this file still only composes.
+import { decideStudyNext, type DecideStudyNextInput } from './decisionEngine';
 // A direct, real import — not merely re-exported through index.ts — so a bundler has an actual
 // reachable dependency edge from this file to the Capacitor bridge (this phase's own brief, point
 // 5) once this module itself is imported from the application (CommandCentre.tsx).
@@ -195,13 +199,40 @@ function describeGroundedStudyState(sections: JarvisContextSections): string {
 }
 
 /**
- * Attempts to ground a 'deterministic_tool'-routed response in the real Phase 2 tools, returning
- * `null` whenever grounding doesn't apply — no toolInputs supplied, a non-study_next intent, every
- * relevant tool unavailable/unregistered, or every relevant tool failing — so the caller can fall
- * back to the exact same canned deterministic response this file has always returned in that case.
- * Never throws: buildJarvisContext already records each tool's own failure into `sources` rather
- * than throwing (see contextEngine.ts), and the try/catch below is only a last-resort guard against
- * something it did not anticipate.
+ * Phase 12 — recovers the ONE existing Phase 2 tool output that carries item-level candidates
+ * (upsc.study_state's own `items`, straight from generateTodaysStudyItems) so the decision engine
+ * can select and explain a SPECIFIC candidate, not just a count. contextEngine.ts's own
+ * JarvisUpscStudySection deliberately compresses `items` down to a bare count (see its own header:
+ * "a COUNT, not the item list itself") for its existing, unrelated callers — this does not widen
+ * that contract; it simply runs the SAME already-registered tool, through the SAME registry, a
+ * second time, to read the one field that compression already discarded. upsc.study_state is a
+ * pure, side-effect-free read (see applicationTools.ts's own header), so recomputing it is cheap
+ * and never duplicates its own underlying calculation (still owned solely by
+ * lib/upscCseTodaysStudy.ts). Returns `undefined` on any failure — the caller falls back to a
+ * count-only decision exactly as if this workspace's tool had no item list at all.
+ */
+async function fetchUpscItemsForDecision(input: RunJarvisRequestInput, registry: JarvisToolRegistry): Promise<DecideStudyNextInput['upscItems']> {
+  const toolInput = input.toolInputs?.['upsc.study_state'];
+  if (!toolInput) return undefined;
+  const tool = registry.get('upsc.study_state');
+  if (!tool) return undefined;
+  try {
+    const result = await tool.run(toolInput, { workspace: input.context.workspace, timestamp: input.context.timestamp, route: input.context.route });
+    if (result.status !== 'ok') return undefined;
+    return (result.data as UpscStudyStateData).items;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Attempts to ground a 'deterministic_tool'-routed response in the real Phase 2/3 tools AND (Phase
+ * 12) the deterministic decision engine, returning `null` whenever grounding doesn't apply at all —
+ * no toolInputs supplied, a non-study_next intent, every relevant tool unavailable/unregistered, or
+ * every relevant tool failing — so the caller can fall back to the exact same canned deterministic
+ * response this file has always returned in that case. Never throws: buildJarvisContext already
+ * records each tool's own failure into `sources` rather than throwing (see contextEngine.ts), and
+ * the try/catch below is only a last-resort guard against something it did not anticipate.
  */
 async function groundDeterministicToolResponse(response: JarvisResponse, input: RunJarvisRequestInput): Promise<string | null> {
   if (response.intent !== 'study_next' || !input.toolInputs) {
@@ -209,18 +240,35 @@ async function groundDeterministicToolResponse(response: JarvisResponse, input: 
   }
 
   try {
+    const registry = input.registry ?? defaultToolRegistry;
     const snapshot = await buildJarvisContext({
       workspace: input.context.workspace,
       mode: STUDY_NEXT_MODE,
       route: input.context.route,
       timestamp: input.context.timestamp,
-      registry: input.registry ?? defaultToolRegistry,
+      registry,
       toolInputs: input.toolInputs,
     });
     if (!hasGroundedStudySection(snapshot.sections)) {
       return null;
     }
-    return describeGroundedStudyState(snapshot.sections);
+
+    const upscItems = snapshot.sections.upscStudy ? await fetchUpscItemsForDecision(input, registry) : undefined;
+    const decision = decideStudyNext({
+      workspace: input.context.workspace,
+      upscItems,
+      apfcStudy: snapshot.sections.apfcStudy,
+      phdResearch: snapshot.sections.phdResearch,
+    });
+
+    // The decision engine couldn't make a grounded recommendation (should only happen if the raw
+    // upsc.study_state re-run above failed after the snapshot already confirmed a section exists)
+    // — fall back to the existing, already-safe generic summary rather than an empty response.
+    if (decision.kind === 'insufficient_data') {
+      return describeGroundedStudyState(snapshot.sections);
+    }
+
+    return `${decision.recommendation} ${decision.rationale}`.trim();
   } catch {
     return null;
   }

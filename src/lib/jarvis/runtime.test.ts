@@ -4,6 +4,8 @@ import { createToolRegistry } from './toolRegistry';
 import { apfcStudyStateTool, upscStudyStateTool, phdResearchStateTool, type ApfcStudyStateInput, type UpscStudyStateInput, type PhdResearchStateInput } from './applicationTools';
 import type { JarvisContext, JarvisTool } from './types';
 import type { LocalLlamaRuntimePlugin, LocalLlamaStreamWireEvent } from './ai/android/localLlamaCapacitorPlugin';
+import { PYQ_BANK } from '../../data/pyq';
+import type { MicroTarget } from '../microTarget';
 
 const CONTEXT: JarvisContext = { workspace: 'upsc', timestamp: '2026-01-01T00:00:00Z' };
 
@@ -254,11 +256,19 @@ describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches th
   const TODAY = '2026-01-01';
   const TIMESTAMP = '2026-01-01T00:00:00Z';
 
-  const APFC_INPUT: ApfcStudyStateInput = { completedTopics: {}, pyqAttempts: [], bookmarkedPyqIds: [], revisionQueue: {}, today: TODAY };
+  // Phase 12 — these three fixtures were originally all-empty (every count legitimately zero),
+  // which the Phase 12 decision engine now correctly reports as a truthful "nothing actionable"
+  // result instead of reciting raw zero counts. That is the intended, more useful behaviour this
+  // phase adds, so the fixtures below were updated to carry real non-zero data — proving the real
+  // tool's own data still flows all the way into the final response text, just through the
+  // decision engine's own (more useful) phrasing rather than the old generic summary. See
+  // decisionEngine.test.ts for the "no actionable items" / "insufficient data" cases on their own.
+  const APFC_INPUT: ApfcStudyStateInput = { completedTopics: {}, pyqAttempts: [], bookmarkedPyqIds: [PYQ_BANK[0].id], revisionQueue: {}, today: TODAY };
   const UPSC_INPUT: UpscStudyStateInput = { coverage: {}, attempts: [], bookmarkedPyqIds: [], revisionQueue: {}, importedContent: [], today: TODAY };
-  const PHD_INPUT: PhdResearchStateInput = { researchStartDate: '2025-01-01', topicAreas: [], microTargets: [], importedContent: [], notesCount: 0, today: TODAY };
+  const OVERDUE_MICRO_TARGET: MicroTarget = { id: 'mt-overdue', title: 'Read chapter 3', status: 'pending', priority: 'medium', createdAt: '2025-01-01T00:00:00.000Z', targetDate: '2025-12-01' };
+  const PHD_INPUT: PhdResearchStateInput = { researchStartDate: '2025-01-01', topicAreas: [], microTargets: [OVERDUE_MICRO_TARGET], importedContent: [], notesCount: 0, today: TODAY };
 
-  it('registers the Phase 2 application tools by default — the apfc workspace\'s real apfc.study_state tool actually runs and grounds the response, never the "No tools are registered" canned text', async () => {
+  it('registers the Phase 2 application tools by default — the apfc workspace\'s real apfc.study_state tool actually runs and grounds the response (via the Phase 12 decision engine), never the "No tools are registered" canned text', async () => {
     vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
     const { runJarvisRequest } = await import('./runtime');
 
@@ -266,6 +276,7 @@ describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches th
     const expectedToolResult = await apfcStudyStateTool.run(APFC_INPUT, toolContext);
     expect(expectedToolResult.status).toBe('ok');
     const expectedData = expectedToolResult.status === 'ok' ? expectedToolResult.data : null;
+    expect(expectedData!.dueRevisionCount).toBeGreaterThan(0);
 
     const result = await runJarvisRequest({
       context: toolContext,
@@ -279,7 +290,7 @@ describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches th
     expect(result.provenance).toEqual({ source: 'deterministic', degraded: false, routeTarget: 'deterministic_tool' });
   });
 
-  it('selects the upsc.study_state tool for the upsc workspace, grounded in the real generateTodaysStudyItems output', async () => {
+  it('selects the upsc.study_state tool for the upsc workspace, and the Phase 12 decision engine names the SAME top candidate generateTodaysStudyItems itself ranked first', async () => {
     vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
     const { runJarvisRequest } = await import('./runtime');
 
@@ -287,6 +298,7 @@ describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches th
     const expectedToolResult = await upscStudyStateTool.run(UPSC_INPUT, toolContext);
     expect(expectedToolResult.status).toBe('ok');
     const expectedData = expectedToolResult.status === 'ok' ? expectedToolResult.data : null;
+    expect(expectedData!.items.length).toBeGreaterThan(0);
 
     const result = await runJarvisRequest({
       context: toolContext,
@@ -294,12 +306,16 @@ describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches th
       toolInputs: { 'upsc.study_state': UPSC_INPUT, 'upsc.current_affairs_revision': { importedContent: [], revisionQueue: {}, today: TODAY } },
     });
 
-    expect(result.response.responseText).toContain(`${expectedData!.items.length} Today's Study item`);
+    // The exact title of generateTodaysStudyItems' own first-ranked item must appear — proving the
+    // decision engine selected the SAME candidate the existing engine already ranked first, never
+    // a re-ranked or fabricated one.
+    expect(result.response.responseText).toContain(expectedData!.items[0].title);
+    expect(result.response.responseText).toContain(`${expectedData!.items.length} study item`);
     expect(result.response.requiresFurtherProcessing).toBe(false);
     expect(result.provenance.routeTarget).toBe('deterministic_tool');
   });
 
-  it('selects the phd.research_state tool for the phd workspace, grounded in the real dashboard/analytics output', async () => {
+  it('selects the phd.research_state tool for the phd workspace, grounded in the real dashboard/analytics output (via the Phase 12 decision engine)', async () => {
     vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({ default: fixturePlugin(), isLocalLlamaRuntimeAvailable: false }));
     const { runJarvisRequest } = await import('./runtime');
 
@@ -307,6 +323,7 @@ describe('runJarvisRequest — Phase 11.4: "what should i study next" reaches th
     const expectedToolResult = await phdResearchStateTool.run(PHD_INPUT, toolContext);
     expect(expectedToolResult.status).toBe('ok');
     const expectedData = expectedToolResult.status === 'ok' ? expectedToolResult.data : null;
+    expect(expectedData!.overdueMicroTargetCount).toBeGreaterThan(0);
 
     const result = await runJarvisRequest({
       context: toolContext,
