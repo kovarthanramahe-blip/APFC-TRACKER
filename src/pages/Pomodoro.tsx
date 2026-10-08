@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import { Play, Pause, RotateCcw, SkipForward, Coffee, BrainCircuit } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { SYLLABUS } from '../data/syllabus';
 import { cx, uuid, formatMinutes, getLocalDateString } from '../lib/utils';
-import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
+import { Card, Badge, Button, PageHeader, ProgressRing } from '../components/ui/Primitives';
 import type { PomodoroSession, SubjectColorKey } from '../lib/types';
 
 const DURATIONS: Record<PomodoroSession['mode'], number> = {
@@ -138,22 +137,15 @@ export default function Pomodoro() {
           </div>
 
           <div className="relative flex h-64 w-64 items-center justify-center sm:h-72 sm:w-72">
-            <svg viewBox="0 0 200 200" className="absolute inset-0 -rotate-90">
-              <circle cx="100" cy="100" r="90" fill="none" stroke="currentColor" strokeWidth="10" className="text-slate-100 dark:text-slate-800" />
-              <motion.circle
-                cx="100"
-                cy="100"
-                r="90"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="10"
-                strokeLinecap="round"
-                className={mode === 'focus' ? 'text-brand-500' : 'text-gold-500'}
-                strokeDasharray={2 * Math.PI * 90}
-                animate={{ strokeDashoffset: 2 * Math.PI * 90 * (1 - pct / 100) }}
-                transition={{ duration: 0.4, ease: 'linear' }}
-              />
-            </svg>
+            <ProgressRing
+              value={pct}
+              radius={90}
+              strokeWidth={10}
+              colorClassName={mode === 'focus' ? 'text-brand-500' : 'text-gold-500'}
+              trackClassName="text-slate-100 dark:text-slate-800"
+              transition={{ duration: 0.4, ease: 'linear' }}
+              className="absolute inset-0"
+            />
             <div className="text-center">
               <p className="font-display text-5xl font-bold text-slate-900 dark:text-white tabular-nums">
                 {mins}:{secs.toString().padStart(2, '0')}

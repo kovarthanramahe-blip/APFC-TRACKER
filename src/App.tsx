@@ -36,6 +36,9 @@ const Pomodoro = lazy(() => import('./pages/Pomodoro'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const StudyPlan = lazy(() => import('./pages/StudyPlan'));
 const Settings = lazy(() => import('./pages/Settings'));
+// Phase 15 — internal-only, deliberately absent from nav.ts/AppShell's sidebar and bottom nav
+// (see the page's own header comment); reachable only by typing /dev/design-system directly.
+const DesignSystemShowcase = lazy(() => import('./pages/DesignSystemShowcase'));
 
 function RouteFallback() {
   return (
@@ -82,6 +85,7 @@ export default function App() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/study-plan" element={<StudyPlan />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/dev/design-system" element={<DesignSystemShowcase />} />
         </Routes>
       </Suspense>
       <RewardCelebration />

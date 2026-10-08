@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Trophy, X } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { REWARDS, useRewards } from '../lib/gamification';
+import { Toast } from './ui/Primitives';
 
 interface ToastState {
   title: string;
@@ -45,32 +45,18 @@ export function RewardCelebration() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Phase 15 — renders through the shared Toast primitive now (tone="gold" added specifically so
+  // this keeps its own established gold/trophy reward styling, pixel-for-pixel the same classes
+  // as before). All of this component's own logic (unlock detection, the 5s auto-dismiss timer)
+  // is completely unchanged — only the JSX moved.
   return (
-    <AnimatePresence>
-      {toast && (
-        <motion.div
-          initial={{ opacity: 0, y: 20, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 10, scale: 0.95 }}
-          transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-          className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 lg:bottom-6 lg:left-auto lg:right-6 lg:translate-x-0"
-        >
-          <div className="flex items-center gap-3 rounded-2xl border border-gold-300/60 bg-white/95 dark:bg-slate-900/95 dark:border-gold-500/30 px-4 py-3 shadow-lg shadow-slate-900/10 backdrop-blur-xl">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gold-100 dark:bg-gold-500/15">
-              <Trophy className="h-4.5 w-4.5 text-gold-600 dark:text-gold-400" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-gold-700 dark:text-gold-400">Reward unlocked</p>
-              <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
-                {toast.count > 1 ? `${toast.count} new rewards unlocked!` : toast.title}
-              </p>
-            </div>
-            <button onClick={() => setToast(null)} className="ml-2 shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <Toast
+      open={toast !== null}
+      onClose={() => setToast(null)}
+      icon={Trophy}
+      title="Reward unlocked"
+      message={toast ? (toast.count > 1 ? `${toast.count} new rewards unlocked!` : toast.title) : ''}
+      tone="gold"
+    />
   );
 }

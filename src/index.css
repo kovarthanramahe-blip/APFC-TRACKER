@@ -49,6 +49,123 @@
   --color-phd-500: #8b5cf6;
   --color-phd-600: #7c3aed;
   --color-phd-900: #4c1d95;
+
+  /* JARVIS Aura Design System (Phase 15) — semantic tokens, additive to everything above: no
+     existing --color-brand-*, --color-gold-*, --color-apfc-*, --color-phd-* token is renamed, removed,
+     or reassigned, so no existing call site (dozens, across the app) changes rendered colour.
+     Every scale below either mirrors a Tailwind built-in family and its own real shade values
+     exactly (the same never-invent-a-colour-that-already-has-a-proven-value discipline
+     lib/workspaceAccent.ts and its own apfc/phd tokens already established) or, for
+     --color-primary-* (JARVIS Aura own sage/emerald identity), is a deliberately NEW, desaturated
+     hue chosen so it never collides with the existing APFC green (--color-apfc-*) or the
+     --color-success-* emerald below — see lib/workspaceAccent.ts for why APFC green and semantic
+     success green must stay visually distinct; primary must not collide with either. */
+
+  /* Primary — sage/emerald, JARVIS Aura own calm, academic accent. Lower saturation than both
+     --color-apfc-* (standard Tailwind green) and --color-success-* (standard Tailwind emerald,
+     below) so all three stay visually distinct even adjacent on the same screen. */
+  --color-primary-50: #f4f7f2;
+  --color-primary-100: #e6ede1;
+  --color-primary-400: #8fab7c;
+  --color-primary-500: #6f9158;
+  --color-primary-600: #577341;
+  --color-primary-700: #445a33;
+  --color-primary-900: #2c3a21;
+
+  /* Secondary — restrained blue: mirrors the EXISTING --color-brand-* scale exactly (already this
+     app long-standing blue, used as the UPSC CSE workspace accent and the default link/focus
+     colour everywhere) rather than inventing a second, redundant blue family. Tailwind theme
+     values must be literal (a var() reference to another theme token is not supported inside
+     this block), so these are the same hex values as --color-brand-*, copied, not aliased. */
+  --color-secondary-50: #eef4ff;
+  --color-secondary-100: #dbe6fe;
+  --color-secondary-400: #5686f6;
+  --color-secondary-500: #3161ee;
+  --color-secondary-600: #1f42e2;
+  --color-secondary-700: #1c34c2;
+
+  /* Semantic feedback colours — each mirrors its Tailwind built-in family and its own real values
+     exactly (the values already used ad hoc as bg-emerald-*, bg-rose-*, bg-amber-* across dozens of
+     existing call sites, e.g. components/ui/Primitives.tsx and its own Badge success/danger/
+     warning tones), so giving them names here changes no rendered colour anywhere. */
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-300: #6ee7b7;
+  --color-success-400: #34d399;
+  --color-success-500: #10b981;
+  --color-success-600: #059669;
+  --color-success-700: #047857;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+
+  --color-danger-50: #fff1f2;
+  --color-danger-100: #ffe4e6;
+  --color-danger-300: #fda4af;
+  --color-danger-400: #fb7185;
+  --color-danger-500: #f43f5e;
+  --color-danger-600: #e11d48;
+  --color-danger-700: #be123c;
+
+  /* Info — the same restrained blue as --color-secondary-* (most design systems use the same hue
+     for both; see --color-secondary-* above for why that blue, not a new one), copied rather than
+     aliased for the same reason noted on --color-secondary-* above. */
+  --color-info-50: #eef4ff;
+  --color-info-100: #dbe6fe;
+  --color-info-400: #5686f6;
+  --color-info-500: #3161ee;
+  --color-info-600: #1f42e2;
+
+  /* Muted — a named alias onto the Tailwind slate family, already this app de facto secondary-
+     text colour everywhere (text-slate-400/500 etc.) — named here so new components can say
+     text-muted-500 instead of repeating the bare Tailwind reference. */
+  --color-muted-400: #94a3b8;
+  --color-muted-500: #64748b;
+  --color-muted-600: #475569;
+
+  /* JARVIS own distinctive identity colour (Step 7) — indigo, chosen because every other hue
+     already in use is spoken for: --color-brand-*, --color-secondary-*, --color-info-* (blue),
+     --color-phd-* (violet), --color-primary-*, --color-success-* (green), --color-apfc-* (green),
+     --color-gold-* (amber/gold), --color-warning-* (amber), --color-danger-* (rose). Mirrors
+     the Tailwind indigo values exactly, same proven-value discipline as every scale above. */
+  --color-jarvis-50: #eef2ff;
+  --color-jarvis-100: #e0e7ff;
+  --color-jarvis-300: #a5b4fc;
+  --color-jarvis-400: #818cf8;
+  --color-jarvis-500: #6366f1;
+  --color-jarvis-600: #4f46e5;
+  --color-jarvis-700: #4338ca;
+
+  /* Base/surface/border/muted-text/focus — unlike every scale above, these genuinely differ between
+     light and dark. Light values are set here directly (plain custom properties, same as every
+     other token in this block); html.dark below reassigns the same property names to their dark
+     values, the exact pattern the pre-existing body background/colour rules already use just
+     below. --color-surface and --color-surface-elevated values are copied verbatim from the
+     existing .surface/.surface-elevated rules (still defined below, now referencing these same
+     tokens) — promoting them to named tokens changes no rendered colour. */
+  --color-bg: #faf8f4;
+  --color-fg: #1f2420;
+  --color-surface: rgba(255, 255, 255, 0.86);
+  --color-surface-elevated: rgba(255, 255, 255, 0.96);
+  --color-border: rgba(148, 163, 184, 0.18);
+  --color-focus: #6f9158;
+
+  /* Radii (Step 4) — named to match the exact values already in use throughout the app (Card own
+     rounded-2xl, Button own rounded-xl, the existing bottom-sheet modals own rounded-2xl/
+     rounded-t-2xl, Badge own rounded-full) so adopting these utilities going forward changes no
+     existing rendered radius. A genuinely new, smaller radius for Input/Select/Toggle controls
+     (0.625rem) sits between Button and the pill shape, matching this app existing soft-rounded,
+     never-a-sharp-corner, never-over-rounded direction. */
+  --radius-card: 1rem;
+  --radius-button: 0.75rem;
+  --radius-input: 0.625rem;
+  --radius-modal: 1rem;
+  --radius-pill: 9999px;
 }
 
 :root {
@@ -68,6 +185,16 @@ html {
 
 html.dark {
   color-scheme: dark;
+
+  /* Dark mode (Step 2) — deep graphite/charcoal surfaces, soft white text; reassigns the same
+     --color-* custom properties @theme set above to their dark values (plain CSS cascade — the
+     exact pattern the pre-existing html.dark body / .surface / .surface-elevated rules below
+     already use), same verbatim-copied values as those rules. */
+  --color-bg: #15181c;
+  --color-fg: #f1f3ee;
+  --color-surface: rgba(15, 23, 42, 0.72);
+  --color-surface-elevated: rgba(15, 23, 42, 0.88);
+  --color-border: rgba(148, 163, 184, 0.12);
 }
 
 * {
@@ -107,15 +234,13 @@ html.dark ::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.5);
 }
 
-/* Glassy card surface used throughout */
+/* Glassy card surface used throughout — now reads from the --color-surface/--color-border tokens
+   (see the @theme block above) instead of repeating these literal values; same rendered colour in
+   both light and dark, since the tokens were copied verbatim from what was here before. */
 .surface {
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   backdrop-filter: blur(14px);
-}
-html.dark .surface {
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 /* Design system — every Card in the app (see components/ui/Primitives.tsx) renders at this exact
@@ -124,13 +249,14 @@ html.dark .surface {
    surface level for that handful of cards — a slightly more opaque background and a slightly more
    visible border than `.surface`, meant to be reached for a few times per page at most, never as
    the new default. Card's own `elevated` prop is the only way this gets applied. */
+/* Border is deliberately slightly more visible here than --color-border (.surface's own) — this
+   level is meant to stand out a little, same literal values as before tokenizing the background. */
 .surface-elevated {
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--color-surface-elevated);
   border: 1px solid rgba(148, 163, 184, 0.3);
   backdrop-filter: blur(14px);
 }
 html.dark .surface-elevated {
-  background: rgba(15, 23, 42, 0.88);
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
@@ -165,3 +291,19 @@ html.dark .bg-grid {
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(148,163,184,0.35); border-radius: 9999px; }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background-color: rgba(148,163,184,0.55); }
+
+/* JARVIS Aura — Step 10 accessibility: honours the OS-level "reduce motion" preference for every
+   CSS transition/animation in the app (body's background/color fade above, .animate-shimmer,
+   future Aura components), collapsing them to effectively instant. This only covers CSS-driven
+   motion; framer-motion's own JS-driven animations (Card/Modal/Toast entrances, ProgressRing, the
+   AppShell page transition) are NOT CSS transitions and don't respond to this rule — those check
+   framer-motion's own useReducedMotion() hook at the call site instead (see Primitives.tsx's new
+   components for where that's applied). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -12,7 +12,7 @@ import { computeUnifiedTopicStatus, MIN_PYQ_ATTEMPTS_FOR_SIGNAL, WEAK_PYQ_ACCURA
 import { getTopicCounts } from '../lib/pyqFilters';
 import { countNotesByTopic } from '../lib/noteOrganization';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
-import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon, ProgressRing } from '../components/ui/Primitives';
 
 // Multi-Workspace OS, Stage 3B-1 — per-workspace copy for the parts of the page that used to
 // hardcode APFC's own wording. Structural/behavioural logic below stays workspace-generic
@@ -136,7 +136,15 @@ export default function Syllabus() {
               </p>
             </div>
             <div className="h-10 w-10">
-              <RadialProgress pct={overallPct} strokeClassName={accent.solidText} />
+              <ProgressRing
+                value={overallPct}
+                radius={16}
+                strokeWidth={4}
+                colorClassName={accent.solidText}
+                animateFromZero
+                transition={{ duration: 0.8, ease: 'easeOut' }}
+                className="h-10 w-10"
+              />
             </div>
           </div>
         }
@@ -325,27 +333,3 @@ export default function Syllabus() {
   );
 }
 
-function RadialProgress({ pct, strokeClassName }: { pct: number; strokeClassName: string }) {
-  const r = 16;
-  const c = 2 * Math.PI * r;
-  const offset = c - (pct / 100) * c;
-  return (
-    <svg viewBox="0 0 40 40" className="h-10 w-10 -rotate-90">
-      <circle cx="20" cy="20" r={r} fill="none" stroke="currentColor" strokeWidth="4" className="text-slate-200 dark:text-slate-800" />
-      <motion.circle
-        cx="20"
-        cy="20"
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="4"
-        strokeLinecap="round"
-        className={strokeClassName}
-        strokeDasharray={c}
-        initial={{ strokeDashoffset: c }}
-        animate={{ strokeDashoffset: offset }}
-        transition={{ duration: 0.8, ease: 'easeOut' }}
-      />
-    </svg>
-  );
-}
