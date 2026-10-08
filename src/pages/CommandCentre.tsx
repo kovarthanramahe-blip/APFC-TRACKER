@@ -33,6 +33,7 @@ import {
   ProgressBar,
   ProgressRing,
   JarvisCard,
+  JarvisInsightCard,
   JarvisThinkingIndicator,
   EmptyState,
   cardEntrance,
@@ -50,6 +51,22 @@ import {
 import { computeApfcHomeSnapshot, type ApfcHomeData, type ApfcHomeSnapshot } from '../lib/commandCentreHome';
 import { computePhdDashboardSnapshot, type PhdDashboardSnapshot } from '../lib/phdDashboard';
 import { computePhdAnalytics, type PhdAnalyticsSnapshot } from '../lib/phdAnalytics';
+// Wave 3 (Phase 22/23) — Gamification 2.0 + JARVIS Experience 2.0. Every module below lives OUTSIDE
+// src/lib/jarvis/: a compact, typed StudyContext (lib/studyContext.ts) built from the SAME
+// ApfcHomeSnapshot this page already computes, feeding a daily mission/weekly challenge
+// (lib/gamificationMissions.ts) and a single deterministic "Top Priority" insight
+// (lib/jarvisPriorityInsight.ts) — the exact same "deterministic, page-level intelligence" pattern
+// this page's own JARVIS Priority Panel already established in Wave 1, never touching the protected
+// JARVIS runtime/Decision Engine.
+import { PYQ_BANK } from '../data/pyq';
+import { SYLLABUS } from '../data/syllabus';
+import { computePyqPerformance } from '../lib/pyqPerformance';
+import { computeUnifiedTopicStatus } from '../lib/topicStatus';
+import { computeSyllabusOverview } from '../lib/syllabusOS';
+import { computeStudyContext, type StudyContext } from '../lib/studyContext';
+import { computeDailyMission, computeWeeklyChallenge, type DailyMission, type WeeklyChallenge } from '../lib/gamificationMissions';
+import { computeJarvisPriorityInsight, type JarvisInsightCategory } from '../lib/jarvisPriorityInsight';
+import { answerDeterministicQuestion, type JarvisQAAnswer } from '../lib/jarvisDeterministicQA';
 // Phase 11 — the smallest sensible JARVIS entry point on this page (see AskJarvis below). This
 // is deliberately NOT a second dashboard and never touches generateUpNextItems/the Up Next list
 // above: it is its own, separate, optional request/response box a person may ignore entirely.
@@ -216,6 +233,21 @@ export default function CommandCentre() {
 
   const apfcHome: ApfcHomeSnapshot = useMemo(() => computeApfcHomeSnapshot(apfcHomeData, today), [apfcHomeData, today]);
 
+  // Wave 3 — the one small computation ApfcHomeSnapshot doesn't already carry: syllabus weak-topic
+  // count, via the SAME lib/topicStatus.ts + lib/syllabusOS.ts pair pages/Syllabus.tsx's own
+  // overview row already uses — never a new weakness rule.
+  const apfcPyqPerf = useMemo(() => computePyqPerformance(PYQ_BANK, [...apfcHomeData.pyqAttempts]), [apfcHomeData.pyqAttempts]);
+  const apfcTopicStatuses = useMemo(() => computeUnifiedTopicStatus(SYLLABUS, apfcHomeData.completedTopics, apfcPyqPerf), [apfcHomeData.completedTopics, apfcPyqPerf]);
+  const apfcSyllabusWeakCount = useMemo(() => computeSyllabusOverview(apfcTopicStatuses).weakCount, [apfcTopicStatuses]);
+
+  const studyContext = useMemo(
+    () => computeStudyContext({ today, apfcHome, revisionQueue: apfcHomeData.revisionQueue, sessions: apfcHomeData.sessions, syllabusWeakCount: apfcSyllabusWeakCount }),
+    [today, apfcHome, apfcHomeData.revisionQueue, apfcHomeData.sessions, apfcSyllabusWeakCount],
+  );
+  const dailyMission = useMemo(() => computeDailyMission(studyContext), [studyContext]);
+  const weeklyChallenge = useMemo(() => computeWeeklyChallenge(studyContext), [studyContext]);
+  const priorityInsight = useMemo(() => computeJarvisPriorityInsight(studyContext, dailyMission, weeklyChallenge), [studyContext, dailyMission, weeklyChallenge]);
+
   const phdSnapshot: PhdDashboardSnapshot = useMemo(
     () => computePhdDashboardSnapshot({ researchStartDate: phdData.researchStartDate, topicAreas: phdData.topicAreas, microTargets: phdData.microTargets, importedContent: phdData.importedContent, today }),
     [phdData, today],
@@ -268,6 +300,31 @@ export default function CommandCentre() {
 
       <CommandHeader workspaceLabel={workspace.shortLabel} accentClassName={accent.text} today={today} overallSyllabusPct={apfcHome.overallSyllabusPct} primaryAction={primaryAction} />
 
+      {/* Wave 3 — "Top Priority": ONE strong, deterministic insight (lib/jarvisPriorityInsight.ts),
+          never a flood of weak ones. APFC-scoped (StudyContext is APFC-only data — same precedent
+          as Revision OS/Study History), rendered unconditionally since computeJarvisPriorityInsight
+          always returns a real insight, never null. */}
+      <motion.div {...cardEntrance}>
+        {(() => {
+          const meta = INSIGHT_CATEGORY_META[priorityInsight.category];
+          return (
+            <JarvisInsightCard
+              icon={meta.icon}
+              title={priorityInsight.title}
+              description={priorityInsight.reason}
+              action={
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={meta.badgeTone}>{meta.label}</Badge>
+                  <Button size="sm" variant="secondary" onClick={() => navigate(priorityInsight.actionHref)}>
+                    {priorityInsight.actionLabel}
+                  </Button>
+                </div>
+              }
+            />
+          );
+        })()}
+      </motion.div>
+
       <motion.div {...cardEntrance}>
         <Card className="p-5 sm:p-6">
           <SectionHeader title="JARVIS Priority Panel" description="Deterministic, grounded in your real data — never generated prose." />
@@ -276,7 +333,8 @@ export default function CommandCentre() {
               below, exactly like the original Command Centre: on a day with several Up Next items,
               a collapsed/conditional AskJarvis previously made it invisible without scrolling (see
               this page's own Phase 11.2 fix history) — never reintroduced. */}
-          <AskJarvis activeWorkspaceId={activeWorkspaceId} today={today} apfcData={apfcData} upscCseData={upscCseData} phdData={phdData} />
+          <AskJarvis activeWorkspaceId={activeWorkspaceId} today={today} apfcData={apfcData} upscCseData={upscCseData} phdData={phdData}
+            studyContext={studyContext} dailyMission={dailyMission} weeklyChallenge={weeklyChallenge} />
 
           {items.length === 0 ? (
             <JarvisCard className="mt-4 flex flex-col items-center justify-center py-10 px-6 text-center">
@@ -332,7 +390,7 @@ export default function CommandCentre() {
         </div>
         <div className="space-y-6">
           <ResearchPulse snapshot={phdSnapshot} analytics={phdAnalytics} hasAnyPhdData={phdData.topicAreas.length > 0 || phdData.importedContent.length > 0} />
-          <GamificationPanel home={apfcHome} />
+          <GamificationPanel home={apfcHome} dailyMission={dailyMission} weeklyChallenge={weeklyChallenge} />
           <RecentContinue notes={notes} sessions={sessions} />
         </div>
       </div>
@@ -391,6 +449,18 @@ const KIND_META: Record<CommandCentreItemKind, { label: string; badgeTone: 'dang
   action: { label: 'In progress', badgeTone: 'success', iconBg: 'bg-success-100 text-success-600 dark:bg-success-500/15 dark:text-success-400', icon: CheckCircle2 },
 };
 
+// Wave 3 — the 6 insight categories lib/jarvisPriorityInsight.ts's own JarvisInsightCategory
+// supports, each with a distinct label/icon/tone so the ONE insight shown always reads as exactly
+// what kind of thing it is (never colour alone — every category also carries its own text label).
+const INSIGHT_CATEGORY_META: Record<JarvisInsightCategory, { label: string; badgeTone: 'danger' | 'jarvis' | 'warning' | 'success' | 'gold' | 'brand'; icon: typeof AlertTriangle }> = {
+  priority: { label: 'Priority', badgeTone: 'danger', icon: AlertTriangle },
+  recommendation: { label: 'Recommendation', badgeTone: 'jarvis', icon: Target },
+  warning: { label: 'Warning', badgeTone: 'warning', icon: AlertTriangle },
+  progress: { label: 'Progress', badgeTone: 'brand', icon: Flame },
+  achievement: { label: 'Achievement', badgeTone: 'gold', icon: Trophy },
+  motivation: { label: 'Motivation', badgeTone: 'success', icon: Sparkles },
+};
+
 const PROVENANCE_LABEL: Record<JarvisRuntimeResult['provenance']['source'], string> = {
   deterministic: 'Deterministic',
   android_local_ai: 'Android on-device AI',
@@ -411,6 +481,11 @@ interface AskJarvisProps {
   apfcData: ApfcCommandCentreData;
   upscCseData: UpscCseCommandCentreData;
   phdData: PhdCommandCentreData;
+  /** Wave 3 — APFC-only deterministic context for the pre-check below (lib/studyContext.ts/
+   * lib/gamificationMissions.ts). Unused for any other active workspace. */
+  studyContext: StudyContext;
+  dailyMission: DailyMission;
+  weeklyChallenge: WeeklyChallenge;
 }
 
 /**
@@ -422,15 +497,32 @@ interface AskJarvisProps {
  * logic from the original Command Centre — Phase 16 only adds the thinking-indicator swap on its
  * own submit button; placement (unconditional, before the Up Next list) is unchanged.
  */
-function AskJarvis({ activeWorkspaceId, today, apfcData, upscCseData, phdData }: AskJarvisProps) {
+function AskJarvis({ activeWorkspaceId, today, apfcData, upscCseData, phdData, studyContext, dailyMission, weeklyChallenge }: AskJarvisProps) {
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<JarvisRuntimeResult | null>(null);
+  // Wave 3 — a SECOND, independent, honestly-labelled answer source (lib/jarvisDeterministicQA.ts),
+  // tried first and only for APFC. It never calls, wraps, or routes through runJarvisRequest/the
+  // protected JARVIS runtime — see that file's own header. Mutually exclusive with `result`:
+  // whichever path answers clears the other, so only one response ever shows at once.
+  const [qaAnswer, setQaAnswer] = useState<JarvisQAAnswer | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const trimmed = query.trim();
     if (!trimmed || isLoading) return;
+
+    if (activeWorkspaceId === 'apfc') {
+      const qa = answerDeterministicQuestion(trimmed, studyContext, dailyMission, weeklyChallenge);
+      if (qa) {
+        setQaAnswer(qa);
+        setResult(null);
+        return;
+      }
+    }
+    setQaAnswer(null);
+
     setIsLoading(true);
     try {
       const workspace = toJarvisWorkspace(activeWorkspaceId);
@@ -481,14 +573,29 @@ function AskJarvis({ activeWorkspaceId, today, apfcData, upscCseData, phdData }:
         </Button>
       </form>
 
-      {result && (
+      {qaAnswer ? (
         <div className="mt-3 rounded-xl bg-white/70 p-3 text-sm text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
           <div className="mb-1.5">
-            <Badge tone={PROVENANCE_TONE[result.provenance.source]}>{PROVENANCE_LABEL[result.provenance.source]}</Badge>
+            <Badge tone="brand">Deterministic — Study System</Badge>
           </div>
-          <p>{result.response.responseText}</p>
-          {result.provenance.degraded && result.provenance.degradedReason && <p className="mt-1.5 text-xs text-slate-400">{result.provenance.degradedReason}</p>}
+          <p className="font-medium text-slate-700 dark:text-slate-200">{qaAnswer.answer}</p>
+          <p className="mt-1 text-xs text-slate-400">{qaAnswer.why}</p>
+          <div className="mt-2.5">
+            <Button size="sm" variant="secondary" onClick={() => navigate(qaAnswer.actionHref)}>
+              {qaAnswer.actionLabel}
+            </Button>
+          </div>
         </div>
+      ) : (
+        result && (
+          <div className="mt-3 rounded-xl bg-white/70 p-3 text-sm text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
+            <div className="mb-1.5">
+              <Badge tone={PROVENANCE_TONE[result.provenance.source]}>{PROVENANCE_LABEL[result.provenance.source]}</Badge>
+            </div>
+            <p>{result.response.responseText}</p>
+            {result.provenance.degraded && result.provenance.degradedReason && <p className="mt-1.5 text-xs text-slate-400">{result.provenance.degradedReason}</p>}
+          </div>
+        )
       )}
     </Card>
   );
@@ -758,7 +865,8 @@ function ResearchPulse({ snapshot, analytics, hasAnyPhdData }: { snapshot: PhdDa
 // 8. Gamification / Motivation
 // --------------------------------------------------------------------------------------------
 
-function GamificationPanel({ home }: { home: ApfcHomeSnapshot }) {
+function GamificationPanel({ home, dailyMission, weeklyChallenge }: { home: ApfcHomeSnapshot; dailyMission: DailyMission; weeklyChallenge: WeeklyChallenge }) {
+  const navigate = useNavigate();
   const { level } = home.gamification;
   return (
     <motion.div {...cardEntrance}>
@@ -787,6 +895,34 @@ function GamificationPanel({ home }: { home: ApfcHomeSnapshot }) {
             <ProgressBar value={home.rewards.nextReward.progress(home.rewards.context)} colorClassName="bg-gold-500" height="h-1.5" />
           </div>
         )}
+
+        {/* Gamification 2.0 (Phase 22) — Daily Mission + Weekly Challenge, both purely derived
+            (lib/gamificationMissions.ts), no new storage. Kept compact — a label, a progress bar,
+            a status — so this panel never grows more visually dominant than the study content
+            around it (this phase's own anti-gamification rule). */}
+        <button
+          type="button"
+          onClick={() => navigate(dailyMission.actionHref)}
+          className="mt-3 block w-full rounded-xl bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100 dark:bg-slate-800/60 dark:hover:bg-slate-800"
+        >
+          <div className="mb-1 flex items-center justify-between text-xs">
+            <span className="font-medium text-slate-600 dark:text-slate-300">Daily Mission · {dailyMission.title}</span>
+            {dailyMission.completed ? <Badge tone="success">Done</Badge> : <span className="text-slate-400">{dailyMission.progressPct}%</span>}
+          </div>
+          <ProgressBar value={dailyMission.progressPct} colorClassName={dailyMission.completed ? 'bg-success-500' : 'bg-jarvis-500'} height="h-1.5" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate(weeklyChallenge.actionHref)}
+          className="mt-2 block w-full rounded-xl bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100 dark:bg-slate-800/60 dark:hover:bg-slate-800"
+        >
+          <div className="mb-1 flex items-center justify-between text-xs">
+            <span className="font-medium text-slate-600 dark:text-slate-300">Weekly Challenge · {formatMinutes(weeklyChallenge.current)} / {formatMinutes(weeklyChallenge.target)}</span>
+            {weeklyChallenge.completed ? <Badge tone="success">Done</Badge> : <span className="text-slate-400">{weeklyChallenge.progressPct}%</span>}
+          </div>
+          <ProgressBar value={weeklyChallenge.progressPct} colorClassName={weeklyChallenge.completed ? 'bg-success-500' : 'bg-brand-500'} height="h-1.5" />
+        </button>
       </Card>
     </motion.div>
   );

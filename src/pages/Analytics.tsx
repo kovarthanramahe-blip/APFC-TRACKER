@@ -36,7 +36,8 @@ import { computeUnifiedTopicStatus } from '../lib/topicStatus';
 import { computeStudyPlanProgress, type ExecutionState, type StudyPlanProgressResult } from '../lib/studyPlanProgress';
 import type { PlanTaskType } from '../lib/studyPlan';
 import { computeRevisionStatusMap, computeEligibleRevisionIds } from '../lib/pyqFilters';
-import { getQueueCounts, type RevisionQueueCounts } from '../lib/revisionQueue';
+import { getQueueCounts, MAX_BOX, type RevisionQueueCounts } from '../lib/revisionQueue';
+import { getAchievementsV2Snapshot } from '../lib/gamificationAchievementsV2';
 import { computeExamReadiness, type ExamReadinessReport, type ExamReadinessVerdict } from '../lib/examReadiness';
 import { selectWeakTopicPracticeIds } from '../lib/weakTopicPractice';
 import { SUBJECT_COLORS, formatMinutes, formatDate, getLocalDateString, cx } from '../lib/utils';
@@ -84,6 +85,15 @@ export default function Analytics() {
   // "Basic review activity" from the queue's own already-stored metadata (reviewCount per item) —
   // no new tracking, just a sum over what lib/revisionQueue already persists.
   const totalRevisionReviews = useMemo(() => Object.values(revisionQueue).reduce((sum, item) => sum + item.reviewCount, 0), [revisionQueue]);
+
+  // Gamification 2.0 (Phase 22) — two new achievements covering Revision OS + Planner (Wave 1/2),
+  // computed from the SAME revisionQueue/studyPlan/personalStudyPlanTasks this page already reads;
+  // never a second XP/activity ledger (see lib/gamificationAchievementsV2.ts's own header).
+  const achievementsV2 = useMemo(() => {
+    const masteredRevisionCount = Object.values(revisionQueue).filter((item) => item.box === MAX_BOX).length;
+    const totalTasksCompleted = [...(studyPlan?.tasks ?? []), ...personalStudyPlanTasks].filter((t) => t.status === 'completed').length;
+    return getAchievementsV2Snapshot({ masteredRevisionCount, totalTasksCompleted });
+  }, [revisionQueue, studyPlan, personalStudyPlanTasks]);
 
   // Connects the "Needs Improvement" ranking (pure PYQ accuracy, unchanged) to the unified
   // topic-status verdict (lib/topicStatus) — a low accuracy from only 1-2 questions isn't the
@@ -562,6 +572,37 @@ export default function Analytics() {
                 </div>
               );
             })}
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Gamification 2.0 (Phase 22) — covers Revision OS/Planner, the two Wave 1/2 systems the
+          existing Achievements card above predates. Same earned/locked visual treatment, a
+          separate array (lib/gamificationAchievementsV2.ts) rather than an edit to the existing,
+          already-wired BADGES — see that file's own header for why. */}
+      <motion.div {...fadeUp} className="mt-6">
+        <Card className="p-5 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">More Achievements</h3>
+            <Badge tone="gold">
+              <Trophy className="h-3 w-3" /> {achievementsV2.earned.length}/{achievementsV2.earned.length + achievementsV2.locked.length} earned
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[...achievementsV2.earned, ...achievementsV2.locked].map((a) => (
+              <div
+                key={a.id}
+                className={cx(
+                  'flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center',
+                  a.earned ? 'border-gold-300/60 bg-gold-50 dark:bg-gold-500/10 dark:border-gold-500/30' : 'border-slate-200 dark:border-slate-800 opacity-60',
+                )}
+              >
+                {a.earned ? <Award className="h-5 w-5 text-gold-500" /> : <Lock className="h-5 w-5 text-slate-300 dark:text-slate-600" />}
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{a.title}</p>
+                <p className="text-[11px] text-slate-400 leading-tight">{a.description}</p>
+                {!a.earned && <span className="text-[11px] font-medium text-slate-400">{a.progressPct}%</span>}
+              </div>
+            ))}
           </div>
         </Card>
       </motion.div>
