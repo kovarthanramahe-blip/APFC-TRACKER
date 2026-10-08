@@ -18,7 +18,7 @@ export function ExamTargetCard({ target }: { target: ExamTarget }) {
     <Card className="p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{target.label}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{target.label}</p>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{formatDate(target.examDate)}</p>
         </div>
         {isScheduled ? (

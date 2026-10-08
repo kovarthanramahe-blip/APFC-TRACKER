@@ -3,29 +3,14 @@ import { Link } from 'react-router-dom';
 import { GraduationCap, Hourglass, FolderKanban, Target, FileText, History as HistoryIcon, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
-import { getLocalDateString, formatDate, cx } from '../lib/utils';
-import { Card, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { getLocalDateString, formatDate } from '../lib/utils';
+import { Card, PageHeader, StatTile, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { computePhdAnalytics } from '../lib/phdAnalytics';
 import { listNotesForWorkspace } from '../lib/repository';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
-
-function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
-  const tones: Record<string, string> = {
-    neutral: 'text-slate-800 dark:text-slate-100',
-    success: 'text-emerald-600 dark:text-emerald-400',
-    danger: 'text-rose-600 dark:text-rose-400',
-    brand: 'text-brand-600 dark:text-brand-400',
-  };
-  return (
-    <Card className="p-4 text-center">
-      <p className={cx('font-display text-xl font-bold', tones[tone])}>{value}</p>
-      <p className="mt-0.5 text-[11px] text-slate-400">{label}</p>
-    </Card>
-  );
-}
 
 export default function PhdAnalytics() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -66,22 +51,22 @@ export default function PhdAnalytics() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-6">
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Research Started</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Research Started</p>
           <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{formatDate(analytics.researchStartDate)}</p>
         </Card>
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Duration</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Duration</p>
           <p className="mt-1 flex items-center gap-1.5 font-display text-lg font-bold text-slate-900 dark:text-white">
             <Hourglass className="h-4 w-4 text-brand-500" />
             {analytics.duration.years}y {analytics.duration.months}m {analytics.duration.days}d
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Topic Areas</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Topic Areas</p>
           <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{analytics.topicAreaCount}</p>
         </Card>
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Target Completion</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Target Completion</p>
           <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{analytics.completionRatePct}%</p>
         </Card>
       </div>

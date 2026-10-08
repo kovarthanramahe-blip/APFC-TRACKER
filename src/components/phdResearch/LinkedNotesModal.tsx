@@ -65,7 +65,7 @@ export function LinkedNotesModal({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg rounded-t-2xl sm:inset-0 sm:top-16 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate">Linked Notes — {sourceLabel}</h3>
-          <button onClick={onClose} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onClose} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>

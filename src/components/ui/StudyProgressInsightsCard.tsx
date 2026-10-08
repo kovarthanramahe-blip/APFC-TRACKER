@@ -65,13 +65,13 @@ export function StudyProgressInsightsCard({
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Last {insights.periodDays} days</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Last {insights.periodDays} days</p>
           <p className="mt-1 font-display text-xl font-bold text-slate-900 dark:text-white">{formatMinutes(insights.currentPeriod.focusMinutes)}</p>
           <p className="mt-0.5 text-xs text-slate-400">{insights.currentPeriod.activeDays} active day{insights.currentPeriod.activeDays === 1 ? '' : 's'}</p>
         </div>
 
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">vs previous {insights.periodDays} days</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">vs previous {insights.periodDays} days</p>
           <div className="mt-1.5">
             <DeltaIndicator delta={insights.focusMinutesDelta} deltaPct={insights.focusMinutesDeltaPct} />
           </div>
@@ -79,7 +79,7 @@ export function StudyProgressInsightsCard({
         </div>
 
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Current streak</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Current streak</p>
           <p className={cx('mt-1 flex items-center gap-1.5 font-display text-xl font-bold', accent.text)}>
             <Flame className="h-4 w-4" /> {insights.streak.current}d
           </p>
@@ -87,7 +87,7 @@ export function StudyProgressInsightsCard({
         </div>
 
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Total activity</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Total activity</p>
           <p className="mt-1 font-display text-xl font-bold text-slate-900 dark:text-white">{formatMinutes(insights.totalActivity.focusMinutes)}</p>
           <p className="mt-0.5 text-xs text-slate-400">{insights.totalActivity.activeDays} active day{insights.totalActivity.activeDays === 1 ? '' : 's'} all-time</p>
         </div>

@@ -392,7 +392,7 @@ export default function Analytics() {
                   <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">PYQ Weak Spots</p>
                   <div className="grid gap-4 sm:grid-cols-3">
                     <div>
-                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         <Repeat className="h-3.5 w-3.5 text-rose-500" /> Repeated Mistakes
                       </div>
                       {repeatedMistakeTopics.length === 0 ? (
@@ -424,7 +424,7 @@ export default function Analytics() {
                       )}
                     </div>
                     <div>
-                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         <ListChecks className="h-3.5 w-3.5 text-brand-500" /> Revise Next
                       </div>
                       {repeatedMistakeSubjects.length === 0 ? (
@@ -443,7 +443,7 @@ export default function Analytics() {
                       )}
                     </div>
                     <div>
-                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         <Gauge className="h-3.5 w-3.5 text-brand-500" /> Recent Performance
                       </div>
                       <PyqTrendBadge trend={pyqTrend} />

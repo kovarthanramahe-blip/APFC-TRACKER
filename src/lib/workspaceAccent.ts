@@ -9,12 +9,14 @@ import type { WorkspaceKind } from './workspace';
 //
 // UPSC CSE reuses the app's existing default "brand" blue (already the app-wide default accent
 // used everywhere with no workspace context) rather than introducing a second, redundant blue.
-// APFC uses Tailwind's `green` family — deliberately NOT `emerald`, which
-// components/ui/Primitives.tsx's own Badge `success` tone already uses: keeping APFC's workspace
-// green and the app's semantic success green in two visually distinct Tailwind colour families
-// means they are never confusable, even where both could appear near each other (e.g. an APFC
-// page showing a success badge). PhD Research uses `violet`. None of these three families are used
-// as a semantic colour (error/warning/success) anywhere else in this app.
+// APFC uses the `apfc` token family (index.css) — a first-class name for what used to be a bare
+// Tailwind `green` reference, deliberately NOT `emerald`, which components/ui/Primitives.tsx's own
+// Badge `success` tone already uses: keeping APFC's workspace green and the app's semantic success
+// green in two visually distinct colour families means they are never confusable, even where both
+// could appear near each other (e.g. an APFC page showing a success badge). PhD Research uses the
+// `phd` token family (bare Tailwind `violet` before). Both token families mirror their original
+// Tailwind shade values exactly, so this rename changes no rendered colour. None of these three
+// families are used as a semantic colour (error/warning/success) anywhere else in this app.
 
 export interface WorkspaceAccent {
   /** Solid background for an active pill/nav item (workspace switcher's selected chip, the active
@@ -45,16 +47,16 @@ export interface WorkspaceAccent {
 
 export const WORKSPACE_ACCENTS: Record<WorkspaceKind, WorkspaceAccent> = {
   apfc: {
-    bg: 'bg-green-600',
-    shadow: 'shadow-green-600/30',
-    text: 'text-green-600 dark:text-green-400',
-    gradientFrom: 'from-green-600',
-    gradientTo: 'to-green-900',
-    bar: 'bg-green-500',
-    ring: 'ring-green-400 dark:ring-green-500/60',
-    focusRing: 'focus:ring-green-500/40',
-    hoverText: 'hover:text-green-600 dark:hover:text-green-400',
-    solidText: 'text-green-500',
+    bg: 'bg-apfc-600',
+    shadow: 'shadow-apfc-600/30',
+    text: 'text-apfc-600 dark:text-apfc-400',
+    gradientFrom: 'from-apfc-600',
+    gradientTo: 'to-apfc-900',
+    bar: 'bg-apfc-500',
+    ring: 'ring-apfc-400 dark:ring-apfc-500/60',
+    focusRing: 'focus:ring-apfc-500/40',
+    hoverText: 'hover:text-apfc-600 dark:hover:text-apfc-400',
+    solidText: 'text-apfc-500',
   },
   upsc_cse: {
     bg: 'bg-brand-600',
@@ -69,16 +71,16 @@ export const WORKSPACE_ACCENTS: Record<WorkspaceKind, WorkspaceAccent> = {
     solidText: 'text-brand-500',
   },
   phd_research: {
-    bg: 'bg-violet-600',
-    shadow: 'shadow-violet-600/30',
-    text: 'text-violet-600 dark:text-violet-400',
-    gradientFrom: 'from-violet-600',
-    gradientTo: 'to-violet-900',
-    bar: 'bg-violet-500',
-    ring: 'ring-violet-400 dark:ring-violet-500/60',
-    focusRing: 'focus:ring-violet-500/40',
-    hoverText: 'hover:text-violet-600 dark:hover:text-violet-400',
-    solidText: 'text-violet-500',
+    bg: 'bg-phd-600',
+    shadow: 'shadow-phd-600/30',
+    text: 'text-phd-600 dark:text-phd-400',
+    gradientFrom: 'from-phd-600',
+    gradientTo: 'to-phd-900',
+    bar: 'bg-phd-500',
+    ring: 'ring-phd-400 dark:ring-phd-500/60',
+    focusRing: 'focus:ring-phd-500/40',
+    hoverText: 'hover:text-phd-600 dark:hover:text-phd-400',
+    solidText: 'text-phd-500',
   },
 };
 

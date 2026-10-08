@@ -35,10 +35,35 @@
   --color-gold-700: #8d5720;
   --color-gold-800: #75461f;
   --color-gold-900: #633b1e;
+
+  /* Workspace accent tokens — first-class names for the APFC/PhD Research workspace accents (see
+     lib/workspaceAccent.ts), mirroring Tailwind's own built-in green/violet shade values exactly so
+     no rendered colour changes; only the two shades that were still bare Tailwind references
+     (green/violet) get a name here — UPSC CSE's accent already reuses --color-brand-* above. */
+  --color-apfc-400: #4ade80;
+  --color-apfc-500: #22c55e;
+  --color-apfc-600: #16a34a;
+  --color-apfc-900: #14532d;
+
+  --color-phd-400: #a78bfa;
+  --color-phd-500: #8b5cf6;
+  --color-phd-600: #7c3aed;
+  --color-phd-900: #4c1d95;
 }
 
 :root {
   color-scheme: light;
+}
+
+/* UI audit — Android WebView/mobile Chrome auto-inflate text size on narrow viewports unless this
+   is explicitly disabled, which silently renders every element larger than its CSS assumes and is
+   a primary cause of labels visually overflowing fixed-size containers on tablet/APK while the
+   exact same layout looks correct on desktop. This is the CSS-side half of the fix — the other
+   half (the WebView's own OS-level font-scale multiplier) is set natively in MainActivity.java's
+   WebSettings.setTextZoom(100), a separate mechanism this alone cannot override. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 html.dark {
@@ -91,6 +116,22 @@ html.dark ::-webkit-scrollbar-thumb {
 html.dark .surface {
   background: rgba(15, 23, 42, 0.72);
   border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* Design system — every Card in the app (see components/ui/Primitives.tsx) renders at this exact
+   same visual weight today, so a page's single most important/actionable card (e.g. Dashboard's
+   "Today's Study") looks identical to its least important one. This is a SECOND, deliberately rare
+   surface level for that handful of cards — a slightly more opaque background and a slightly more
+   visible border than `.surface`, meant to be reached for a few times per page at most, never as
+   the new default. Card's own `elevated` prop is the only way this gets applied. */
+.surface-elevated {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  backdrop-filter: blur(14px);
+}
+html.dark .surface-elevated {
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .bg-grid {

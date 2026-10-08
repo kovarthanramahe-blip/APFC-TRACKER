@@ -224,26 +224,26 @@ export default function PhdDashboard() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Research Started</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Research Started</p>
           <p className="mt-1 flex items-center gap-1.5 font-display text-lg font-bold text-slate-900 dark:text-white">
             <CalendarClock className="h-4 w-4 text-brand-500" /> {formatDate(researchStartDate)}
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Research Duration</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Research Duration</p>
           <p className="mt-1 flex items-center gap-1.5 font-display text-lg font-bold text-slate-900 dark:text-white">
             <Hourglass className="h-4 w-4 text-brand-500" />
             {snapshot.duration.years}y {snapshot.duration.months}m {snapshot.duration.days}d
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Topic Areas</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Topic Areas</p>
           <p className="mt-1 flex items-center gap-1.5 font-display text-lg font-bold text-slate-900 dark:text-white">
             <FolderKanban className="h-4 w-4 text-brand-500" /> {snapshot.topicAreaCount}
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Active Targets</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Active Targets</p>
           <p className="mt-1 flex items-center gap-1.5 font-display text-lg font-bold text-slate-900 dark:text-white">
             <Target className="h-4 w-4 text-brand-500" /> {snapshot.activeTargets.length}
           </p>

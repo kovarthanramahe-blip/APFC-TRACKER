@@ -17,25 +17,35 @@ const TABS = [
 ] as const;
 
 export function PhdResearchTabs() {
+  // UI audit — this row's 5 full-text labels (including "Working Bibliography" and "Research
+  // Documents") are wider than their combined natural width on any phone and many tablet-portrait
+  // viewports. The row used to be a plain `flex w-fit` with no wrap and no scroll, so once the
+  // labels' combined width exceeded the viewport there was nowhere for the excess to go — it
+  // pushed the whole page wider than the screen. Root-caused here rather than hidden: the outer
+  // wrapper scrolls horizontally ONLY when it must (never truncating or wrapping a tab's own
+  // label, which would look broken for a short pill-style tab bar), while `shrink-0` on each tab
+  // keeps every pill's own width stable regardless of how many others are present.
   return (
-    <div className="mb-5 flex w-fit items-center gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
-      {TABS.map((tab) => (
-        <NavLink
-          key={tab.to}
-          to={tab.to}
-          end
-          className={({ isActive }) =>
-            cx(
-              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-              isActive
-                ? 'bg-white dark:bg-slate-900 text-brand-600 dark:text-brand-400 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
-            )
-          }
-        >
-          <tab.icon className="h-3.5 w-3.5" /> {tab.label}
-        </NavLink>
-      ))}
+    <div className="mb-5 -mx-1 overflow-x-auto px-1">
+      <div className="flex w-fit items-center gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+        {TABS.map((tab) => (
+          <NavLink
+            key={tab.to}
+            to={tab.to}
+            end
+            className={({ isActive }) =>
+              cx(
+                'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-white dark:bg-slate-900 text-brand-600 dark:text-brand-400 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
+              )
+            }
+          >
+            <tab.icon className="h-3.5 w-3.5 shrink-0" /> {tab.label}
+          </NavLink>
+        ))}
+      </div>
     </div>
   );
 }

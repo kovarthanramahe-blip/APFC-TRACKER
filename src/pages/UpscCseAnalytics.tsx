@@ -4,7 +4,7 @@ import { Compass, TrendingUp, TrendingDown, Minus, Repeat, Gauge, BarChart3, Boo
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, cx } from '../lib/utils';
-import { Card, Badge, PageHeader, ProgressBar, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { Card, Badge, PageHeader, ProgressBar, StatTile, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_MAINS_SYLLABUS } from '../data/upscCseMainsSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
@@ -19,21 +19,6 @@ import {
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
-
-function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
-  const tones: Record<string, string> = {
-    neutral: 'text-slate-800 dark:text-slate-100',
-    success: 'text-emerald-600 dark:text-emerald-400',
-    danger: 'text-rose-600 dark:text-rose-400',
-    brand: 'text-brand-600 dark:text-brand-400',
-  };
-  return (
-    <Card className="p-4 text-center">
-      <p className={cx('font-display text-xl font-bold', tones[tone])}>{value}</p>
-      <p className="mt-0.5 text-[11px] text-slate-400">{label}</p>
-    </Card>
-  );
-}
 
 function progressToneClass(pct: number): string {
   if (pct >= 90) return 'bg-emerald-500';
@@ -239,7 +224,7 @@ export default function UpscCseAnalytics() {
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">PYQ Weak Spots</p>
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div>
-                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       <Repeat className="h-3.5 w-3.5 text-rose-500" /> Repeated Mistakes
                     </div>
                     {weakSpots.repeatedMistakeMicrosyllabus.length === 0 ? (
@@ -271,7 +256,7 @@ export default function UpscCseAnalytics() {
                     )}
                   </div>
                   <div>
-                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       <ListChecks className="h-3.5 w-3.5 text-brand-500" /> Revise Next
                     </div>
                     {weakSpots.repeatedMistakeSubjects.length === 0 ? (
@@ -290,7 +275,7 @@ export default function UpscCseAnalytics() {
                     )}
                   </div>
                   <div>
-                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       <Gauge className="h-3.5 w-3.5 text-brand-500" /> Recent Performance
                     </div>
                     <PyqTrendBadge trend={weakSpots.trend} />

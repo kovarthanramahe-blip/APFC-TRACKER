@@ -738,7 +738,7 @@ function PlanScenariosCard({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-3">
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Miss study days</label>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Miss study days</label>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -755,7 +755,7 @@ function PlanScenariosCard({
         </div>
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-3">
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Change target date (days)</label>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Change target date (days)</label>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -793,14 +793,14 @@ function PlanScenariosCard({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Current</p>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Current</p>
               <Badge tone={HEALTH_VERDICT_META[result.comparison.current.verdict].tone}>{HEALTH_VERDICT_META[result.comparison.current.verdict].label}</Badge>
               <p className="mt-1.5 font-display text-sm font-bold text-slate-900 dark:text-white">
                 {formatMinutes(result.comparison.current.requiredMinutesPerStudyDay)}/day
               </p>
             </div>
             <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Scenario</p>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Scenario</p>
               <Badge tone={HEALTH_VERDICT_META[result.comparison.scenario.verdict].tone}>{HEALTH_VERDICT_META[result.comparison.scenario.verdict].label}</Badge>
               <p className="mt-1.5 font-display text-sm font-bold text-slate-900 dark:text-white">
                 {formatMinutes(result.comparison.scenario.requiredMinutesPerStudyDay)}/day
@@ -905,7 +905,7 @@ function TaskList({
               <div className="space-y-3">
                 {personal.length > 0 && (
                   <div>
-                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Personal</p>
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Personal</p>
                     <ul className="space-y-1.5">
                       {personal.map((t) => (
                         <TaskRow key={t.id} id={t.id} date={t.date} title={t.title} reason={t.reason} estimatedMinutes={t.estimatedMinutes} status={t.status} kind="personal" {...rowProps} />
@@ -915,7 +915,7 @@ function TaskList({
                 )}
                 {byPhase.map(([phase, phaseTasks]) => (
                   <div key={phase}>
-                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{TASK_TYPE_LABEL[phaseTasks[0].taskType]}</p>
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{TASK_TYPE_LABEL[phaseTasks[0].taskType]}</p>
                     <ul className="space-y-1.5">
                       {phaseTasks.map((t) => (
                         <TaskRow key={t.id} id={t.id} date={t.date} title={t.title} reason={t.reason} estimatedMinutes={t.estimatedMinutes} status={t.status} kind="syllabus" {...rowProps} />

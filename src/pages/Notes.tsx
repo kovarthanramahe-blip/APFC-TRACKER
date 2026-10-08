@@ -238,7 +238,7 @@ export default function Notes() {
       {importError && (
         <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
           <p>{importError}</p>
-          <button onClick={() => setImportError(null)} className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
+          <button onClick={() => setImportError(null)} aria-label="Dismiss error" title="Dismiss error" className="shrink-0 text-rose-400 hover:text-rose-600 dark:hover:text-rose-200">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -481,7 +481,7 @@ function OrganiseView({
 
         <div className="hidden md:block md:mt-3">
           <div className="mb-1 flex items-center justify-between px-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Folders</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Folders</p>
             <button
               onClick={() => setCreatingFolderParentId(null)}
               aria-label="New root folder"
@@ -504,7 +504,7 @@ function OrganiseView({
 
         {allTags.length > 0 && (
           <div className="hidden md:block md:mt-3">
-            <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Tags</p>
+            <p className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Tags</p>
             <div className="flex flex-wrap gap-1 px-1">
               {allTags.map((tag) => (
                 <button
@@ -826,7 +826,7 @@ function FolderNameDialog({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-sm rounded-t-2xl sm:inset-0 sm:top-1/3 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
-          <button onClick={onCancel} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onCancel} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -875,7 +875,7 @@ function DeleteFolderDialog({
       <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-sm rounded-t-2xl sm:inset-0 sm:top-1/3 sm:bottom-auto sm:h-fit sm:rounded-2xl bg-white dark:bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Delete "{folder.name}"?</h3>
-          <button onClick={onCancel} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onCancel} aria-label="Close" title="Close" className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1319,7 +1319,7 @@ function NoteEditor({
       >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-4">
           <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">{isNew ? 'New Note' : 'Edit Note'}</h3>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={onClose} aria-label="Close" title="Close" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1350,7 +1350,7 @@ function NoteEditor({
           />
           {isNew && (
             <div>
-              <label htmlFor="note-template" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <label htmlFor="note-template" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Start from a template
               </label>
               <select

@@ -33,7 +33,7 @@ export function FolderPicker({
   return (
     <div className={className}>
       {label && (
-        <label htmlFor={id} className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        <label htmlFor={id} className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           {label}
         </label>
       )}

@@ -212,15 +212,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="md:pl-64">
         {/* Top bar */}
         <header className="sticky top-0 z-20 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/75 dark:bg-slate-950/60 backdrop-blur-xl pt-[env(safe-area-inset-top)]">
-          <div className="flex h-14 items-center justify-between gap-3 px-3 sm:h-16 sm:px-6">
-            <div className="flex items-center gap-3">
+          <div className="flex min-h-14 items-center justify-between gap-3 px-3 py-2 sm:min-h-16 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
               <button
                 className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 md:hidden"
                 onClick={() => setMobileOpen(true)}
               >
                 <Menu className="h-5 w-5" />
               </button>
-              <h2 className="font-display text-base font-semibold text-slate-800 dark:text-slate-100 sm:text-lg">{activeLabel}</h2>
+              <h2 className="truncate font-display text-base font-semibold text-slate-800 dark:text-slate-100 sm:text-lg">{activeLabel}</h2>
             </div>
             <div className="flex items-center gap-3">
               <CountdownChip />

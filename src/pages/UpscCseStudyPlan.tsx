@@ -368,19 +368,19 @@ export default function UpscCseStudyPlan() {
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-6">
             <Card className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Plan Type</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Plan Type</p>
               <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{PLAN_TYPE_LABELS[config.planType]}</p>
             </Card>
             <Card className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Target Date</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Target Date</p>
               <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{formatDate(config.targetDate)}</p>
             </Card>
             <Card className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Days Remaining</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Days Remaining</p>
               <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{progress?.remainingDays ?? 0}</p>
             </Card>
             <Card className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Time Elapsed</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Time Elapsed</p>
               <p className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">{progress?.timeElapsedPct ?? 0}%</p>
               <div className="mt-2">
                 <ProgressBar value={progress?.timeElapsedPct ?? 0} height="h-1.5" />

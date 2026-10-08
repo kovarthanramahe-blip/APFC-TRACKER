@@ -502,8 +502,12 @@ const TODAY_STATE_MESSAGE: Record<Extract<DailyQueueResult, { status: 'active' }
  * action reuses the same pure completeStudyPlanTask + store setters the Study Plan page itself
  * uses — this component never mutates a task's date or generates a second schedule. */
 function TodayStudyCard({ queue, onComplete }: { queue: DailyQueueResult; onComplete: (item: DailyQueueItem) => void }) {
+  // Design system — the single most actionable card on this page ("what should I study right now")
+  // used to render at the exact same visual weight as a purely historical one like Recent Mock
+  // Tests below it. `elevated` (Primitives.tsx's Card) is the new, deliberately rare tool for
+  // exactly this: a slightly stronger surface/shadow, no content or layout change.
   return (
-    <Card className="p-5 sm:p-6">
+    <Card elevated className="p-5 sm:p-6">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ListTodo className="h-4 w-4 text-brand-600 dark:text-brand-400" />
@@ -571,7 +575,7 @@ function DoNextList({ queue, onComplete }: { queue: Extract<DailyQueueResult, { 
 
   return (
     <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Do Next</p>
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Do Next</p>
       <ul className="space-y-1.5">
         {items.map((item) => (
           <li key={item.id} className="flex items-center justify-between gap-2 rounded-lg -mx-1.5 px-1.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/60">
@@ -642,8 +646,11 @@ function ExamReadinessCard({ report, hasWeakTopicPractice }: { report: ExamReadi
   // (PYQ accuracy, mock tests, plan execution, revision mastery) aren't "topic weakness" in that
   // sense, so no practice link is shown when one of those is the weakest area.
   const canPracticeWeakestArea = report.weakestDimension.dimension === 'syllabus' && hasWeakTopicPractice;
+  // Design system — the second card on the page (right after the Hero) and the single clearest
+  // "how ready am I, overall" signal on the dashboard; elevated for the same reason Today's Study
+  // is — everything else here stays flat by design, per this pass's "a few cards at most" rule.
   return (
-    <Card className="p-5 sm:p-6">
+    <Card elevated className="p-5 sm:p-6">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Gauge className="h-4 w-4 text-brand-600 dark:text-brand-400" />
@@ -720,11 +727,19 @@ function StatTile({
   value: string;
   accent: string;
 }) {
+  // UI audit — this used to hand-roll its own surface (`rounded-xl`, flat bg-white/70, a plain
+  // border) instead of the shared Card primitive every other StatTile-shaped card in the app
+  // (UpscCsePyqTest/PhdAnalytics/PYQTest/UpscCseAnalytics/UpscCseDashboard) already uses —
+  // a visibly different corner radius (12px vs Card's 16px) and a flat surface next to Card's
+  // glassy backdrop-blur treatment, on cards that sit right next to each other on this same
+  // dashboard. Switching to Card fixes that mismatch without changing this tile's own distinct
+  // content (icon + left-aligned value/label), which is a deliberate difference from the other
+  // pages' centered, icon-less variant, not a bug.
   return (
-    <div className="rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 px-3 py-2.5">
+    <Card className="px-3 py-2.5">
       <Icon className={cx('h-4 w-4 mb-1.5', accent)} strokeWidth={2.2} />
       <p className="font-display text-lg font-bold text-slate-900 dark:text-white leading-none">{value}</p>
       <p className="text-[11px] text-slate-400 mt-1">{label}</p>
-    </div>
+    </Card>
   );
 }
