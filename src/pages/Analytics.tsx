@@ -177,7 +177,16 @@ export default function Analytics() {
 
   return (
     <div>
-      <PageHeader eyebrow="Insights" title="Analytics" description="Track your preparation trends across syllabus coverage, study time and test performance." />
+      <PageHeader
+        eyebrow="Insights"
+        title="Analytics"
+        description="Track your preparation trends across syllabus coverage, study time and test performance."
+        action={
+          <Link to="/history" className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+            View Full History <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        }
+      />
 
       <motion.div {...fadeUp} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <Card className="p-5">

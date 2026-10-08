@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target, CheckCircle2, CircleDashed, Trophy } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target, CheckCircle2, CircleDashed, Trophy, Timer } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
@@ -358,6 +358,16 @@ export default function Syllabus() {
                               >
                                 <NotebookPen className="h-4 w-4" />
                                 {noteCount > 0 && noteCount}
+                              </Link>
+                              {/* Syllabus <-> Focus OS (Phase 20) — a read-only deep link into the
+                                  existing /pomodoro timer (same contract as pages/StudyPlan.tsx's own
+                                  Start Focus action), never a new focus-tracking mechanism here. */}
+                              <Link
+                                to={`/pomodoro?context=${encodeURIComponent(topic.title)}&subject=${encodeURIComponent(subj.colorKey)}`}
+                                title={`Start a focus session on ${topic.title}`}
+                                className={cx('shrink-0 flex items-center gap-1 rounded-lg p-2 text-slate-300 dark:text-slate-600', accent.hoverText)}
+                              >
+                                <Timer className="h-4 w-4" />
                               </Link>
                             </li>
                           );

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   CalendarRange,
@@ -16,6 +17,9 @@ import {
   Activity,
   FlaskConical,
   X,
+  Timer,
+  ExternalLink,
+  ListTodo,
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
@@ -46,10 +50,12 @@ import {
   type PersonalPlanTask,
 } from '../lib/studyPlanEditing';
 import { computeUnscheduledTopicIds } from '../lib/studyPlanAdaptive';
+import { computeDailyStudyQueue } from '../lib/studyPlanDailyQueue';
+import { computePlannerOverview, type PlannerOverview } from '../lib/plannerOS';
 import { computePlanHealth, type PlanHealthInput, type PlanHealthReport, type PlanHealthVerdict } from '../lib/studyPlanHealth';
 import { simulateMissedStudyDays, simulateTargetDateShift, type ScenarioResult } from '../lib/studyPlanScenarios';
 import { formatDate, formatMinutes, getLocalDateString, cx } from '../lib/utils';
-import { Card, Badge, Button, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { Card, Badge, Button, StatCard, SectionHeader, Modal, Input, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 
 type TaskKind = 'syllabus' | 'personal';
 
@@ -304,6 +310,21 @@ export default function StudyPlan() {
 
   const planHealth = useMemo(() => (healthInput ? computePlanHealth(healthInput) : null), [healthInput]);
 
+  // Planner Overview (Phase 19) — reuses the EXISTING daily-queue engine (lib/studyPlanDailyQueue,
+  // the same one lib/commandCentreHome.ts's own Today panel already calls) for today/overdue, and
+  // adds only the tomorrow/this-week/later bucketing on top (lib/plannerOS.ts) — never a second
+  // scheduling or priority engine.
+  const plannerOverview: PlannerOverview = useMemo(() => {
+    const pyqPerf = computePyqPerformance(PYQ_BANK, pyqAttempts);
+    const dailyQueue = computeDailyStudyQueue({ plan, personalTasks, syllabus: SYLLABUS, completedTopics, pyqPerf, currentDate: todayStr() });
+    return computePlannerOverview(dailyQueue, plan?.tasks ?? [], personalTasks, todayStr());
+  }, [plan, personalTasks, pyqAttempts, completedTopics]);
+
+  // Subject colour lookup for the Start Focus deep link below — StudyPlanTask only carries
+  // subjectId (a real SYLLABUS foreign key), never a colorKey directly; this is the SAME lookup
+  // pages/Syllabus.tsx already performs for its own display, not a new subject-resolution rule.
+  const subjectColorById = useMemo(() => new Map(SYLLABUS.map((s) => [s.id, s.colorKey])), []);
+
   // Plan Scenarios (Stage 6) — a pure "what if" simulation, run only when the user explicitly
   // presses Simulate. Held entirely in local component state: never written to the store, and
   // never touches the real plan (see lib/studyPlanScenarios). Re-simulating after the underlying
@@ -462,6 +483,7 @@ export default function StudyPlan() {
               <p className="text-xs text-brand-700 dark:text-brand-300">{actionMessage}</p>
             </div>
           )}
+          <PlannerOverviewCard overview={plannerOverview} />
           {editedCapacity && <CapacitySummary plan={plan} edited={editedCapacity} generatedAt={studyPlanGeneratedAt} />}
           {planHealth && <PlanHealthCard health={planHealth} />}
           {plan && (
@@ -482,6 +504,7 @@ export default function StudyPlan() {
           <TaskList
             tasksByDate={tasksByDate}
             studyDayDates={plan.capacity.studyDayDates}
+            subjectColorById={subjectColorById}
             movingTaskId={movingTaskId}
             resizingTaskId={resizingTaskId}
             onStartMove={setMovingTaskId}
@@ -540,6 +563,41 @@ function WeekdayPicker({ selected, onToggle }: { selected: WeekdayIndex[]; onTog
         </button>
       ))}
     </div>
+  );
+}
+
+/** Planner Overview (Phase 19) — the "what should I do, and when" summary row. Every number comes
+ * straight from lib/plannerOS.ts's computePlannerOverview; this component only renders it. */
+function PlannerOverviewCard({ overview }: { overview: PlannerOverview }) {
+  const hasUpcoming = overview.tomorrowCount + overview.thisWeekCount + overview.laterCount > 0;
+  return (
+    <Card className="p-5 sm:p-6">
+      <SectionHeader title="Planner Overview" description="What's left to do, and when." />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon={ListTodo} label="Today remaining" value={`${overview.todayRemainingCount}`} accentClassName="text-brand-600 dark:text-brand-400" />
+        <StatCard icon={AlertTriangle} label="Overdue" value={`${overview.overdueCount}`} accentClassName="text-danger-600 dark:text-danger-400" />
+        <StatCard icon={CalendarClock} label="Tomorrow" value={`${overview.tomorrowCount}`} accentClassName="text-jarvis-600 dark:text-jarvis-400" />
+        <StatCard icon={CalendarRange} label="This week+" value={`${overview.thisWeekCount + overview.laterCount}`} accentClassName="text-slate-500 dark:text-slate-400" />
+      </div>
+
+      {overview.priorityItems.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Priority right now</p>
+          <ul className="space-y-1.5">
+            {overview.priorityItems.map((item) => (
+              <li key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{item.task.title}</span>
+                <Badge tone={item.overdue ? 'danger' : 'neutral'}>{item.reason}</Badge>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!overview.hasActivePlan && !hasUpcoming && (
+        <p className="mt-4 text-xs text-slate-400">Nothing scheduled yet — generate a plan below, or add a personal task.</p>
+      )}
+    </Card>
   );
 }
 
@@ -857,6 +915,7 @@ interface TaskListDay {
 function TaskList({
   tasksByDate,
   studyDayDates,
+  subjectColorById,
   movingTaskId,
   resizingTaskId,
   onStartMove,
@@ -870,6 +929,7 @@ function TaskList({
 }: {
   tasksByDate: TaskListDay[];
   studyDayDates: string[];
+  subjectColorById: Map<string, string>;
   movingTaskId: string | null;
   resizingTaskId: string | null;
   onStartMove: (id: string | null) => void;
@@ -918,7 +978,19 @@ function TaskList({
                     <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{TASK_TYPE_LABEL[phaseTasks[0].taskType]}</p>
                     <ul className="space-y-1.5">
                       {phaseTasks.map((t) => (
-                        <TaskRow key={t.id} id={t.id} date={t.date} title={t.title} reason={t.reason} estimatedMinutes={t.estimatedMinutes} status={t.status} kind="syllabus" {...rowProps} />
+                        <TaskRow
+                          key={t.id}
+                          id={t.id}
+                          date={t.date}
+                          title={t.title}
+                          reason={t.reason}
+                          estimatedMinutes={t.estimatedMinutes}
+                          status={t.status}
+                          kind="syllabus"
+                          topicId={t.topicId}
+                          subjectColorKey={subjectColorById.get(t.subjectId)}
+                          {...rowProps}
+                        />
                       ))}
                     </ul>
                   </div>
@@ -940,6 +1012,8 @@ function TaskRow({
   estimatedMinutes,
   status,
   kind,
+  topicId,
+  subjectColorKey,
   studyDayDates,
   movingTaskId,
   resizingTaskId,
@@ -959,6 +1033,10 @@ function TaskRow({
   estimatedMinutes: number;
   status: PlanTaskStatus;
   kind: TaskKind;
+  /** A real SYLLABUS topic id — present only for a syllabus task (see lib/studyPlan.ts's own
+   * StudyPlanTask), never fabricated for a personal task. Powers the "View Topic" deep link below. */
+  topicId?: string;
+  subjectColorKey?: string;
   studyDayDates: string[];
   movingTaskId: string | null;
   resizingTaskId: string | null;
@@ -971,11 +1049,24 @@ function TaskRow({
   onResize: (id: string, kind: TaskKind, minutes: number) => void;
   onRemove: (id: string, kind: TaskKind) => void;
 }) {
+  const navigate = useNavigate();
   const isCompleted = status === 'completed';
   const isMoving = movingTaskId === id;
   const isResizing = resizingTaskId === id;
   // Syllabus tasks may only move to a configured study day; personal tasks can go on any date.
   const dateOptions = kind === 'syllabus' ? studyDayDates : undefined;
+
+  // Planner <-> Focus OS (Phase 19/20) — the SAME /pomodoro route Command Centre's own "Start
+  // Focus" quick action already uses, with a read-only context hint (never a new task-linking
+  // write-back; see pages/Pomodoro.tsx's own header for what these params do).
+  function startFocus() {
+    // taskId/taskKind let Focus OS resolve the real task and offer an explicit "Mark Task
+    // Complete" action once the session finishes (see pages/Pomodoro.tsx's own header) — never an
+    // automatic completion.
+    const params = new URLSearchParams({ context: title, taskId: id, taskKind: kind });
+    if (subjectColorKey) params.set('subject', subjectColorKey);
+    navigate(`/pomodoro?${params.toString()}`);
+  }
 
   return (
     <li className="rounded-lg border border-slate-100 dark:border-slate-800/80 px-2.5 py-2">
@@ -993,6 +1084,10 @@ function TaskRow({
         ) : (
           <>
             <IconButton label="Complete" onClick={() => onComplete(id, kind)} icon={Check} />
+            <IconButton label="Start Focus" onClick={startFocus} icon={Timer} />
+            {kind === 'syllabus' && topicId && (
+              <IconButton label="View Topic" onClick={() => navigate(`/syllabus?topicId=${encodeURIComponent(topicId)}`)} icon={ExternalLink} />
+            )}
             <IconButton label="Move" onClick={() => onStartMove(isMoving ? null : id)} icon={CalendarClock} active={isMoving} />
             <IconButton label="Edit time" onClick={() => onStartResize(isResizing ? null : id)} icon={Clock} active={isResizing} />
             <IconButton label="Remove" onClick={() => onRemove(id, kind)} icon={Trash2} tone="danger" />
@@ -1084,6 +1179,10 @@ function IconButton({
   );
 }
 
+/** Quick task creation (Phase 19) — upgraded to the shared Modal/Input primitives (Phase 15)
+ * instead of an inline expanding form, for a faster, more focused creation flow. `show`/`onToggle`
+ * keep the exact same parent-owned open/close contract as before (now driving the Modal instead of
+ * a conditional block), so no caller-side change was needed. */
 function AddPersonalTask({
   show,
   onToggle,
@@ -1097,6 +1196,13 @@ function AddPersonalTask({
   const [date, setDate] = useState(todayStr());
   const [minutes, setMinutes] = useState(30);
 
+  function handleAdd() {
+    onAdd({ title, date, estimatedMinutes: minutes });
+    setTitle('');
+    setDate(todayStr());
+    setMinutes(30);
+  }
+
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex items-center justify-between gap-2">
@@ -1105,40 +1211,33 @@ function AddPersonalTask({
           <Plus className="h-3.5 w-3.5" /> Add Personal Task
         </Button>
       </div>
-      {show && (
-        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
-          <Field label="Title" required>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Revise my notes"
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Date" required>
-            <DateInput value={date} onChange={setDate} />
-          </Field>
-          <Field label="Minutes" required>
-            <input
+
+      <Modal open={show} onClose={onToggle} title="Add Personal Task">
+        <div className="space-y-4">
+          <Input label="Title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Revise my notes" />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Date" required>
+              <DateInput value={date} onChange={setDate} />
+            </Field>
+            <Input
+              label="Minutes"
               type="number"
               min={1}
               max={MAX_TASK_MINUTES}
               value={minutes}
               onChange={(e) => setMinutes(Math.round(Number(e.target.value) || 0))}
-              className={cx(inputClass, 'sm:w-24')}
             />
-          </Field>
-          <Button
-            onClick={() => {
-              onAdd({ title, date, estimatedMinutes: minutes });
-              setTitle('');
-            }}
-            disabled={!title.trim()}
-          >
-            Add
-          </Button>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onToggle}>
+              Cancel
+            </Button>
+            <Button onClick={handleAdd} disabled={!title.trim()}>
+              <Plus className="h-4 w-4" /> Add Task
+            </Button>
+          </div>
         </div>
-      )}
+      </Modal>
     </Card>
   );
 }

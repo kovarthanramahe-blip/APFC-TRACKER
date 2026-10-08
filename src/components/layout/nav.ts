@@ -20,6 +20,7 @@ import {
   Target,
   Sparkles,
   Bot,
+  History,
   type LucideIcon,
 } from 'lucide-react';
 import type { WorkspaceKind } from '../../lib/workspace';
@@ -76,6 +77,7 @@ const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
     { to: '/repository', label: 'Repository', icon: Library },
     { to: '/pomodoro', label: 'Pomodoro', icon: Timer },
     { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+    { to: '/history', label: 'History', icon: History },
     { to: '/study-plan', label: 'Study Plan', icon: CalendarRange },
     { to: '/settings', label: 'Settings', icon: Settings },
   ],

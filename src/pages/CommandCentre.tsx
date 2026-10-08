@@ -499,8 +499,14 @@ function AskJarvis({ activeWorkspaceId, today, apfcData, upscCseData, phdData }:
 // --------------------------------------------------------------------------------------------
 
 function TodayCommandPanel({ home }: { home: ApfcHomeSnapshot }) {
+  const navigate = useNavigate();
   const remaining = home.dailyQueue.status === 'active' ? home.dailyQueue.todayPending.length : 0;
   const completed = home.dailyQueue.status === 'active' ? home.dailyQueue.todayCompletedCount : 0;
+  // Planner integration (Phase 19) — the SAME recommendedOrder/overdueTasks lib/studyPlanDailyQueue
+  // already computes (reused verbatim by lib/plannerOS.ts's own Planner Overview on /study-plan),
+  // never a second priority ranking here.
+  const overdueCount = home.dailyQueue.status === 'active' ? home.dailyQueue.overdueTasks.length : 0;
+  const nextPriorityTask = home.dailyQueue.status === 'active' ? home.dailyQueue.recommendedOrder[0] : undefined;
   return (
     <motion.div {...cardEntrance}>
       <Card className="p-5 sm:p-6">
@@ -527,6 +533,28 @@ function TodayCommandPanel({ home }: { home: ApfcHomeSnapshot }) {
           </div>
           <ProgressBar value={home.todayFocusMinutes} max={Math.max(home.dailyGoalMinutes, 1)} colorClassName="bg-primary-600" />
         </div>
+
+        {nextPriorityTask && (
+          <button
+            type="button"
+            onClick={() => navigate('/study-plan')}
+            className="mt-4 flex w-full items-center gap-3 rounded-xl border border-slate-200/70 p-3 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus dark:border-slate-800 dark:hover:bg-slate-800/60"
+          >
+            <span
+              className={cx(
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                nextPriorityTask.overdue ? 'bg-danger-100 text-danger-600 dark:bg-danger-500/15 dark:text-danger-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+              )}
+            >
+              <ListChecks className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200">{nextPriorityTask.task.title}</span>
+              <span className="block text-xs text-slate-400">{nextPriorityTask.reason}</span>
+            </span>
+            {overdueCount > 0 && <Badge tone="danger">{overdueCount} overdue</Badge>}
+          </button>
+        )}
       </Card>
     </motion.div>
   );
@@ -780,7 +808,14 @@ function RecentContinue({ notes, sessions }: { notes: { id: string; title: strin
   return (
     <motion.div {...cardEntrance}>
       <Card className="p-5 sm:p-6">
-        <SectionHeader title="Recent" />
+        <SectionHeader
+          title="Recent"
+          action={
+            <button type="button" onClick={() => navigate('/history')} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+              View Full History
+            </button>
+          }
+        />
         {!hasAny ? (
           <EmptyState icon={Compass} title="Nothing recent yet" description="Your most recently edited note or focus session will show up here." />
         ) : (

@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Clock, Sparkles, Trophy } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Clock, Sparkles, Timer, Trophy } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getLocalDateString, cx } from '../lib/utils';
 import { Card, PageHeader, Button, Badge, StatCard, SectionHeader, EmptyState, Tabs, type TabItem, cardEntrance, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { motion } from 'framer-motion';
 import { computeRevisionOSSnapshot, REVISION_BUCKET_ORDER, REVISION_BUCKET_LABEL, type RevisionBucketKey, type RevisionOSItem } from '../lib/revisionOS';
 import { getWorkspaceMeta } from '../lib/workspace';
+import { SYLLABUS } from '../data/syllabus';
 
 // Revision OS (Phase 17) — APFC's own first-class revision workspace, built entirely on top of
 // the EXISTING revision engine (lib/revisionQueue.ts + lib/pyqFilters.ts, via lib/revisionOS.ts's
@@ -49,6 +50,10 @@ export default function Revision() {
   const revisionQueue = useAppStore((s) => s.revisionQueue);
   const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
   const [filter, setFilter] = useState<FilterKey>('all');
+
+  // Revision <-> Focus OS (Phase 20) — the same subjectId -> colorKey lookup pages/StudyPlan.tsx's
+  // own Start Focus action already performs, just for the Focus deep link's optional ?subject=.
+  const subjectColorById = useMemo(() => new Map(SYLLABUS.map((s) => [s.id, s.colorKey])), []);
 
   const today = useMemo(() => getLocalDateString(), []);
   const snapshot = useMemo(() => computeRevisionOSSnapshot(pyqAttempts, bookmarkedPyqIds, revisionQueue, today), [pyqAttempts, bookmarkedPyqIds, revisionQueue, today]);
@@ -141,6 +146,19 @@ export default function Revision() {
                                   )}
                                 </p>
                               </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  const colorKey = subjectColorById.get(item.subjectId);
+                                  const params = new URLSearchParams({ context: item.topicTitle });
+                                  if (colorKey) params.set('subject', colorKey);
+                                  navigate(`/pomodoro?${params.toString()}`);
+                                }}
+                                className="shrink-0"
+                              >
+                                <Timer className="h-3.5 w-3.5" /> Focus
+                              </Button>
                               <Button variant="ghost" size="sm" onClick={() => navigate(`/syllabus?topicId=${encodeURIComponent(item.topicId)}`)} className="shrink-0">
                                 View Topic
                               </Button>
