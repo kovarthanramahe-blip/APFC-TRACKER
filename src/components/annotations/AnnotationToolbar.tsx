@@ -1,13 +1,39 @@
 import { useState } from 'react';
-import { Pen, Pencil, Feather, Highlighter, Eraser, Lasso, Shapes, Square, Circle, Minus as LineIcon, ArrowRight, Undo2, Redo2, Bookmark, StickyNote, Eye, EyeOff, Trash2, Minus, Plus, Droplet } from 'lucide-react';
+import {
+  PenLine,
+  Pen,
+  Pencil,
+  Paintbrush,
+  PenTool,
+  Highlighter,
+  Eraser,
+  Lasso,
+  Shapes,
+  Square,
+  Circle,
+  Minus as LineIcon,
+  ArrowRight,
+  Undo2,
+  Redo2,
+  Bookmark,
+  StickyNote,
+  Eye,
+  EyeOff,
+  Trash2,
+  Minus,
+  Plus,
+  Droplet,
+} from 'lucide-react';
 import type { AnnotationTool, PenStyle, ShapeKind } from '../../lib/annotations';
-import { INK_COLORS, HIGHLIGHTER_COLORS, MIN_THICKNESS, MAX_THICKNESS, MIN_OPACITY, MAX_OPACITY } from '../../lib/annotations';
+import { INK_COLORS, HIGHLIGHTER_COLORS, MIN_THICKNESS, MAX_THICKNESS, MIN_OPACITY, MAX_OPACITY, THICKNESS_PRESETS } from '../../lib/annotations';
 import { cx } from '../../lib/utils';
 
 const PEN_STYLE_META: Record<PenStyle, { label: string; icon: typeof Pen }> = {
-  pen: { label: 'Pen', icon: Pen },
+  fine: { label: 'Fine Pen', icon: PenLine },
+  ballpoint: { label: 'Ballpoint', icon: Pen },
   pencil: { label: 'Pencil', icon: Pencil },
-  fountain: { label: 'Fountain Pen', icon: Feather },
+  brush: { label: 'Brush', icon: Paintbrush },
+  marker: { label: 'Marker', icon: PenTool },
 };
 
 type ShapeTool = ShapeKind | 'arrow';
@@ -71,6 +97,11 @@ export interface AnnotationToolbarProps {
   onSelectTool: (tool: AnnotationTool | null) => void;
   color: string;
   onSelectColor: (color: string) => void;
+  /** Most-recently-used colours (including ones picked via the custom colour input below), most
+   * recent first — session-local, not persisted (see DocumentAnnotator's own recentColors state
+   * for why: a lightweight per-visit convenience, not a new persistence surface). Empty until the
+   * user has actually used a colour outside the fixed preset at least once. */
+  recentColors: string[];
   thickness: number;
   onChangeThickness: (thickness: number) => void;
   opacity: number;
@@ -95,6 +126,7 @@ export function AnnotationToolbar({
   onSelectTool,
   color,
   onSelectColor,
+  recentColors,
   thickness,
   onChangeThickness,
   opacity,
@@ -270,20 +302,56 @@ export function AnnotationToolbar({
           <span className="h-5 w-5 rounded-full border border-slate-300 dark:border-slate-600" style={{ backgroundColor: color }} />
         </ToolButton>
         {showColorPanel && (
-          <div className={cx('absolute top-full z-30 mt-1.5 flex gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800', popoverAlignClass)}>
-            {palette.map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-label={`Colour ${c}`}
-                onClick={() => {
-                  onSelectColor(c);
-                  setShowColorPanel(false);
-                }}
-                className={cx('h-9 w-9 shrink-0 rounded-full border-2', c === color ? 'border-brand-500' : 'border-transparent')}
-                style={{ backgroundColor: c }}
-              />
-            ))}
+          <div className={cx('absolute top-full z-30 mt-1.5 flex max-w-64 flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2.5 shadow-lg dark:border-slate-700 dark:bg-slate-800', popoverAlignClass)}>
+            <div className="flex flex-wrap gap-1.5">
+              {palette.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-label={`Colour ${c}`}
+                  onClick={() => {
+                    onSelectColor(c);
+                    setShowColorPanel(false);
+                  }}
+                  className={cx('h-9 w-9 shrink-0 rounded-full border-2', c === color ? 'border-brand-500' : 'border-transparent')}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              {/* Custom colour — a real <input type="color"> so the OS's own colour picker (with
+                  hex entry, eyedropper, etc.) does the actual picking rather than a bespoke one
+                  reimplementing that UI. Its own swatch shows `color` whenever the current colour
+                  isn't one of the fixed presets, so the control always reflects the real state. */}
+              <label
+                className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-slate-300 bg-[conic-gradient(from_0deg,red,yellow,lime,cyan,blue,magenta,red)] dark:border-slate-600"
+                title="Custom colour"
+              >
+                <input
+                  type="color"
+                  value={color}
+                  onChange={(e) => onSelectColor(e.target.value)}
+                  aria-label="Custom colour"
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                />
+              </label>
+            </div>
+            {recentColors.length > 0 && (
+              <div className="flex items-center gap-1.5 border-t border-slate-100 pt-2 dark:border-slate-700">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Recent</span>
+                {recentColors.map((c, i) => (
+                  <button
+                    key={`${c}-${i}`}
+                    type="button"
+                    aria-label={`Recent colour ${c}`}
+                    onClick={() => {
+                      onSelectColor(c);
+                      setShowColorPanel(false);
+                    }}
+                    className={cx('h-7 w-7 shrink-0 rounded-full border-2', c === color ? 'border-brand-500' : 'border-transparent')}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -295,32 +363,51 @@ export function AnnotationToolbar({
           </span>
         </ToolButton>
         {showThicknessPanel && (
-          <div className={cx('absolute top-full z-30 mt-1.5 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-800', popoverAlignClass)}>
-            <button
-              type="button"
-              aria-label="Decrease thickness"
-              onClick={() => onChangeThickness(thickness - 1)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"
-            >
-              <Minus className="h-4 w-4" />
-            </button>
-            <input
-              type="range"
-              min={MIN_THICKNESS}
-              max={MAX_THICKNESS}
-              value={thickness}
-              onChange={(e) => onChangeThickness(Number(e.target.value))}
-              className="h-9 w-28 accent-brand-600"
-              aria-label="Stroke thickness"
-            />
-            <button
-              type="button"
-              aria-label="Increase thickness"
-              onClick={() => onChangeThickness(thickness + 1)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+          <div className={cx('absolute top-full z-30 mt-1.5 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-800', popoverAlignClass)}>
+            <div className="flex items-center gap-1.5">
+              {THICKNESS_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => onChangeThickness(preset.value)}
+                  className={cx(
+                    'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-xs font-medium',
+                    thickness === preset.value
+                      ? 'border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700',
+                  )}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Decrease thickness"
+                onClick={() => onChangeThickness(thickness - 1)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <input
+                type="range"
+                min={MIN_THICKNESS}
+                max={MAX_THICKNESS}
+                value={thickness}
+                onChange={(e) => onChangeThickness(Number(e.target.value))}
+                className="h-9 w-28 accent-brand-600"
+                aria-label="Stroke thickness"
+              />
+              <button
+                type="button"
+                aria-label="Increase thickness"
+                onClick={() => onChangeThickness(thickness + 1)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
       </div>

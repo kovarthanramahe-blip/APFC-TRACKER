@@ -103,12 +103,22 @@ export function sanitizeAnnotation(raw: unknown): Annotation | null {
     case 'ink': {
       const points = sanitizePoints(raw.points);
       if (points.length < MIN_POINTS_PER_STROKE) return null; // no usable geometry left
-      const penStyle: PenStyle = raw.penStyle === 'pencil' || raw.penStyle === 'fountain' ? raw.penStyle : 'pen';
+      // Migrates a pre-existing user's already-saved 'pen'/'fountain' values (the old 3-style
+      // PenStyle union) onto their closest equivalent in the current 5-style one, rather than
+      // silently defaulting every previously-drawn stroke to 'fine' — 'pen' and 'fountain' were the
+      // two closest matches, numerically, to 'ballpoint' and 'brush' respectively (see
+      // lib/strokeRendering.ts's own PEN_STYLE_OPTIONS). 'pencil' is unchanged; anything else
+      // (missing, corrupt, or already-current data) defaults to 'fine'.
+      const legacyPenStyleMap: Record<string, PenStyle> = { pen: 'ballpoint', fountain: 'brush', pencil: 'pencil' };
+      const penStyle: PenStyle =
+        raw.penStyle === 'fine' || raw.penStyle === 'ballpoint' || raw.penStyle === 'brush' || raw.penStyle === 'marker' || raw.penStyle === 'pencil'
+          ? raw.penStyle
+          : (legacyPenStyleMap[typeof raw.penStyle === 'string' ? raw.penStyle : ''] ?? 'fine');
       return {
         ...base,
         type: 'ink',
         penStyle,
-        color: sanitizeColor(raw.color, '#1e293b'),
+        color: sanitizeColor(raw.color, '#000000'),
         thickness: clampThickness(typeof raw.thickness === 'number' ? raw.thickness : 2.5),
         opacity: clampOpacity(typeof raw.opacity === 'number' ? raw.opacity : DEFAULT_INK_OPACITY),
         points,

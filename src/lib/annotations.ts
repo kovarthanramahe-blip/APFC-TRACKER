@@ -37,14 +37,35 @@ export type RenderMode = 'raw' | 'preview';
 
 export type AnnotationType = 'textHighlight' | 'underline' | 'strikethrough' | 'textNote' | 'ink' | 'highlighterInk' | 'shape' | 'arrow' | 'stickyNote' | 'bookmark';
 
-/** The tool the toolbar currently has selected — distinct from AnnotationType, since e.g. 'pen'/
- * 'pencil'/'fountain' are all the SAME stored type ('ink') with a different `penStyle`. The four
- * shape tools ('rectangle'/'ellipse'/'line'/'arrow') each map to exactly one drawn ShapeAnnotation/
- * ArrowAnnotation — see components/annotations/AnnotationLayer.tsx's own drag-to-draw handling. */
+/** The tool the toolbar currently has selected — distinct from AnnotationType, since e.g. 'fine'/
+ * 'ballpoint'/'pencil'/'brush'/'marker' are all the SAME stored type ('ink') with a different
+ * `penStyle`. The four shape tools ('rectangle'/'ellipse'/'line'/'arrow') each map to exactly one
+ * drawn ShapeAnnotation/ArrowAnnotation — see components/annotations/AnnotationLayer.tsx's own
+ * drag-to-draw handling. */
 export type AnnotationTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'rectangle' | 'ellipse' | 'line' | 'arrow';
 
-export type PenStyle = 'pen' | 'pencil' | 'fountain';
+/** Five distinct pen "feels" (a sixth requested tool, Highlighter, is its own top-level
+ * AnnotationTool/annotation type — see the header above — not a PenStyle, since it already had its
+ * own distinct opacity/colour treatment before this existed). Each maps to its own stroke-shape
+ * preset (lib/strokeRendering.ts's PEN_STYLE_OPTIONS) and its own sensible default
+ * thickness/opacity (PEN_STYLE_DEFAULTS below) applied when the toolbar switches to it. */
+export type PenStyle = 'fine' | 'ballpoint' | 'pencil' | 'brush' | 'marker';
 export type ShapeKind = 'rectangle' | 'ellipse' | 'line';
+
+/** Which AnnotationTool values the native Android Ink overlay (when available) should handle
+ * itself, vs. which must keep going through the existing JS/AnnotationLayer path. A tool is
+ * "native-capable" here in the sense of "this is real freehand handwriting the native low-latency
+ * path was built for" — 'pen' covers all five PenStyle variants (fine/ballpoint/pencil/brush/
+ * marker are sub-selections of the SAME 'pen' tool, not separate AnnotationTool values, so this one
+ * entry already covers all of them) plus 'highlighter'. Everything else (eraser, lasso, shapes,
+ * arrows) has no native equivalent and must keep reaching the JS layer, where those tools already
+ * work — the native overlay has no concept of "which JS tool is selected" and would otherwise
+ * unconditionally treat any stylus contact as an ink stroke regardless of toolbar selection.
+ * Pulled out as its own pure function (rather than an inline check in DocumentAnnotator) so the
+ * routing decision itself is directly unit-testable without needing to mock the native bridge. */
+export function isNativeInkCapableTool(tool: AnnotationTool | null): boolean {
+  return tool === 'pen' || tool === 'highlighter';
+}
 
 export function shapeKindForTool(tool: AnnotationTool): ShapeKind | null {
   return tool === 'rectangle' || tool === 'ellipse' || tool === 'line' ? tool : null;
@@ -163,8 +184,10 @@ export type Annotation = TextAnchoredAnnotation | GeometryAnnotation | StickyNot
 
 export const DEFAULT_PAGE_NUMBER = 1;
 
-// A small, fixed palette rather than a full colour picker — every swatch is a large touch target.
-export const INK_COLORS: readonly string[] = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#7c3aed'];
+// Named touch-target-sized swatches, plus a custom colour picker (see AnnotationToolbar) for
+// anything outside this set. Black is genuine black (#000000, matching the native Ink brush's own
+// default) — not the near-black slate this palette used before.
+export const INK_COLORS: readonly string[] = ['#000000', '#2563eb', '#dc2626', '#16a34a', '#7c3aed', '#ea580c', '#ca8a04'];
 export const HIGHLIGHTER_COLORS: readonly string[] = ['#fde047', '#86efac', '#93c5fd', '#fca5a5', '#f5d0fe'];
 export const TEXT_MARKUP_COLORS: readonly string[] = ['#facc15', '#f97316', '#ef4444', '#22c55e', '#3b82f6'];
 
@@ -174,10 +197,33 @@ export const DEFAULT_SHAPE_THICKNESS = 2;
 export const MIN_THICKNESS = 1;
 export const MAX_THICKNESS = 24;
 
+/** Simple named presets shown as buttons alongside the thickness slider — deliberately just three
+ * points on the same MIN_THICKNESS-MAX_THICKNESS range the slider already covers, not a second,
+ * disconnected scale. */
+export const THICKNESS_PRESETS: readonly { label: string; value: number }[] = [
+  { label: 'Fine', value: 2 },
+  { label: 'Medium', value: 6 },
+  { label: 'Thick', value: 14 },
+];
+
 export const DEFAULT_INK_OPACITY = 1;
 export const DEFAULT_HIGHLIGHTER_OPACITY = 0.35;
 export const MIN_OPACITY = 0.05;
 export const MAX_OPACITY = 1;
+
+/** Applied when the toolbar switches to a given pen style, so each one is genuinely distinguishable
+ * rather than a cosmetic relabelling of the same thickness/opacity — a real fine-tip pen is thin
+ * and fully opaque; a marker is thick and semi-opaque like a felt tip; a brush sits between the two.
+ * The user can still override either via the toolbar's own thickness/opacity controls afterward —
+ * this only sets the starting point for a newly-selected style, the same way most note-taking apps
+ * behave. */
+export const PEN_STYLE_DEFAULTS: Record<PenStyle, { thickness: number; opacity: number }> = {
+  fine: { thickness: 1.5, opacity: 1 },
+  ballpoint: { thickness: 2.5, opacity: 1 },
+  pencil: { thickness: 3, opacity: 0.85 },
+  brush: { thickness: 8, opacity: 1 },
+  marker: { thickness: 12, opacity: 0.55 },
+};
 
 // A stroke's point list is capped defensively — a very long, slow drag still produces a compact,
 // boundedly-sized record rather than growing without limit.
@@ -295,7 +341,7 @@ export function createInkAnnotation(
   return {
     ...baseFields(input),
     type: 'ink',
-    penStyle: input.penStyle ?? 'pen',
+    penStyle: input.penStyle ?? 'fine',
     color: input.color,
     thickness: clampThickness(input.thickness),
     opacity: clampOpacity(input.opacity ?? DEFAULT_INK_OPACITY),

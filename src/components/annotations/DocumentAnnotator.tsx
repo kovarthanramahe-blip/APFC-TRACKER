@@ -19,12 +19,15 @@ import {
   createTextNote,
   isTextAnchored,
   isGeometryAnnotation,
+  isMeaningfulStroke,
+  isNativeInkCapableTool,
   translatePoints,
   DEFAULT_PEN_THICKNESS,
   DEFAULT_HIGHLIGHTER_THICKNESS,
   DEFAULT_SHAPE_THICKNESS,
   DEFAULT_INK_OPACITY,
   DEFAULT_HIGHLIGHTER_OPACITY,
+  PEN_STYLE_DEFAULTS,
   INK_COLORS,
   HIGHLIGHTER_COLORS,
   TEXT_MARKUP_COLORS,
@@ -46,6 +49,11 @@ import { AnnotationToolbar } from './AnnotationToolbar';
 import { AnnotationLayer } from './AnnotationLayer';
 import { NoteEditorDialog } from './NoteEditorDialog';
 import { ContextualSelectionToolbar } from './ContextualSelectionToolbar';
+import NativeInk, { isNativeInkAvailable, toNativeBrushConfig } from '../../lib/nativeInk';
+
+/** Session-local, not persisted — a lightweight "colours you've used recently" convenience for the
+ * custom colour picker, capped so it never grows into a second colour-history feature. */
+const MAX_RECENT_COLORS = 6;
 
 const PULSE_DURATION_MS = 1400;
 
@@ -109,7 +117,8 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
   const [highlighterThickness, setHighlighterThickness] = useState<number>(DEFAULT_HIGHLIGHTER_THICKNESS);
   const [inkOpacity, setInkOpacity] = useState<number>(DEFAULT_INK_OPACITY);
   const [highlighterOpacity, setHighlighterOpacity] = useState<number>(DEFAULT_HIGHLIGHTER_OPACITY);
-  const [penStyle, setPenStyle] = useState<PenStyle>('pen');
+  const [penStyle, setPenStyle] = useState<PenStyle>('fine');
+  const [recentColors, setRecentColors] = useState<string[]>([]);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [editingNote, setEditingNote] = useState<StickyNoteAnnotation | null | 'new'>(null);
   const [editingTextNote, setEditingTextNote] = useState<TextNoteAnnotation | null>(null);
@@ -231,6 +240,9 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
   function setColor(c: string) {
     if (activeTool === 'highlighter') setHighlighterColor(c);
     else setInkColor(c);
+    if (!INK_COLORS.includes(c) && !HIGHLIGHTER_COLORS.includes(c)) {
+      setRecentColors((prev) => [c, ...prev.filter((existing) => existing !== c)].slice(0, MAX_RECENT_COLORS));
+    }
   }
 
   function setOpacity(o: number) {
@@ -242,6 +254,19 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
   function setThickness(t: number) {
     if (activeTool === 'highlighter') setHighlighterThickness(t);
     else setInkThickness(t);
+  }
+
+  /** Switching pen style also applies that style's own sensible thickness/opacity defaults (see
+   * PEN_STYLE_DEFAULTS) — e.g. picking Marker starts semi-transparent and thick, Fine Pen starts
+   * thin and fully opaque, matching how most note-taking apps behave. The user can still override
+   * either afterward via the toolbar's own thickness/opacity controls; this only sets the starting
+   * point for the newly-selected style. Never touches the highlighter's own thickness/opacity,
+   * which penStyle has no relationship to. */
+  function selectPenStyle(style: PenStyle) {
+    setPenStyle(style);
+    const defaults = PEN_STYLE_DEFAULTS[style];
+    setInkThickness(defaults.thickness);
+    setInkOpacity(defaults.opacity);
   }
 
   function record(entry: Parameters<typeof pushHistoryEntry>[1]) {
@@ -256,6 +281,119 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
     addAnnotation(stroke);
     record({ action: 'create', annotation: stroke });
   }
+
+  // A finished NATIVE stroke is committed through the SAME addAnnotation/record primitives
+  // handleCommitStroke above already uses — not a second, parallel persistence path — so it
+  // renders, undoes/redoes, and persists exactly like a JS-drawn stroke. Uses whatever the toolbar
+  // currently has selected (colour/thickness/opacity/penStyle, or the highlighter's own colour/
+  // thickness/opacity if that's the active tool) rather than a hardcoded brush, since
+  // NativeInkPlugin.setBrushConfig (below) keeps the native brush in sync with these same values.
+  function handleNativeInkStroke(points: NormalizedPoint[]) {
+    if (!isMeaningfulStroke(points)) return;
+    const stroke: InkAnnotation | HighlighterInkAnnotation =
+      activeTool === 'highlighter'
+        ? createHighlighterInkAnnotation({ documentId, renderMode, color: highlighterColor, thickness: highlighterThickness, opacity: highlighterOpacity, points })
+        : createInkAnnotation({ documentId, renderMode, color: inkColor, thickness: inkThickness, opacity: inkOpacity, penStyle, points });
+    addAnnotation(stroke);
+    record({ action: 'create', annotation: stroke });
+  }
+
+  useEffect(() => {
+    if (!isNativeInkAvailable) return;
+    const listenerPromise = NativeInk.addListener('nativeInkStrokeFinished', (event) => {
+      handleNativeInkStroke(event.points);
+    });
+    return () => {
+      listenerPromise.then((listener) => listener.remove());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, renderMode]);
+
+  // Native ink is only attached while a native-capable tool is armed (see isNativeInkCapableTool —
+  // currently pen [covering all five PenStyle variants] and highlighter), exactly the same gating
+  // AnnotationLayer's own `interactive = !!activeTool` already applies to the JS path. While lasso/
+  // eraser/shape/arrow is selected (or no tool at all), the overlay is detached so a stylus reaches
+  // the WebView/JS layer instead, where those tools already work correctly — the native overlay has
+  // no concept of "which JS tool is active" and would otherwise unconditionally treat any stylus
+  // contact as an ink stroke regardless of toolbar selection.
+  const nativeInkShouldBeActive = isNativeInkAvailable && isNativeInkCapableTool(activeTool);
+  useEffect(() => {
+    if (!nativeInkShouldBeActive) return;
+    NativeInk.enableNativeInk().catch((err) => console.error('NativeInk.enableNativeInk failed', err));
+    return () => {
+      NativeInk.disableNativeInk().catch((err) => console.error('NativeInk.disableNativeInk failed', err));
+    };
+  }, [nativeInkShouldBeActive]);
+
+  // Keeps the native brush in sync with the toolbar's own colour/thickness/opacity selection (see
+  // toNativeBrushConfig's own header for why PenStyle itself doesn't map to a different native
+  // brush family) — this is what makes "the selected tool controls the actual native drawing
+  // configuration" true, and what stops the native stroke rendering a fixed test colour regardless
+  // of the toolbar's own selection.
+  //
+  // Bug fix — this used to call NativeInk.setBrushConfig() directly, racing the separate
+  // enable/disable effect above's own unawaited NativeInk.enableNativeInk() call: both fire in the
+  // same commit the moment a native-capable tool is first armed, and nothing guaranteed
+  // attachOverlay() (which constructs the overlay and assigns NativeInkPlugin's `overlay` field)
+  // finished before this effect's setBrushConfig reached native. When the race was lost,
+  // `overlay?.updateBrush(...)` silently no-op'd against a still-null overlay, permanently leaving
+  // the just-attached overlay on its hardcoded default brush (black) until the next colour change
+  // — explaining "native stroke is always black even when a different colour is selected" on the
+  // very first stroke of a session. Explicitly awaiting enableNativeInk() first — a cheap,
+  // idempotent no-op when the overlay already exists, since attachOverlay() returns immediately if
+  // `overlay != null` — closes the race with a real ordering guarantee instead of an assumption
+  // about the Capacitor bridge's own call ordering. This does NOT touch the separate attach/detach
+  // effect above or its cleanup, so switching tools still only attaches/detaches once; a colour/
+  // thickness/opacity change alone never detaches or recreates the overlay.
+  useEffect(() => {
+    if (!nativeInkShouldBeActive) return;
+
+    const applyBrushConfig = async () => {
+      try {
+        await NativeInk.enableNativeInk();
+        const dpr = window.devicePixelRatio || 1;
+        await NativeInk.setBrushConfig(toNativeBrushConfig(color, thickness, opacity, dpr));
+      } catch (err) {
+        console.error('NativeInk brush configuration failed', err);
+      }
+    };
+
+    void applyBrushConfig();
+  }, [nativeInkShouldBeActive, color, thickness, opacity]);
+
+  // Coordinate-mapping fix (this session's own forensic finding): tells the native side where the
+  // document's own scrollable content box currently sits on screen, so a finished native stroke's
+  // points are normalized against that SAME box the JS AnnotationLayer already uses — not this
+  // overlay's on-screen viewport bounds. Re-sent on mount, on resize (ResizeObserver), and whenever
+  // the scroll box scrolls (which moves the content box's own getBoundingClientRect() top/left).
+  // Not gated on nativeInkShouldBeActive: cheap to keep fresh, and avoids a stale/missing bounds
+  // report on the very first stroke right after a tool switch.
+  useEffect(() => {
+    if (!isNativeInkAvailable) return;
+    const content = contentRef.current;
+    const scrollBox = scrollBoxRef.current;
+    if (!content || !scrollBox) return;
+    function reportBounds() {
+      if (!content) return;
+      const rect = content.getBoundingClientRect();
+      NativeInk.setDocumentBounds({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        devicePixelRatio: window.devicePixelRatio || 1,
+      }).catch((err) => console.error('NativeInk.setDocumentBounds failed', err));
+    }
+    reportBounds();
+    const ro = new ResizeObserver(reportBounds);
+    ro.observe(content);
+    scrollBox.addEventListener('scroll', reportBounds, { passive: true });
+    return () => {
+      ro.disconnect();
+      scrollBox.removeEventListener('scroll', reportBounds);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, renderMode]);
 
   function handleCommitShape(shapeKind: ShapeKind, points: [NormalizedPoint, NormalizedPoint]) {
     const shape = createShapeAnnotation({ documentId, renderMode, shapeKind, color, thickness: Math.max(thickness, DEFAULT_SHAPE_THICKNESS), opacity: inkOpacity, points });
@@ -446,12 +584,13 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
           onSelectTool={setActiveTool}
           color={color}
           onSelectColor={setColor}
+          recentColors={recentColors}
           thickness={thickness}
           onChangeThickness={(t) => setThickness(Math.min(24, Math.max(1, Math.round(t))))}
           opacity={opacity}
           onChangeOpacity={setOpacity}
           penStyle={penStyle}
-          onSelectPenStyle={setPenStyle}
+          onSelectPenStyle={selectPenStyle}
           canUndo={canUndoHistory(history)}
           canRedo={canRedoHistory(history)}
           onUndo={handleUndo}

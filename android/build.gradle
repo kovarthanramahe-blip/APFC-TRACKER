@@ -9,6 +9,12 @@ buildscript {
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
         classpath 'com.google.gms:google-services:4.4.4'
+        // Phase 2 — Kotlin support was not previously configured anywhere in this project (no
+        // Kotlin files existed). 2.3.0 is the version Google's own AGP/Kotlin compatibility table
+        // documents against AGP 8.13 (the AGP version already pinned above) — see this session's
+        // architecture report for the exact source. Deliberately NOT the newer 2.4.x line, to stay
+        // inside the officially documented-compatible range without also bumping AGP.
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files

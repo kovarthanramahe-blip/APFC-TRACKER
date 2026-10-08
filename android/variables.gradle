@@ -1,5 +1,9 @@
 ext {
-    minSdkVersion = 24
+    // Phase 2 (native Android low-latency stylus ink) — raised from 24 to 29 because
+    // androidx.ink and androidx.graphics:graphics-core (LowLatencyCanvasView/front-buffer
+    // rendering) both require minSdk 29; see this session's "Architecture Report — minSdk 29 +
+    // Jetpack Ink" for the full rationale. Drops installability on Android 7/8/9 (API 24-28).
+    minSdkVersion = 29
     compileSdkVersion = 36
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'
