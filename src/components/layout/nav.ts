@@ -17,6 +17,8 @@ import {
   FileText,
   BookMarked,
   Target,
+  Sparkles,
+  Bot,
   type LucideIcon,
 } from 'lucide-react';
 import type { WorkspaceKind } from '../../lib/workspace';
@@ -49,9 +51,21 @@ export interface NavItem {
 //     see pages/Settings.tsx, which has no workspace gating at all), so it appears everywhere too.
 //   - UPSC CSE and PhD Research each get their own dashboard/content routes — never the generic `/`
 //     Dashboard, which is APFC's own page and renders nothing useful for another workspace.
+// Command Centre (Phase 14) — the one route every workspace's nav list shares verbatim (same `to`,
+// same label/icon): a short, workspace-agnostic "what should I do next?" view (lib/commandCentre.ts
+// + pages/CommandCentre.tsx), never a per-workspace variant of its own.
+const COMMAND_CENTRE_ITEM: NavItem = { to: '/command-centre', label: 'Command Centre', icon: Sparkles };
+
+// JARVIS (Phase 14) — the dedicated conversation surface (pages/JarvisChat.tsx), reachable from
+// every workspace's own nav exactly like Command Centre: same `to`/label/icon across all three
+// lists, never a per-workspace variant.
+const JARVIS_ITEM: NavItem = { to: '/jarvis', label: 'JARVIS', icon: Bot };
+
 const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
   apfc: [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+    COMMAND_CENTRE_ITEM,
+    JARVIS_ITEM,
     { to: '/syllabus', label: 'Syllabus', icon: ListChecks },
     { to: '/pyq', label: 'Question Bank', icon: BookOpenCheck },
     { to: '/pyq-test', label: 'PYQs', icon: FileQuestion },
@@ -65,6 +79,8 @@ const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
   ],
   upsc_cse: [
     { to: '/upsc-dashboard', label: 'UPSC CSE Dashboard', icon: Compass, end: true },
+    COMMAND_CENTRE_ITEM,
+    JARVIS_ITEM,
     { to: '/upsc-syllabus', label: 'UPSC CSE Syllabus', icon: ListTree },
     { to: '/upsc-pyq-test', label: 'UPSC CSE PYQs', icon: ClipboardCheck },
     { to: '/upsc-study-plan', label: 'Study Plan', icon: CalendarRange },
@@ -76,6 +92,8 @@ const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
   ],
   phd_research: [
     { to: '/phd-dashboard', label: 'PhD Dashboard', icon: GraduationCap, end: true },
+    COMMAND_CENTRE_ITEM,
+    JARVIS_ITEM,
     // `end: true` — '/phd-research' would otherwise also match (and highlight) on
     // '/phd-research/bibliography' since that path starts with it.
     { to: '/phd-research', label: 'Research Documents', icon: FileText, end: true },

@@ -1,0 +1,18 @@
+# JARVIS Phase 5 — minimal Supabase configuration, scoped to Edge Functions only.
+#
+# Deliberately NOT the full `supabase init` scaffold (db/auth/storage/realtime/analytics/etc
+# sections) — this phase's own brief is explicit: "initialize only what is required for Edge
+# Functions." A full local-dev config would assert opinions (ports, auth settings, storage
+# limits...) about parts of this project this phase has no business touching, and could conflict
+# with whatever the real linked Supabase project already has configured on its dashboard.
+#
+# For detailed configuration reference documentation, visit:
+# https://supabase.com/docs/guides/local-development/cli/config
+project_id = "apfc-tracker"
+
+[functions.jarvis-gateway]
+# Platform-level JWT verification stays ON — Supabase rejects a request with no/invalid user JWT
+# before this function's own code ever runs. Never disable this for convenience (see this
+# phase's own brief and supabase/functions/jarvis-gateway/index.ts's own header for the
+# defense-in-depth auth.getUser() check this function performs IN ADDITION to this platform check).
+verify_jwt = true

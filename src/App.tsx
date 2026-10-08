@@ -11,6 +11,8 @@ import { useNativeAuthBridge } from './lib/nativeAuth';
 import { RewardCelebration } from './components/RewardCelebration';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const CommandCentre = lazy(() => import('./pages/CommandCentre'));
+const JarvisChat = lazy(() => import('./pages/JarvisChat'));
 const Syllabus = lazy(() => import('./pages/Syllabus'));
 const UpscCseDashboard = lazy(() => import('./pages/UpscCseDashboard'));
 const UpscCseSyllabus = lazy(() => import('./pages/UpscCseSyllabus'));
@@ -55,6 +57,8 @@ export default function App() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/command-centre" element={<CommandCentre />} />
+          <Route path="/jarvis" element={<JarvisChat />} />
           <Route path="/syllabus" element={<Syllabus />} />
           <Route path="/upsc-dashboard" element={<UpscCseDashboard />} />
           <Route path="/upsc-syllabus" element={<UpscCseSyllabus />} />

@@ -189,6 +189,22 @@ describe('getMobileNavItemsForWorkspace — mobile bottom bar respects the activ
   });
 });
 
+describe('JARVIS (Phase 14) — reachable from every workspace, exactly like Command Centre', () => {
+  it('appears in all three workspace nav lists at /jarvis', () => {
+    for (const workspace of ['apfc', 'upsc_cse', 'phd_research'] as const) {
+      const items = getNavItemsForWorkspace(workspace);
+      expect(items.map((i) => i.to)).toContain('/jarvis');
+      expect(items.find((i) => i.to === '/jarvis')?.label).toBe('JARVIS');
+    }
+  });
+
+  it('is never part of the 5-item mobile bottom bar for any workspace (same precedent as Command Centre)', () => {
+    for (const workspace of ['apfc', 'upsc_cse', 'phd_research'] as const) {
+      expect(getMobileNavItemsForWorkspace(workspace).map((i) => i.to)).not.toContain('/jarvis');
+    }
+  });
+});
+
 describe('NAV_ITEMS — the deduplicated union across all three workspaces', () => {
   it('contains every distinct route from every workspace exactly once', () => {
     const allPaths = [...getNavItemsForWorkspace('apfc'), ...getNavItemsForWorkspace('upsc_cse'), ...getNavItemsForWorkspace('phd_research')].map((i) => i.to);

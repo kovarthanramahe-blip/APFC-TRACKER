@@ -6,6 +6,14 @@ ext {
     minSdkVersion = 29
     compileSdkVersion = 36
     targetSdkVersion = 36
+    // Phase 10 (JARVIS Android local AI runtime proof-of-integration) — the JNI bridge-validation
+    // stub's own native build (app/src/main/cpp). 27.3.13750724 is NDK r27d, the latest LTS
+    // release per developer.android.com/ndk/downloads/revision_history as researched for this
+    // phase (the newest overall stable is r29; r27d LTS was chosen deliberately, the same
+    // conservative-but-current reasoning this file's own Phase 2 Kotlin-version comment already
+    // used). NOT verified against a real NDK install in this session — no Android NDK/SDK is
+    // available in this execution environment (see native_llama_bridge.cpp's own header).
+    ndkVersion = "27.3.13750724"
     androidxActivityVersion = '1.11.0'
     androidxAppCompatVersion = '1.7.1'
     androidxCoordinatorLayoutVersion = '1.3.0'
