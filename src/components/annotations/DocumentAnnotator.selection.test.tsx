@@ -24,11 +24,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { getStroke } from 'perfect-freehand';
 import { useAppStore } from '../../lib/store';
 import { DEFAULT_WORKSPACE_ID } from '../../lib/workspace';
-import { createTextHighlight } from '../../lib/annotations';
+import { createTextHighlight, type NormalizedPoint, type InkAnnotation, type HighlighterInkAnnotation } from '../../lib/annotations';
 import { createTextAnchor } from '../../lib/textAnchor';
 import { DocumentAnnotator } from './DocumentAnnotator';
+import { drawLivePreviewStroke, drawStrokePath } from './AnnotationLayer';
+
+// Phase 8J — mocked so the tests below can assert exactly WHEN perfect-freehand's real,
+// expensive geometry computation runs (once per committed stroke, never per live-preview frame —
+// see strokeRendering.ts's and AnnotationLayer.tsx's drawLivePreviewStroke's own header comments)
+// without depending on perfect-freehand's actual output shape, which no test in this file checks.
+vi.mock('perfect-freehand', () => ({ getStroke: vi.fn(() => []) }));
 
 const DOC_ID = 'note:doc-selection-test';
 const FULL_TEXT = 'The quick brown fox jumps over the lazy dog near the riverbank.';
@@ -477,6 +485,284 @@ describe('AnnotationLayer — drawing/lasso/eraser still work after moving point
     } finally {
       cleanup();
     }
+  });
+
+  // Regression test (Phase 8G) — touch-action is a STATIC 'pan-y pinch-zoom' at all times (the
+  // Phase 8F dynamic 'none'-during-gesture mechanism was reverted: the browser/WebView locks in a
+  // pointer sequence's allowed-gesture determination at/before that sequence's first event dispatch,
+  // so a value changed from inside that same gesture's own pointerdown handler can never apply to
+  // it retroactively — see AnnotationLayer.tsx's own header comment). Suppressing an armed gesture
+  // from being stolen as a page pan instead relies entirely on preventDefault(), which must be
+  // called SYNCHRONOUSLY inside pointerdown for an armed tool — this is the one thing that actually
+  // has correct timing (a not-yet-committed gesture can still be cancelled by a synchronous
+  // preventDefault in the same dispatch), so it's what this test asserts directly.
+  it('preventDefault is called synchronously on pointerdown for an armed drawing tool, and touch-action stays static', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const penButton = findButtonByLabel(container, 'Pen (')!;
+      act(() => {
+        penButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      expect(wrapper.style.touchAction).toBe('pan-y pinch-zoom'); // static, never toggled
+
+      const down = pointerEvent('pointerdown', 10, 10, 'pen');
+      const preventDefaultSpy = vi.spyOn(down, 'preventDefault');
+      act(() => {
+        wrapper.dispatchEvent(down);
+      });
+      expect(preventDefaultSpy).toHaveBeenCalledTimes(1); // called synchronously within this same dispatch
+      expect(wrapper.style.touchAction).toBe('pan-y pinch-zoom'); // still static, unaffected by the gesture
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preventDefault is called synchronously on pointermove during an active S Pen stroke', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const penButton = findButtonByLabel(container, 'Pen (')!;
+      act(() => {
+        penButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      act(() => {
+        wrapper.dispatchEvent(pointerEvent('pointerdown', 10, 10, 'pen'));
+      });
+
+      const move = pointerEvent('pointermove', 60, 10, 'pen');
+      const preventDefaultSpy = vi.spyOn(move, 'preventDefault');
+      act(() => {
+        wrapper.dispatchEvent(move);
+      });
+      expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('preventDefault is never called for a touch pointerdown, even with a tool armed', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const penButton = findButtonByLabel(container, 'Pen (')!;
+      act(() => {
+        penButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      const down = pointerEvent('pointerdown', 10, 10, 'touch');
+      const preventDefaultSpy = vi.spyOn(down, 'preventDefault');
+      act(() => {
+        wrapper.dispatchEvent(down);
+      });
+      expect(preventDefaultSpy).not.toHaveBeenCalled(); // touch must reach native scroll/selection untouched
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Regression test (Phase 8I, updated Phase 8J) — the live-preview renderer (AnnotationLayer.tsx's
+  // drawLivePreviewStroke, a cheap polyline that never calls perfect-freehand — see
+  // strokeRendering.ts's own header) must NEVER cause any point to be dropped from what actually
+  // gets committed. A long, continuous gesture (hundreds of pointermove samples) must still commit
+  // with every single captured point intact — activePointsRef.current is never decimated or
+  // truncated for rendering purposes, only handed to a cheaper renderer while the gesture is active.
+  it('a long stroke with hundreds of samples still commits with EVERY captured point', () => {
+    const { container, cleanup } = renderAnnotator();
+    try {
+      const penButton = findButtonByLabel(container, 'Pen (')!;
+      act(() => {
+        penButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const wrapper = findWrapper(container);
+      const SAMPLE_COUNT = 300; // a long, continuous stroke
+      act(() => {
+        wrapper.dispatchEvent(pointerEvent('pointerdown', 0, 10, 'pen'));
+        for (let i = 1; i <= SAMPLE_COUNT; i++) {
+          wrapper.dispatchEvent(pointerEvent('pointermove', i, 10, 'pen'));
+        }
+        wrapper.dispatchEvent(pointerEvent('pointerup', SAMPLE_COUNT, 10, 'pen'));
+      });
+      const strokes = useAppStore.getState().annotations.filter((a) => a.type === 'ink');
+      expect(strokes).toHaveLength(1);
+      // 1 point from pointerdown + SAMPLE_COUNT points from pointermove — nothing decimated away.
+      expect(strokes[0].points.length).toBe(SAMPLE_COUNT + 1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Regression tests (Phase 8J) — root cause of "Document freehand writing is slow/laggy/unclear
+  // on real Android hardware while Notes stays smooth": perfect-freehand's getStroke() (real
+  // tangent/normal/outline computation per point) used to run every animation frame during an
+  // ACTIVE gesture, via the live-preview canvas — Phase 8I's point cap only bounded that per-frame
+  // cost, it never eliminated it, which physical-device testing on two separate Android devices
+  // confirmed was still too slow. The fix moves the live preview to its own cheap renderer
+  // (drawLivePreviewStroke — a plain stroked polyline, the same technique NoteEditorDialog.tsx's
+  // MiniInkCanvas already uses) and reserves getStroke() exclusively for the committed-canvas's
+  // one-time render on commit — see strokeRendering.ts's and AnnotationLayer.tsx's own
+  // header/doc comments for the full rationale.
+  //
+  // These exercise drawLivePreviewStroke/drawStrokePath directly (both exported from
+  // AnnotationLayer.tsx specifically so this is possible) against a fake CanvasRenderingContext2D,
+  // rather than through a full component render: this project's test environment (happy-dom) has no
+  // real Canvas 2D backend — canvas.getContext('2d') always returns null there — so neither
+  // renderer's own effect ever actually runs when a document is rendered end-to-end in a test, and
+  // an assertion built on that path would pass or fail for reasons unrelated to which renderer ran.
+  describe('live preview never uses the expensive perfect-freehand renderer', () => {
+    const getStrokeMock = vi.mocked(getStroke);
+
+    beforeEach(() => {
+      getStrokeMock.mockClear();
+    });
+
+    function fakeCtx() {
+      return {
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        closePath: vi.fn(),
+        moveTo: vi.fn(),
+        lineTo: vi.fn(),
+        fill: vi.fn(),
+        stroke: vi.fn(),
+      } as unknown as CanvasRenderingContext2D;
+    }
+
+    function inkStroke(points: NormalizedPoint[]): InkAnnotation {
+      return { id: 's1', documentId: DOC_ID, renderMode: 'raw', pageNumber: 1, studyTags: [], type: 'ink', penStyle: 'fine', color: '#000', thickness: 4, opacity: 1, points, createdAt: '', updatedAt: '' };
+    }
+
+    it('drawLivePreviewStroke draws every point as a plain polyline and never calls getStroke', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.1, pressure: 0.6 }, { x: 0.3, y: 0.1, pressure: 0.9 }, { x: 0.4, y: 0.1, pressure: 0.2 }];
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke(points), { width: 200, height: 100 });
+      expect(ctx.moveTo).toHaveBeenCalledTimes(1);
+      expect(ctx.lineTo).toHaveBeenCalledTimes(points.length - 1); // one segment per point after the first
+      expect(ctx.stroke).toHaveBeenCalledTimes(1);
+      expect(getStrokeMock).not.toHaveBeenCalled();
+    });
+
+    it('drawLivePreviewStroke handles a long stroke (hundreds of points) drawing every single one, still without calling getStroke', () => {
+      const SAMPLE_COUNT = 300;
+      const points: NormalizedPoint[] = Array.from({ length: SAMPLE_COUNT }, (_, i) => ({ x: i / SAMPLE_COUNT, y: 0.5 }));
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke(points), { width: 200, height: 100 });
+      // Every one of the 300 points reaches the canvas — nothing capped or decimated away.
+      expect(ctx.lineTo).toHaveBeenCalledTimes(SAMPLE_COUNT - 1);
+      expect(getStrokeMock).not.toHaveBeenCalled();
+    });
+
+    it('drawLivePreviewStroke derives its line width from the latest pressure sample, and never mutates the input points', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1, pressure: 0.1 }, { x: 0.2, y: 0.1, pressure: 1 }];
+      const snapshot = JSON.stringify(points);
+      const ctx = fakeCtx();
+      const stroke = inkStroke(points);
+      drawLivePreviewStroke(ctx, stroke, { width: 200, height: 100 });
+      expect(ctx.lineWidth).toBeGreaterThan(0);
+      expect(JSON.stringify(points)).toBe(snapshot);
+    });
+
+    it('drawLivePreviewStroke draws nothing for fewer than 2 points (a tap with no drag yet)', () => {
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke([{ x: 0.1, y: 0.1 }]), { width: 200, height: 100 });
+      expect(ctx.moveTo).not.toHaveBeenCalled();
+      expect(ctx.stroke).not.toHaveBeenCalled();
+    });
+
+    it('drawStrokePath — the COMMITTED-canvas renderer — is the one that calls getStroke, exactly once, with the complete point array', () => {
+      const SAMPLE_COUNT = 300;
+      const points: NormalizedPoint[] = Array.from({ length: SAMPLE_COUNT }, (_, i) => ({ x: i / SAMPLE_COUNT, y: 0.5, pressure: 0.5 }));
+      const ctx = fakeCtx();
+      drawStrokePath(ctx, inkStroke(points), { width: 200, height: 100 });
+      expect(getStrokeMock).toHaveBeenCalledTimes(1);
+      expect(getStrokeMock.mock.calls[0][0]).toHaveLength(SAMPLE_COUNT); // full fidelity, nothing decimated
+    });
+
+    it('drawStrokePath also renders a highlighter stroke via getStroke (the highlighter style preset), not the cheap preview path', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.1 }, { x: 0.3, y: 0.1 }];
+      const stroke: HighlighterInkAnnotation = { id: 'h1', documentId: DOC_ID, renderMode: 'raw', pageNumber: 1, studyTags: [], type: 'highlighterInk', color: '#facc15', thickness: 12, opacity: 0.4, points, createdAt: '', updatedAt: '' };
+      const ctx = fakeCtx();
+      drawStrokePath(ctx, stroke, { width: 200, height: 100 });
+      expect(getStrokeMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Regression tests (Phase 8K) — root cause found THIS phase: the Document canvas is sized to the
+  // FULL scrollable document (see DocumentAnnotator.tsx's scrollBoxClassName vs. the actual document
+  // content it wraps), often many times taller than the visible viewport — unlike MiniInkCanvas's
+  // small, bounded canvas. Even Phase 8J's cheap drawLivePreviewStroke, called with a full
+  // clearRect()+redraw of the ENTIRE accumulated stroke every animation frame, still touches a
+  // backing store that can be orders of magnitude larger than Notes' own on a long document. The fix
+  // (AnnotationLayer.tsx's drawActivePreview) now paints only the segment(s) added since the last
+  // frame — via drawLivePreviewStroke's `fromIndex` parameter — onto whatever the canvas already
+  // has, with no per-frame clearRect for ink/highlighter at all.
+  describe('drawLivePreviewStroke — incremental (fromIndex) live-preview drawing (Phase 8K)', () => {
+    function fakeCtx() {
+      return {
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        closePath: vi.fn(),
+        moveTo: vi.fn(),
+        lineTo: vi.fn(),
+        fill: vi.fn(),
+        stroke: vi.fn(),
+      } as unknown as CanvasRenderingContext2D;
+    }
+
+    function inkStroke(points: NormalizedPoint[]): InkAnnotation {
+      return { id: 's1', documentId: DOC_ID, renderMode: 'raw', pageNumber: 1, studyTags: [], type: 'ink', penStyle: 'fine', color: '#000', thickness: 4, opacity: 1, points, createdAt: '', updatedAt: '' };
+    }
+
+    it('with a fromIndex, draws only the new segment starting at that already-painted point, not the whole stroke again', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.1 }, { x: 0.3, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.5, y: 0.1 }];
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke(points), { width: 200, height: 100 }, 3);
+      expect(ctx.moveTo).toHaveBeenCalledTimes(1);
+      expect(ctx.moveTo).toHaveBeenCalledWith(0.4 * 200, 0.1 * 100); // starts at the already-painted point, index 3 (x=0.4)
+      expect(ctx.lineTo).toHaveBeenCalledTimes(1); // only the one new segment (index 3 -> 4)
+    });
+
+    it('draws nothing when fromIndex is already caught up with the latest point (no new samples this frame)', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.1 }];
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke(points), { width: 200, height: 100 }, 1);
+      expect(ctx.moveTo).not.toHaveBeenCalled();
+      expect(ctx.stroke).not.toHaveBeenCalled();
+    });
+
+    it('painting incrementally across several frames touches every point exactly once — same total segment count as one full-array call', () => {
+      const points: NormalizedPoint[] = Array.from({ length: 50 }, (_, i) => ({ x: i / 50, y: 0.5 }));
+      const incrementalCtx = fakeCtx();
+      let painted = 0;
+      // Mirrors drawActivePreview's own activePaintedCountRef bookkeeping across several simulated
+      // animation frames, including one frame with no new points at all (a duplicate rAF tick).
+      for (const frameEnd of [5, 5, 12, 30, 50]) {
+        drawLivePreviewStroke(incrementalCtx, inkStroke(points.slice(0, frameEnd)), { width: 200, height: 100 }, painted);
+        painted = frameEnd - 1;
+      }
+      const fullCtx = fakeCtx();
+      drawLivePreviewStroke(fullCtx, inkStroke(points), { width: 200, height: 100 }); // fromIndex 0 — everything at once
+      const incrementalLineToCount = (incrementalCtx.lineTo as ReturnType<typeof vi.fn>).mock.calls.length;
+      const fullLineToCount = (fullCtx.lineTo as ReturnType<typeof vi.fn>).mock.calls.length;
+      expect(incrementalLineToCount).toBe(fullLineToCount); // no point skipped, none drawn twice
+    });
+
+    it('never mutates the stroke\'s points regardless of fromIndex', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1, pressure: 0.2 }, { x: 0.2, y: 0.1, pressure: 0.9 }, { x: 0.3, y: 0.1, pressure: 0.5 }];
+      const snapshot = JSON.stringify(points);
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke(points), { width: 200, height: 100 }, 1);
+      expect(JSON.stringify(points)).toBe(snapshot);
+    });
+
+    it('omitting fromIndex still draws the whole stroke from the start (backward compatible default)', () => {
+      const points: NormalizedPoint[] = [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.1 }, { x: 0.3, y: 0.1 }];
+      const ctx = fakeCtx();
+      drawLivePreviewStroke(ctx, inkStroke(points), { width: 200, height: 100 });
+      expect(ctx.moveTo).toHaveBeenCalledWith(0.1 * 200, 0.1 * 100);
+      expect(ctx.lineTo).toHaveBeenCalledTimes(2);
+    });
   });
 });
 

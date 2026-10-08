@@ -53,7 +53,7 @@ describe('PhD Research Analytics — Study Activity Trend integration', () => {
   });
 
   it('accent resolution: PhD Research Analytics uses the violet accent', () => {
-    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-violet-600');
+    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-phd-600');
   });
 
   it('workspace isolation: a trend built from PhD Research studyLog never reflects activity logged under either other workspace', () => {

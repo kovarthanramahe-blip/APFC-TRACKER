@@ -153,9 +153,19 @@ describe('sanitizeAnnotation — ink/highlighterInk require usable geometry afte
     expect((sanitized as { opacity: number }).opacity).toBeGreaterThanOrEqual(0);
   });
 
-  it('defaults an invalid penStyle to "pen"', () => {
+  it('defaults an invalid penStyle to "fine"', () => {
     const sanitized = sanitizeAnnotation({ ...base, type: 'ink', penStyle: 'crayon', points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })!;
-    expect((sanitized as { penStyle: string }).penStyle).toBe('pen');
+    expect((sanitized as { penStyle: string }).penStyle).toBe('fine');
+  });
+
+  it('migrates a legacy "pen" penStyle (the old 3-style union) to "ballpoint"', () => {
+    const sanitized = sanitizeAnnotation({ ...base, type: 'ink', penStyle: 'pen', points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })!;
+    expect((sanitized as { penStyle: string }).penStyle).toBe('ballpoint');
+  });
+
+  it('migrates a legacy "fountain" penStyle (the old 3-style union) to "brush"', () => {
+    const sanitized = sanitizeAnnotation({ ...base, type: 'ink', penStyle: 'fountain', points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })!;
+    expect((sanitized as { penStyle: string }).penStyle).toBe('brush');
   });
 });
 

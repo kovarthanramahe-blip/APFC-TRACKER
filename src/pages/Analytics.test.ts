@@ -49,7 +49,7 @@ describe('APFC Analytics — Study Activity Trend integration', () => {
   });
 
   it('accent resolution: APFC Analytics uses the green accent, same as the dashboard', () => {
-    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-green-600');
+    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-apfc-600');
   });
 
   it('workspace isolation: a trend built from APFC studyLog never reflects activity logged under another workspace', () => {

@@ -38,6 +38,7 @@ import {
   MAX_OPACITY,
   MAX_POINTS_PER_STROKE,
   DEFAULT_PAGE_NUMBER,
+  isNativeInkCapableTool,
   type Annotation,
   type InkAnnotation,
   type HighlighterInkAnnotation,
@@ -57,7 +58,7 @@ describe('createInkAnnotation / createHighlighterInkAnnotation — create annota
     expect(s.renderMode).toBe('raw');
     expect(s.pageNumber).toBe(DEFAULT_PAGE_NUMBER);
     expect(s.type).toBe('ink');
-    expect(s.penStyle).toBe('pen');
+    expect(s.penStyle).toBe('fine');
     expect(s.color).toBe('#111');
     expect(s.thickness).toBe(3);
     expect(s.opacity).toBe(0.8);
@@ -242,7 +243,7 @@ describe('isMeaningfulStroke', () => {
 });
 
 function ink(id: string, documentId: string, renderMode: 'raw' | 'preview' = 'raw', points: { x: number; y: number }[] = [{ x: 0, y: 0 }, { x: 1, y: 1 }]): InkAnnotation {
-  return { id, documentId, renderMode, pageNumber: 1, studyTags: [], type: 'ink', penStyle: 'pen', color: '#000', thickness: 2, opacity: 1, points, createdAt: 't', updatedAt: 't' };
+  return { id, documentId, renderMode, pageNumber: 1, studyTags: [], type: 'ink', penStyle: 'fine', color: '#000', thickness: 2, opacity: 1, points, createdAt: 't', updatedAt: 't' };
 }
 
 describe('type guards — isTextAnchored / isGeometryAnnotation / isInkLike', () => {
@@ -475,5 +476,28 @@ describe('translatePoints', () => {
     const snapshot = JSON.stringify(points);
     translatePoints(points, 0.1, 0.1);
     expect(JSON.stringify(points)).toBe(snapshot);
+  });
+});
+
+describe('isNativeInkCapableTool — routing between the native Ink overlay and the JS annotation layer', () => {
+  it('treats "pen" as native-capable (covers all five PenStyle variants: fine/ballpoint/pencil/brush/marker are sub-selections of this one tool)', () => {
+    expect(isNativeInkCapableTool('pen')).toBe(true);
+  });
+
+  it('treats "highlighter" as native-capable', () => {
+    expect(isNativeInkCapableTool('highlighter')).toBe(true);
+  });
+
+  it('treats every non-handwriting tool as JS-only', () => {
+    expect(isNativeInkCapableTool('eraser')).toBe(false);
+    expect(isNativeInkCapableTool('lasso')).toBe(false);
+    expect(isNativeInkCapableTool('rectangle')).toBe(false);
+    expect(isNativeInkCapableTool('ellipse')).toBe(false);
+    expect(isNativeInkCapableTool('line')).toBe(false);
+    expect(isNativeInkCapableTool('arrow')).toBe(false);
+  });
+
+  it('treats no tool armed (null) as JS-only — native ink should not intercept the stylus when nothing is selected', () => {
+    expect(isNativeInkCapableTool(null)).toBe(false);
   });
 });

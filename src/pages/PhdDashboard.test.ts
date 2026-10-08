@@ -261,7 +261,7 @@ describe('PhD Research Dashboard — Study Progress Insights integration', () =>
 
   it('workspace accent: PhD Research resolves to the violet accent', () => {
     const accent = getWorkspaceAccent(useAppStore.getState().activeWorkspaceId);
-    expect(accent.bg).toBe('bg-violet-600');
+    expect(accent.bg).toBe('bg-phd-600');
   });
 
   it('workspace isolation: studyLog logged while PhD Research is active is invisible after switching to UPSC CSE, and never mixes with either other workspace', () => {
@@ -322,7 +322,7 @@ describe('PhD Research Dashboard — Study Activity Trend integration', () => {
   });
 
   it('accent resolution: PhD Research\'s trend uses the violet accent', () => {
-    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-violet-600');
+    expect(getWorkspaceAccent(useAppStore.getState().activeWorkspaceId).bg).toBe('bg-phd-600');
   });
 
   it('workspace isolation: a trend built from PhD Research studyLog never reflects activity logged under either other workspace', () => {

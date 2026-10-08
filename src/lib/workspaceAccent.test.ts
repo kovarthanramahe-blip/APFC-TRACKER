@@ -9,14 +9,14 @@ import { WORKSPACE_ACCENTS, getWorkspaceAccent } from './workspaceAccent';
 // actual exported config, which is exactly what every one of those consumers reads.
 
 describe('workspace accent — colour assignment', () => {
-  it('APFC uses the green family', () => {
+  it('APFC uses the apfc (green) family', () => {
     const accent = getWorkspaceAccent('apfc');
-    expect(accent.bg).toBe('bg-green-600');
-    expect(accent.text).toContain('green');
-    expect(accent.shadow).toContain('green');
-    expect(accent.bar).toContain('green');
-    expect(accent.gradientFrom).toContain('green');
-    expect(accent.gradientTo).toContain('green');
+    expect(accent.bg).toBe('bg-apfc-600');
+    expect(accent.text).toContain('apfc');
+    expect(accent.shadow).toContain('apfc');
+    expect(accent.bar).toContain('apfc');
+    expect(accent.gradientFrom).toContain('apfc');
+    expect(accent.gradientTo).toContain('apfc');
   });
 
   it('UPSC CSE reuses the app\'s existing default "brand" blue, not a second/new blue', () => {
@@ -27,23 +27,23 @@ describe('workspace accent — colour assignment', () => {
     expect(accent.bar).toContain('brand');
   });
 
-  it('PhD Research uses the violet family', () => {
+  it('PhD Research uses the phd (violet) family', () => {
     const accent = getWorkspaceAccent('phd_research');
-    expect(accent.bg).toBe('bg-violet-600');
-    expect(accent.text).toContain('violet');
-    expect(accent.shadow).toContain('violet');
-    expect(accent.bar).toContain('violet');
-    expect(accent.gradientFrom).toContain('violet');
-    expect(accent.gradientTo).toContain('violet');
+    expect(accent.bg).toBe('bg-phd-600');
+    expect(accent.text).toContain('phd');
+    expect(accent.shadow).toContain('phd');
+    expect(accent.bar).toContain('phd');
+    expect(accent.gradientFrom).toContain('phd');
+    expect(accent.gradientTo).toContain('phd');
   });
 });
 
 describe('workspace accent — Phase 6 ring/focusRing/hoverText/solidText tokens', () => {
   it('every workspace has the four new tokens, matching its own colour family', () => {
     for (const [id, family] of [
-      ['apfc', 'green'],
+      ['apfc', 'apfc'],
       ['upsc_cse', 'brand'],
-      ['phd_research', 'violet'],
+      ['phd_research', 'phd'],
     ] as const) {
       const accent = getWorkspaceAccent(id);
       expect(accent.ring).toContain(family);
@@ -62,7 +62,7 @@ describe('workspace accent — Phase 6 ring/focusRing/hoverText/solidText tokens
 });
 
 describe('workspace accent — never confusable with a semantic colour', () => {
-  it('APFC\'s workspace green is a different Tailwind colour family from the app\'s semantic "success" green (emerald) — see Primitives.tsx\'s Badge success tone', () => {
+  it('APFC\'s workspace green (apfc token family) is different from the app\'s semantic "success" green (emerald) — see Primitives.tsx\'s Badge success tone', () => {
     const accent = getWorkspaceAccent('apfc');
     expect(accent.bg).not.toContain('emerald');
     expect(accent.text).not.toContain('emerald');
@@ -110,8 +110,8 @@ describe('workspace accent — every workspace is covered, no stale/leftover acc
     // most recently resolved workspace.
     const greenAgain = getWorkspaceAccent('apfc');
     expect(greenAgain).toEqual(green);
-    expect(greenAgain.bg).toBe('bg-green-600');
+    expect(greenAgain.bg).toBe('bg-apfc-600');
     expect(blue.bg).toBe('bg-brand-600');
-    expect(violet.bg).toBe('bg-violet-600');
+    expect(violet.bg).toBe('bg-phd-600');
   });
 });
