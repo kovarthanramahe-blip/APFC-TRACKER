@@ -9,9 +9,9 @@ import { GENERATED_QUESTION_BANK } from '../data/generatedQuestionBank';
 import { useAppStore } from '../lib/store';
 import { cx, uuid, SUBJECT_COLORS } from '../lib/utils';
 import { Button, Card } from '../components/ui/Primitives';
-import type { MockTestAttempt } from '../lib/types';
+import type { MockTestAttempt, MockTestBlueprint } from '../lib/types';
 import { useQuestionSession } from '../lib/useQuestionSession';
-import type { QuestionResultStatus, QuestionSessionScoring } from '../lib/questionSessionEngine';
+import type { QuestionResultStatus, QuestionSessionResults, QuestionSessionScoring } from '../lib/questionSessionEngine';
 import { buildQuestionCatalog, type CatalogQuestion } from '../lib/questionCatalog';
 import { selectMockQuestionPool, APPROVED_GENERATED_INCLUSIVE_POLICY } from '../lib/mockQuestionPool';
 import { resolveTestingKeyAction } from '../lib/questionKeyboardShortcuts';
@@ -21,10 +21,63 @@ import { resolveTestingKeyAction } from '../lib/questionKeyboardShortcuts';
 // generic over CatalogQuestion rather than narrowed to 'practice_bank' only, since correctness
 // classification doesn't depend on provenance — which entries actually reach this function is a
 // selection-policy question, handled explicitly by lib/mockQuestionPool.ts (Stage 5C), not here.
-function mockQuestionStatus(q: CatalogQuestion, answers: Record<string, string | null>): QuestionResultStatus {
+export function mockQuestionStatus(q: CatalogQuestion, answers: Record<string, string | null>): QuestionResultStatus {
   const ans = answers[q.id];
   if (!ans) return 'unanswered';
   return ans === q.correctOptionId ? 'correct' : 'wrong';
+}
+
+/** The pure portion of handleSubmit's attempt construction, extracted verbatim (testability pass)
+ * so it can be covered without rendering the component. Takes exactly the values handleSubmit
+ * closed over, including `id`/`submittedAt` (previously computed inline via uuid()/new Date()):
+ * callers supply those so this function stays side-effect-free. No calculation, rounding,
+ * negative-marking, or aggregation rule changed from the original inline implementation. */
+export function buildMockTestAttempt(
+  blueprint: MockTestBlueprint,
+  questions: CatalogQuestion[],
+  answers: Record<string, string | null>,
+  results: QuestionSessionResults,
+  id: string,
+  startedAt: string,
+  submittedAt: string,
+): MockTestAttempt {
+  // Per-subject aggregation is Mock-Test-specific (the shared engine's results are subject-
+  // agnostic), so it stays a local loop here, reusing the same mockQuestionStatus classifier
+  // handed to the engine above — one classification rule, not two.
+  const subjectBreakdown: MockTestAttempt['subjectBreakdown'] = {};
+  questions.forEach((q) => {
+    const bd = subjectBreakdown[q.subject] ?? { correct: 0, wrong: 0, skipped: 0, total: 0 };
+    bd.total += 1;
+    const status = mockQuestionStatus(q, answers);
+    if (status === 'unanswered') bd.skipped += 1;
+    else if (status === 'correct') bd.correct += 1;
+    else bd.wrong += 1;
+    subjectBreakdown[q.subject] = bd;
+  });
+
+  // Same rounding the original implementation applied before persisting — the engine's raw
+  // `results.score` (correct*marksCorrect + wrong*marksWrong, mathematically identical to the
+  // original's correct*marksPerCorrect - wrong*marksPerCorrect*negativeMarkFraction) is rounded
+  // here exactly as before, so the persisted value is unchanged bit-for-bit.
+  const score = Math.round(results.score * 100) / 100;
+  const maxScore = results.total * blueprint.marksPerCorrect;
+
+  return {
+    id,
+    blueprintId: blueprint.id,
+    blueprintTitle: blueprint.title,
+    startedAt,
+    submittedAt,
+    durationMinutes: blueprint.durationMinutes,
+    questionIds: questions.map((q) => q.id),
+    answers,
+    correctCount: results.correct,
+    wrongCount: results.wrong,
+    skippedCount: results.unanswered,
+    score,
+    maxScore,
+    subjectBreakdown,
+  };
 }
 
 export default function MockTestRunner() {
@@ -149,43 +202,7 @@ export default function MockTestRunner() {
   function handleSubmit() {
     if (!session.trySubmit()) return;
 
-    // Per-subject aggregation is Mock-Test-specific (the shared engine's results are subject-
-    // agnostic), so it stays a local loop here, reusing the same mockQuestionStatus classifier
-    // handed to the engine above — one classification rule, not two.
-    const subjectBreakdown: MockTestAttempt['subjectBreakdown'] = {};
-    questions.forEach((q) => {
-      const bd = subjectBreakdown[q.subject] ?? { correct: 0, wrong: 0, skipped: 0, total: 0 };
-      bd.total += 1;
-      const status = mockQuestionStatus(q, answers);
-      if (status === 'unanswered') bd.skipped += 1;
-      else if (status === 'correct') bd.correct += 1;
-      else bd.wrong += 1;
-      subjectBreakdown[q.subject] = bd;
-    });
-
-    // Same rounding the original implementation applied before persisting — the engine's raw
-    // `results.score` (correct*marksCorrect + wrong*marksWrong, mathematically identical to the
-    // original's correct*marksPerCorrect - wrong*marksPerCorrect*negativeMarkFraction) is rounded
-    // here exactly as before, so the persisted value is unchanged bit-for-bit.
-    const score = Math.round(results.score * 100) / 100;
-    const maxScore = results.total * blueprint!.marksPerCorrect;
-
-    const attempt: MockTestAttempt = {
-      id: uuid(),
-      blueprintId: blueprint!.id,
-      blueprintTitle: blueprint!.title,
-      startedAt: startedAtRef.current,
-      submittedAt: new Date().toISOString(),
-      durationMinutes: blueprint!.durationMinutes,
-      questionIds: questions.map((q) => q.id),
-      answers,
-      correctCount: results.correct,
-      wrongCount: results.wrong,
-      skippedCount: results.unanswered,
-      score,
-      maxScore,
-      subjectBreakdown,
-    };
+    const attempt = buildMockTestAttempt(blueprint!, questions, answers, results, uuid(), startedAtRef.current, new Date().toISOString());
     addAttempt(attempt);
     navigate(`/mock-tests/result/${attempt.id}`, { replace: true });
   }
@@ -318,7 +335,14 @@ export default function MockTestRunner() {
       <Card className="hidden lg:block p-4 h-fit sticky top-24">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Navigator</p>
-          <button onClick={() => confirm('Submit the test now?') && handleSubmit()} className="text-slate-400 hover:text-rose-500">
+          {/* Accessibility pass — this icon-only button had no accessible name at all; a screen
+              reader announced it as a bare "button" on an important exam control. */}
+          <button
+            onClick={() => confirm('Submit the test now?') && handleSubmit()}
+            aria-label="Submit test"
+            title="Submit test"
+            className="text-slate-400 hover:text-rose-500"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -330,8 +354,14 @@ export default function MockTestRunner() {
               <button
                 key={qq.id}
                 onClick={() => session.goToQuestion(i)}
+                // Accessibility pass — bumped from h-8/w-8 (32px) to h-9/w-9 (36px), the largest
+                // step that still fits 5-across inside this card's actual available width (260px
+                // column − 32px Card padding − 32px of grid-cols-5's own gap-2 = 196px ÷ 5 ≈ 39px
+                // max per button) without touching the grid itself. The number's own font size
+                // (text-xs) is unchanged, so the tap target grows while the digit stays visually
+                // compact, same as the rest of this navigator's density.
                 className={cx(
-                  'relative h-8 w-8 rounded-lg text-xs font-semibold transition-colors',
+                  'relative h-9 w-9 rounded-lg text-xs font-semibold transition-colors',
                   isCurrent
                     ? 'bg-brand-600 text-white'
                     : answered

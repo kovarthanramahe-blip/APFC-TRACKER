@@ -15,6 +15,14 @@
 //
 // Same deterministic discipline as lib/upscCseStudyTask.ts and lib/revisionQueue.ts: no
 // Date.now()/new Date().toISOString() calls in here — every timestamp is supplied by the caller.
+//
+// Shared Planning Utilities migration (first controlled step) — overdueMicroTargets/
+// upcomingMicroTargets/countMicroTargetsByStatus/setMicroTargetStatus below are now thin wrappers
+// over lib/planSource.ts's already-tested shared functions, whose semantics were verified
+// identical to these four before migrating. Every public signature, return type, ordering,
+// unknown-id behaviour, and completedAt behaviour is unchanged — see each function's own comment.
+// updateMicroTarget and every other function in this file are deliberately untouched.
+import { overdueItems, upcomingItems, countByStatus, setStatusWithTimestamp } from './planSource';
 
 export type MicroTargetStatus = 'pending' | 'in_progress' | 'completed';
 export type MicroTargetPriority = 'low' | 'medium' | 'high';
@@ -97,9 +105,13 @@ export function updateMicroTarget(targets: readonly MicroTarget[], id: string, u
 }
 
 /** Returns a NEW array with the matching target's status set — completedAt is stamped with `now`
- * moving to 'completed', cleared reverting to pending/in_progress. Never mutates `targets`. */
+ * moving to 'completed', cleared reverting to pending/in_progress. Never mutates `targets`. An id
+ * that doesn't exist is a silent no-op (matches lib/planSource.ts's own documented convention,
+ * identical to this function's own prior behaviour). Thin wrapper over the shared
+ * setStatusWithTimestamp — MicroTarget already structurally satisfies PlannableItem (its optional
+ * `date` field is simply never present/read here). */
 export function setMicroTargetStatus(targets: readonly MicroTarget[], id: string, status: MicroTargetStatus, now: string): MicroTarget[] {
-  return targets.map((t) => (t.id === id ? { ...t, status, completedAt: status === 'completed' ? now : undefined } : t));
+  return setStatusWithTimestamp<MicroTargetStatus, MicroTarget>(targets, id, status, now);
 }
 
 export function deleteMicroTarget(targets: readonly MicroTarget[], id: string): MicroTarget[] {
@@ -111,18 +123,27 @@ export function activeMicroTargets(targets: readonly MicroTarget[]): MicroTarget
 }
 
 /** Active (pending/in_progress) targets whose targetDate has already passed `today` — a target
- * with no targetDate is never overdue. */
+ * with no targetDate is never overdue. Thin wrapper over the shared overdueItems: MicroTarget's
+ * date field is named `targetDate` (not planSource's generic `date`), so a locally-scoped,
+ * read-only view with that one field renamed is built just for the shared call, then the ORIGINAL
+ * target objects (never the renamed view) are returned, in their original relative order —
+ * overdueItems itself never sorts, so this preserves this function's own prior ordering exactly. */
 export function overdueMicroTargets(targets: readonly MicroTarget[], today: string): MicroTarget[] {
-  return targets.filter((t) => t.status !== 'completed' && t.targetDate !== undefined && t.targetDate < today);
+  const withDate = targets.map((t) => ({ ...t, date: t.targetDate }));
+  const overdueIds = new Set(overdueItems(withDate, today).map((t) => t.id));
+  return targets.filter((t) => overdueIds.has(t.id));
 }
 
 /** Active targets with a targetDate today or in the future, soonest first — a target with no
- * targetDate is never "upcoming" (it has nothing to be soon relative to). */
+ * targetDate is never "upcoming" (it has nothing to be soon relative to). Thin wrapper over the
+ * shared upcomingItems, with the same targetDate->date rename as overdueMicroTargets above; the
+ * shared function's own date-ascending sort + optional limit is applied first, and each result is
+ * then mapped back to its ORIGINAL target object by id, preserving that exact sorted order. */
 export function upcomingMicroTargets(targets: readonly MicroTarget[], today: string, limit?: number): MicroTarget[] {
-  const upcoming = targets
-    .filter((t) => t.status !== 'completed' && t.targetDate !== undefined && t.targetDate >= today)
-    .sort((a, b) => a.targetDate!.localeCompare(b.targetDate!));
-  return limit !== undefined ? upcoming.slice(0, limit) : upcoming;
+  const withDate = targets.map((t) => ({ ...t, date: t.targetDate }));
+  const sorted = upcomingItems(withDate, today, limit);
+  const byId = new Map(targets.map((t) => [t.id, t]));
+  return sorted.map((t) => byId.get(t.id)!);
 }
 
 /** Completed targets, most recently completed first — targets with no completedAt (shouldn't occur
@@ -141,12 +162,13 @@ export interface MicroTargetCounts {
   completed: number;
 }
 
+/** Thin wrapper over the shared countByStatus, which only returns keys for statuses that actually
+ * occurred (no zero-fill, since it must stay generic over any domain's status union) — this
+ * function's own contract has always been all three keys present, zero-filled, so that's restored
+ * here explicitly rather than changed. */
 export function countMicroTargetsByStatus(targets: readonly MicroTarget[]): MicroTargetCounts {
-  return {
-    pending: targets.filter((t) => t.status === 'pending').length,
-    in_progress: targets.filter((t) => t.status === 'in_progress').length,
-    completed: targets.filter((t) => t.status === 'completed').length,
-  };
+  const counts = countByStatus<MicroTargetStatus>(targets);
+  return { pending: counts.pending ?? 0, in_progress: counts.in_progress ?? 0, completed: counts.completed ?? 0 };
 }
 
 export function microTargetsForContext(targets: readonly MicroTarget[], contextId: string): MicroTarget[] {

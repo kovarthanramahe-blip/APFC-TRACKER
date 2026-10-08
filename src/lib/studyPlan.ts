@@ -12,6 +12,7 @@ import type { SyllabusSubject } from './types';
 import { computeUnifiedTopicStatus, type UnifiedTopicStatus, type TopicStatus } from './topicStatus';
 import type { PyqPerformanceSnapshot } from './pyqPerformance';
 import type { WorkspaceKind } from './workspace';
+import { getLocalDateString } from './utils';
 
 // --- Config ---------------------------------------------------------------
 // 0 = Sunday .. 6 = Saturday, matching JS Date#getDay() — no new day-numbering convention invented.
@@ -120,7 +121,12 @@ export function calculatePlanCapacity(config: StudyPlanConfig): PlanCapacity {
   const cursor = new Date(start);
   for (let i = 0; i < totalCalendarDays; i++) {
     if (studyWeekdaySet.has(cursor.getDay() as WeekdayIndex)) {
-      studyDayDates.push(cursor.toISOString().slice(0, 10));
+      // Bug fix — cursor is a LOCAL-time Date (parseDate/setDate both operate in local time);
+      // cursor.toISOString() converts to UTC, which silently reports the PREVIOUS calendar day
+      // for any positive-offset timezone (e.g. IST, UTC+5:30) since local midnight is still the
+      // previous day in UTC. getLocalDateString reads cursor's own local getters instead, so the
+      // date-only "yyyy-mm-dd" values this module works in are never shifted by UTC conversion.
+      studyDayDates.push(getLocalDateString(cursor));
     }
     cursor.setDate(cursor.getDate() + 1);
   }

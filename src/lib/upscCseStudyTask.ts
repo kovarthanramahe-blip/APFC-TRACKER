@@ -9,6 +9,17 @@
 // completedAt) is untouched; the Study Plan's own richer fields (syllabus linkage, priority,
 // notes, in_progress status) are all OPTIONAL additions a quick-add task simply never sets.
 import type { MicroTargetPriority } from './microTarget';
+import { overdueItems, upcomingItems, countByStatus, setStatusWithTimestamp } from './planSource';
+
+// Shared Planning Utilities migration (second controlled step, after PhD) —
+// overdueStudyTasks/upcomingStudyTasks/countStudyTasksByStatus/setUpscCseStudyTaskStatus below are
+// now thin wrappers over lib/planSource.ts's already-tested shared functions, whose semantics were
+// verified identical to these four before migrating. Every public signature, return type,
+// ordering, unknown-id behaviour, and completedAt behaviour is unchanged — see each function's own
+// comment. UpscCseStudyTask's `date` field is already named `date` (unlike PhD's MicroTarget,
+// which needed a targetDate->date rename view), so these call the shared functions directly on the
+// real array, with no adapter view needed. updateUpscCseStudyTask and every other function in this
+// file are deliberately untouched.
 
 export type UpscCseStudyTaskStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -87,14 +98,15 @@ export function createUpscCseStudyTask(input: CreateUpscCseStudyTaskInput, id: s
 /** Returns a NEW array with the matching task's status set — completedAt is stamped with `now`
  * when moving to 'completed', and cleared when reverting to a non-completed status. Never mutates
  * `tasks`. An id that doesn't exist in `tasks` is a no-op (returns an equivalent array), never an
- * error. */
+ * error. Thin wrapper over the shared setStatusWithTimestamp — UpscCseStudyTask already
+ * structurally satisfies PlannableItem. */
 export function setUpscCseStudyTaskStatus(
   tasks: readonly UpscCseStudyTask[],
   id: string,
   status: UpscCseStudyTaskStatus,
   now: string,
 ): UpscCseStudyTask[] {
-  return tasks.map((t) => (t.id === id ? { ...t, status, completedAt: status === 'completed' ? now : undefined } : t));
+  return setStatusWithTimestamp<UpscCseStudyTaskStatus, UpscCseStudyTask>(tasks, id, status, now);
 }
 
 export type UpdateUpscCseStudyTaskFields = Partial<
@@ -120,15 +132,16 @@ export function tasksForDate(tasks: readonly UpscCseStudyTask[], date: string): 
   return tasks.filter((t) => t.date === date);
 }
 
-/** Active (pending/in_progress) tasks whose planned date has already passed `today`. */
+/** Active (pending/in_progress) tasks whose planned date has already passed `today`. Thin wrapper
+ * over the shared overdueItems — no sorting, matching this function's own prior behaviour. */
 export function overdueStudyTasks(tasks: readonly UpscCseStudyTask[], today: string): UpscCseStudyTask[] {
-  return tasks.filter((t) => t.status !== 'completed' && t.date < today);
+  return overdueItems<UpscCseStudyTaskStatus, UpscCseStudyTask>(tasks, today);
 }
 
-/** Active tasks planned today or later, soonest first. */
+/** Active tasks planned today or later, soonest first. Thin wrapper over the shared upcomingItems
+ * — same date-ascending sort and optional limit as this function's own prior behaviour. */
 export function upcomingStudyTasks(tasks: readonly UpscCseStudyTask[], today: string, limit?: number): UpscCseStudyTask[] {
-  const upcoming = tasks.filter((t) => t.status !== 'completed' && t.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-  return limit !== undefined ? upcoming.slice(0, limit) : upcoming;
+  return upcomingItems<UpscCseStudyTaskStatus, UpscCseStudyTask>(tasks, today, limit);
 }
 
 export interface UpscCseStudyTaskCounts {
@@ -137,12 +150,13 @@ export interface UpscCseStudyTaskCounts {
   completed: number;
 }
 
+/** Thin wrapper over the shared countByStatus, which only returns keys for statuses that actually
+ * occurred (no zero-fill, since it must stay generic over any domain's status union) — this
+ * function's own contract has always been all three keys present, zero-filled, so that's restored
+ * here explicitly rather than changed. */
 export function countStudyTasksByStatus(tasks: readonly UpscCseStudyTask[]): UpscCseStudyTaskCounts {
-  return {
-    pending: tasks.filter((t) => t.status === 'pending').length,
-    in_progress: tasks.filter((t) => t.status === 'in_progress').length,
-    completed: tasks.filter((t) => t.status === 'completed').length,
-  };
+  const counts = countByStatus<UpscCseStudyTaskStatus>(tasks);
+  return { pending: counts.pending ?? 0, in_progress: counts.in_progress ?? 0, completed: counts.completed ?? 0 };
 }
 
 /** Most recently completed tasks first (by completedAt) — used for a dashboard's "recent activity"
