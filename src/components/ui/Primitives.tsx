@@ -308,7 +308,7 @@ export function StatCard({
     <Card className={cx('p-4', className)}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+          <p className="break-words text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
           <p className="mt-1 font-display text-xl font-bold text-slate-900 dark:text-white">{value}</p>
         </div>
         {Icon && (

@@ -128,6 +128,7 @@ export default function PYQTest() {
   const [searchParams] = useSearchParams();
   const autoStartWeakTopicsRef = useRef(false);
   const autoStartRepeatedMistakesRef = useRef(false);
+  const autoStartDueRevisionRef = useRef(false);
 
   // Phase 6 — Competitive Exam Intelligence: /pyq-test?topicId=... (pages/Syllabus.tsx's new
   // "Practice PYQs" entry point) pre-selects that topic filter, read once on mount exactly like
@@ -427,6 +428,20 @@ export default function PYQTest() {
     if (repeatedMistakePracticeIds.length > 0) practiceRepeatedMistakes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, repeatedMistakePracticeIds]);
+
+  // /pyq-test?mode=due_revision (Phase 17 — Revision OS) — mirrors ?mode=weak_topics/
+  // ?mode=repeated_mistakes's own auto-start effects exactly: launches the EXISTING due-revision
+  // session (startRevision(), no override — the same session the page's own "Revise Now" button
+  // already starts) so Revision OS's "Start Revision" action is a real, one-click deep link rather
+  // than landing on this page and requiring a second click. If there's nothing due, this does
+  // nothing and the user lands on the select screen, same as every other auto-start mode.
+  useEffect(() => {
+    if (autoStartDueRevisionRef.current) return;
+    if (searchParams.get('mode') !== 'due_revision') return;
+    autoStartDueRevisionRef.current = true;
+    if (dueRevisionItems.length > 0) startRevision();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, dueRevisionItems]);
 
   function checkRevisionAnswer() {
     const q = reviseQuestions[reviseIndex];

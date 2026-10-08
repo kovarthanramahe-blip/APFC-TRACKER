@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target, CheckCircle2, CircleDashed, Trophy } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
@@ -9,10 +9,11 @@ import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { computePyqPerformance } from '../lib/pyqPerformance';
 import { computeUnifiedTopicStatus, MIN_PYQ_ATTEMPTS_FOR_SIGNAL, WEAK_PYQ_ACCURACY_THRESHOLD } from '../lib/topicStatus';
+import { computeSyllabusOverview } from '../lib/syllabusOS';
 import { getTopicCounts } from '../lib/pyqFilters';
 import { countNotesByTopic } from '../lib/noteOrganization';
 import { SUBJECT_COLORS, cx } from '../lib/utils';
-import { Card, ProgressBar, Button, PageHeader, WorkspaceComingSoon, ProgressRing } from '../components/ui/Primitives';
+import { Card, ProgressBar, Button, Badge, StatCard, PageHeader, WorkspaceComingSoon, ProgressRing } from '../components/ui/Primitives';
 
 // Multi-Workspace OS, Stage 3B-1 — per-workspace copy for the parts of the page that used to
 // hardcode APFC's own wording. Structural/behavioural logic below stays workspace-generic
@@ -61,6 +62,12 @@ export default function Syllabus() {
     [topicStatusById],
   );
 
+  // Phase 18 — Syllabus OS: a thin, pure read of the SAME topicStatusById this page already
+  // computes (see lib/syllabusOS.ts's own header) for the overview row below. Not a second
+  // source of truth — overview.completedCount/weakCount are always consistent with doneTopics/
+  // needsRevisionTopicIds above since both derive from the same computeUnifiedTopicStatus() call.
+  const overview = useMemo(() => computeSyllabusOverview([...topicStatusById.values()]), [topicStatusById]);
+
   // Phase 6 — Competitive Exam Intelligence: how many PYQs exist in the bank for each topic
   // (historical coverage, independent of whether the user has attempted any of them) — reuses
   // lib/pyqFilters.ts's existing getTopicCounts verbatim (the same aggregation PYQTest.tsx's own
@@ -80,6 +87,10 @@ export default function Syllabus() {
 
   const [openIds, setOpenIds] = useState<string[]>(() => (deepLinkSubjectId ? [deepLinkSubjectId] : syllabus[0] ? [syllabus[0].id] : []));
   const [query, setQuery] = useState('');
+  // Phase 18 — Syllabus OS: a lightweight toggle over the SAME needsRevisionTopicIds set already
+  // computed above, never a new weakness rule. Auto-expands every subject with a weak topic so
+  // turning the toggle on doesn't leave the user staring at a wall of collapsed accordions.
+  const [weakOnly, setWeakOnly] = useState(false);
   const highlightedRef = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
@@ -96,15 +107,31 @@ export default function Syllabus() {
   const overallPct = totalTopics ? Math.round((doneTopics / totalTopics) * 100) : 0;
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return syllabus;
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
     return syllabus
       .map((subj) => ({
         ...subj,
-        topics: subj.topics.filter((t) => t.title.toLowerCase().includes(q) || subj.title.toLowerCase().includes(q)),
+        topics: subj.topics.filter((t) => {
+          if (weakOnly && !needsRevisionTopicIds.has(t.id)) return false;
+          if (!q) return true;
+          return t.title.toLowerCase().includes(q) || subj.title.toLowerCase().includes(q);
+        }),
       }))
       .filter((subj) => subj.topics.length > 0);
-  }, [syllabus, query]);
+  }, [syllabus, query, weakOnly, needsRevisionTopicIds]);
+
+  // Weak-only mode auto-expands every subject that has a surviving weak topic, otherwise the
+  // accordion stays collapsed and the toggle appears to do nothing.
+  useEffect(() => {
+    if (!weakOnly) return;
+    setOpenIds((prev) => {
+      const weakSubjectIds = filtered.map((s) => s.id);
+      const merged = new Set(prev);
+      for (const id of weakSubjectIds) merged.add(id);
+      return [...merged];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weakOnly]);
 
   // Multi-Workspace OS, Stage 3B-1 — a workspace's own syllabus (not just "is it apfc") decides
   // whether this page has real content to show. Today only 'apfc' and 'upsc_cse' resolve to a
@@ -150,17 +177,55 @@ export default function Syllabus() {
         }
       />
 
-      <div className="mb-5 relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search topics or subjects…"
+      {/* lg: not sm: — same tablet-width StatCard label-wrapping lesson as CommandCentre.tsx's own
+          grids (see that file's own comment): at ~800px viewport this page's real column width
+          (minus the sidebar) is still too narrow at the 640px sm: breakpoint for 4 StatCards with
+          longer labels like "COMPLETED"/"REMAINING" without wrapping. */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon={CheckCircle2} label="Completed" value={`${overview.completedCount}`} accentClassName="text-success-600 dark:text-success-400" />
+        <StatCard icon={CircleDashed} label="Remaining" value={`${overview.remainingCount}`} accentClassName="text-slate-500 dark:text-slate-400" />
+        {overview.weakCount > 0 ? (
+          // Syllabus <-> Revision OS integration (Phase 18): a weak area here means a topic the
+          // Leitner engine already schedules for revision (lib/pyqFilters's "ever answered
+          // incorrectly" eligibility) — a real, already-derivable link, not an invented one. Clicking
+          // goes straight to Revision OS rather than duplicating its interface here.
+          <Link to="/revision" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-focus rounded-2xl" title="Open Revision OS">
+            <StatCard icon={AlertTriangle} label="Weak areas" value={`${overview.weakCount}`} accentClassName="text-danger-600 dark:text-danger-400" className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60" />
+          </Link>
+        ) : (
+          <StatCard icon={AlertTriangle} label="Weak areas" value="0" accentClassName="text-danger-600 dark:text-danger-400" />
+        )}
+        <StatCard icon={Trophy} label="Overall" value={`${overview.completionPct}%`} accentClassName={accent.solidText} />
+      </div>
+
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search topics or subjects…"
+            className={cx(
+              'w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2',
+              accent.focusRing,
+            )}
+          />
+        </div>
+        <button
+          onClick={() => setWeakOnly((prev) => !prev)}
+          aria-pressed={weakOnly}
+          disabled={overview.weakCount === 0}
           className={cx(
-            'w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2',
-            accent.focusRing,
+            'flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            weakOnly
+              ? 'border-danger-300 bg-danger-50 text-danger-700 dark:border-danger-500/30 dark:bg-danger-500/10 dark:text-danger-300'
+              : 'border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/60',
           )}
-        />
+        >
+          <AlertTriangle className="h-4 w-4" />
+          Weak areas only
+          {overview.weakCount > 0 && <Badge tone={weakOnly ? 'danger' : 'neutral'}>{overview.weakCount}</Badge>}
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -249,11 +314,10 @@ export default function Syllabus() {
                                 </span>
                               </button>
                               {needsRevisionTopicIds.has(topic.id) && (
-                                <span
-                                  title="Covered, but recent PYQ accuracy on this topic is weak — worth revising"
-                                  className="shrink-0 rounded-lg p-2 text-amber-500 dark:text-amber-400"
-                                >
-                                  <AlertTriangle className="h-4 w-4" />
+                                <span title="Covered, but recent PYQ accuracy on this topic is weak — worth revising" className="shrink-0">
+                                  <Badge tone="danger" className="flex items-center gap-1">
+                                    <AlertTriangle className="h-3 w-3" /> Weak
+                                  </Badge>
                                 </span>
                               )}
                               {/* Phase 6 — Competitive Exam Intelligence: PYQ coverage + performance for
@@ -263,18 +327,15 @@ export default function Syllabus() {
                                   only shown when the bank genuinely has questions for this topic, and
                                   the accuracy badge only once there is enough real attempt data to mean
                                   anything (same MIN_PYQ_ATTEMPTS_FOR_SIGNAL threshold the needs_revision
-                                  warning above already uses). */}
+                                  warning above already uses). Phase 18 — rendered via the shared Badge
+                                  primitive (Phase 15 success/warning tokens) instead of raw emerald/
+                                  amber classes, so colour is never the only signal (the % text and the
+                                  "Weak" badge above both carry it too). */}
                               {hasPerformanceSignal && status && (
-                                <span
-                                  title={`${status.pyqAttempted} PYQ${status.pyqAttempted === 1 ? '' : 's'} attempted, ${status.pyqAccuracy!.toFixed(0)}% accuracy`}
-                                  className={cx(
-                                    'shrink-0 rounded-lg px-2 py-1 text-xs font-semibold tabular-nums',
-                                    status.pyqAccuracy! >= WEAK_PYQ_ACCURACY_THRESHOLD
-                                      ? 'text-emerald-600 dark:text-emerald-400'
-                                      : 'text-amber-600 dark:text-amber-400',
-                                  )}
-                                >
-                                  {status.pyqAccuracy!.toFixed(0)}%
+                                <span title={`${status.pyqAttempted} PYQ${status.pyqAttempted === 1 ? '' : 's'} attempted, ${status.pyqAccuracy!.toFixed(0)}% accuracy`} className="shrink-0">
+                                  <Badge tone={status.pyqAccuracy! >= WEAK_PYQ_ACCURACY_THRESHOLD ? 'success' : 'warning'} className="tabular-nums">
+                                    {status.pyqAccuracy!.toFixed(0)}%
+                                  </Badge>
                                 </span>
                               )}
                               {pyqCount > 0 && (
@@ -310,7 +371,9 @@ export default function Syllabus() {
           );
         })}
         {filtered.length === 0 && (
-          <div className="py-16 text-center text-sm text-slate-400">No topics match "{query}".</div>
+          <div className="py-16 text-center text-sm text-slate-400">
+            {weakOnly && !query.trim() ? 'No weak areas right now — nice work.' : `No topics match "${query}".`}
+          </div>
         )}
       </div>
 

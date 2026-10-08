@@ -111,12 +111,15 @@ describe('generateUpNextItems — empty/all-caught-up state', () => {
 });
 
 describe('generateUpNextItems — APFC item composition', () => {
-  it('surfaces a due-for-revision item using the real revisionQueue/pyqFilters engines, with the existing /pyq-test route', () => {
+  it('surfaces a due-for-revision item using the real revisionQueue/pyqFilters engines, routed into Revision OS (Phase 17)', () => {
     const dueQueue: RevisionQueue = { q1: { pyqId: 'q1', box: 1, dueDate: '2026-09-20', lastReviewedDate: '2026-09-10', reviewCount: 1 } };
     const items = generateUpNextItems(baseInput({ apfc: emptyApfc({ bookmarkedPyqIds: ['q1'], revisionQueue: dueQueue }) }));
     const apfcItems = items.filter((i) => i.workspaceId === 'apfc');
     expect(apfcItems).toHaveLength(1);
-    expect(apfcItems[0]).toMatchObject({ id: 'apfc-revision-due', actionHref: '/pyq-test', actionLabel: 'Revise Now' });
+    // Phase 17 — Revision OS (pages/Revision.tsx) is now the real home for "what's due", which
+    // itself launches the same /pyq-test?mode=due_revision session this item used to link to
+    // directly.
+    expect(apfcItems[0]).toMatchObject({ id: 'apfc-revision-due', actionHref: '/revision', actionLabel: 'Revise Now' });
     expect(apfcItems[0].title).toContain('1 PYQ');
   });
 
@@ -386,9 +389,64 @@ describe('generateUpNextItems — existing actionHref preservation', () => {
         }),
       }),
     );
-    const knownRoutes = [/^\/pyq-test/, /^\/upsc-syllabus/, /^\/upsc-pyq-test/, /^\/repository/, /^\/phd-plan$/, /^\/phd-research$/, /^\/phd-research\/bibliography$/];
+    const knownRoutes = [/^\/pyq-test/, /^\/revision$/, /^\/upsc-syllabus/, /^\/upsc-pyq-test/, /^\/repository/, /^\/phd-plan$/, /^\/phd-research$/, /^\/phd-research\/bibliography$/];
     for (const item of items) {
       expect(knownRoutes.some((re) => re.test(item.actionHref))).toBe(true);
     }
+  });
+});
+
+describe('generateUpNextItems — kind (Phase 16 JARVIS Priority Panel categorisation)', () => {
+  it('tags APFC revision-due and PhD overdue-targets as warning, everything else as recommendation/action, never leaving an item untagged', () => {
+    const dueQueue: RevisionQueue = { q1: { pyqId: 'q1', box: 1, dueDate: '2026-09-20', lastReviewedDate: '2026-09-10', reviewCount: 1 } };
+    const items = generateUpNextItems(
+      baseInput({
+        apfc: emptyApfc({ bookmarkedPyqIds: ['q1'], revisionQueue: dueQueue }),
+        upscCse: emptyUpscCse(),
+        phdResearch: emptyPhd({
+          microTargets: [microTarget({ id: 'overdue1', status: 'pending', targetDate: '2026-09-01' })],
+          importedContent: [importedContent({ id: 'doc1', contentType: 'research_document', metadata: { readingStatus: 'unread' } })],
+        }),
+      }),
+    );
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) expect(item.kind).toBeDefined();
+
+    expect(items.find((i) => i.id === 'apfc-revision-due')?.kind).toBe('warning');
+    expect(items.find((i) => i.id === 'phd-overdue-targets')?.kind).toBe('warning');
+    expect(items.find((i) => i.id === 'phd-continue-documents')?.kind).toBe('action');
+  });
+
+  it('tags the weak-topics item as recommendation', () => {
+    // Same lookup as the "APFC item composition" describe block's own realTopicWithAtLeastNPyqs
+    // helper above (not reused directly — it's declared inside that describe block, out of scope
+    // here) — finds a real syllabus topic in PYQ_BANK with at least 3 real PYQs.
+    const byTopic = new Map<string, typeof PYQ_BANK>();
+    for (const q of PYQ_BANK) byTopic.set(q.topicId, [...(byTopic.get(q.topicId) ?? []), q]);
+    const found = [...byTopic.entries()].find(([, qs]) => qs.length >= 3);
+    if (!found) throw new Error('No real syllabus topic in PYQ_BANK has at least 3 questions — fixture assumption broken.');
+    const [topicId, questions] = [found[0], found[1].slice(0, 3)];
+    const answers: Record<string, string> = {};
+    questions.forEach((q, i) => {
+      answers[q.id] = i === 0 ? q.correctOptionId : q.options.find((o) => o.id !== q.correctOptionId)!.id;
+    });
+    const weakAttempt: PYQAttempt = {
+      id: 'weak-attempt',
+      submittedAt: '2026-09-01T00:00:00.000Z',
+      year: 'all',
+      subject: 'all',
+      topicId: 'all',
+      questionIds: questions.map((q) => q.id),
+      answers,
+      correctCount: 1,
+      wrongCount: questions.length - 1,
+      unansweredCount: 0,
+      score: 1,
+      accuracy: 100 / questions.length,
+    };
+    const items = generateUpNextItems(baseInput({ apfc: emptyApfc({ completedTopics: { [topicId]: true }, pyqAttempts: [weakAttempt] }) }));
+    const weakTopicsItem = items.find((i) => i.id === 'apfc-weak-topics');
+    expect(weakTopicsItem).toBeDefined();
+    expect(weakTopicsItem?.kind).toBe('recommendation');
   });
 });

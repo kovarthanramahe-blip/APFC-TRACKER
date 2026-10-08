@@ -34,6 +34,13 @@ import type { ImportedContent } from './contentImport';
 // active-workspace fields, or an inactive workspace's own archived slice (lib/store.ts's
 // inactiveWorkspaceOwnedData) — this module has no opinion on which, and never mutates either.
 
+/** Phase 16 — how Command Centre 2.0's JARVIS Priority Panel visually distinguishes an item,
+ * purely a presentation hint computed deterministically from which builder produced it (never a
+ * live/LLM judgement call) — 'warning' for something overdue/time-sensitive, 'recommendation' for
+ * a suggested-but-not-urgent next step, 'action' for something already in progress that just needs
+ * finishing. Optional so every existing caller/test that doesn't reference it is unaffected. */
+export type CommandCentreItemKind = 'warning' | 'recommendation' | 'action';
+
 export interface CommandCentreItem {
   id: string;
   workspaceId: WorkspaceKind;
@@ -50,6 +57,7 @@ export interface CommandCentreItem {
    * priority order). Never randomised, never recomputed per render in a way that could reorder an
    * unchanged list. */
   priority: number;
+  kind?: CommandCentreItemKind;
 }
 
 export interface ApfcCommandCentreData {
@@ -102,7 +110,11 @@ function buildApfcItems(data: ApfcCommandCentreData, today: string, max: number)
       workspaceId: 'apfc',
       title: `${dueCount} PYQ${dueCount === 1 ? '' : 's'} due for revision`,
       actionLabel: 'Revise Now',
-      actionHref: '/pyq-test',
+      // Phase 17 — Revision OS (pages/Revision.tsx) is now the real home for "what's due", not a
+      // bare /pyq-test deep link; Revision itself still launches the actual session via /pyq-test's
+      // own ?mode=due_revision auto-start, so the underlying engine is unchanged.
+      actionHref: '/revision',
+      kind: 'warning',
     });
   }
 
@@ -126,6 +138,7 @@ function buildApfcItems(data: ApfcCommandCentreData, today: string, max: number)
       context,
       actionLabel: 'Practice Weak Topics',
       actionHref: '/pyq-test?mode=weak_topics',
+      kind: 'recommendation',
     });
   }
 
@@ -156,6 +169,7 @@ function buildUpscCseItems(data: UpscCseCommandCentreData, today: string, max: n
     context: item.description,
     actionLabel: item.actionLabel,
     actionHref: item.actionHref,
+    kind: 'recommendation' as const,
   }));
 }
 
@@ -187,6 +201,7 @@ function buildPhdItems(data: PhdCommandCentreData, today: string, max: number): 
       context: `Most overdue by ${maxDaysOverdue} day${maxDaysOverdue === 1 ? '' : 's'}`,
       actionLabel: 'Open Research Plan',
       actionHref: '/phd-plan',
+      kind: 'warning',
     });
   }
 
@@ -206,6 +221,7 @@ function buildPhdItems(data: PhdCommandCentreData, today: string, max: number): 
       title: `${n} research document${n === 1 ? '' : 's'} to continue`,
       actionLabel: 'Continue Research Documents',
       actionHref: '/phd-research',
+      kind: 'action',
     });
   }
   if (analytics.bibliographyToContinueCount > 0) {
@@ -216,6 +232,7 @@ function buildPhdItems(data: PhdCommandCentreData, today: string, max: number): 
       title: `${n} bibliography record${n === 1 ? '' : 's'} to continue`,
       actionLabel: 'Continue Working Bibliography',
       actionHref: '/phd-research/bibliography',
+      kind: 'action',
     });
   }
 
