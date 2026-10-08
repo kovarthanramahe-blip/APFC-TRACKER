@@ -2,6 +2,7 @@ import { computeResearchDuration, type ResearchDuration } from './phdResearch';
 import type { PhdTopicArea } from './phdTopicArea';
 import { countMicroTargetsByStatus, overdueMicroTargets, upcomingMicroTargets, type MicroTarget, type MicroTargetCounts } from './microTarget';
 import type { ImportedContent, ImportedContentType } from './contentImport';
+import { countByReadingStatus } from './phdReadingStatus';
 
 // PhD Research Analytics — pure aggregation only, same discipline as lib/phdDashboard.ts: every
 // number here is composed from an already-existing, already-tested engine (computeResearchDuration,
@@ -38,6 +39,14 @@ export interface PhdAnalyticsSnapshot {
   topicAreaCount: number;
   topicAreas: TopicAreaAnalytics[];
   materialCounts: MaterialCounts;
+  /** How many research_document / bibliography items are 'unread' or 'reading' (i.e. genuinely
+   * have something left to continue) for EACH type separately, so a caller can link to the one
+   * page that actually lets the user act on that specific type (pages/PhdResearch.tsx for
+   * research_document, pages/WorkingBibliography.tsx for bibliography — a combined count can't
+   * tell which page to send the user to). Reuses lib/phdReadingStatus.ts's own countByReadingStatus
+   * verbatim, never a second status-counting engine. */
+  researchDocumentsToContinueCount: number;
+  bibliographyToContinueCount: number;
   microTargetCounts: MicroTargetCounts;
   overdueTargetCount: number;
   upcomingTargetCount: number;
@@ -77,6 +86,11 @@ export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyti
   const bibliographyRecords = input.importedContent.filter((c) => c.contentType === 'bibliography').length;
   const otherImportedContent = input.importedContent.filter((c) => !RESEARCH_CONTENT_TYPES.has(c.contentType) && c.contentType !== 'note').length;
 
+  const researchDocumentReadingCounts = countByReadingStatus(input.importedContent.filter((c) => c.contentType === 'research_document'));
+  const bibliographyReadingCounts = countByReadingStatus(input.importedContent.filter((c) => c.contentType === 'bibliography'));
+  const researchDocumentsToContinueCount = researchDocumentReadingCounts.unread + researchDocumentReadingCounts.reading;
+  const bibliographyToContinueCount = bibliographyReadingCounts.unread + bibliographyReadingCounts.reading;
+
   const microTargetCounts = countMicroTargetsByStatus(input.microTargets);
   const totalTargets = microTargetCounts.pending + microTargetCounts.in_progress + microTargetCounts.completed;
   const completionRatePct = totalTargets > 0 ? Math.round((microTargetCounts.completed / totalTargets) * 100) : 0;
@@ -101,6 +115,8 @@ export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyti
     topicAreaCount: input.topicAreas.length,
     topicAreas,
     materialCounts: { researchDocuments, bibliographyRecords, notes: input.notesCount, otherImportedContent },
+    researchDocumentsToContinueCount,
+    bibliographyToContinueCount,
     microTargetCounts,
     overdueTargetCount: overdueMicroTargets(input.microTargets, input.today).length,
     upcomingTargetCount: upcomingMicroTargets(input.microTargets, input.today).length,
