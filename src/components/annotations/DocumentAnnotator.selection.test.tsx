@@ -160,6 +160,125 @@ describe('DocumentAnnotator — text selection is honoured even while a drawing 
   });
 });
 
+// Wave 4A targeted hardening — the new "Explain with JARVIS" toolbar action, tested through the
+// EXACT SAME real selection-preservation interaction (Range + selectionchange, same stubbed
+// Range.prototype.getBoundingClientRect technique) every other selection action above already
+// uses. DocumentAnnotator never calls any document-intelligence/AI code itself — it only forwards
+// the selection's own already-captured quote text to the caller-supplied onExplainSelection
+// callback, exactly like onAddToRevision/onMarkDoubt/etc. forward to their own handlers.
+describe('DocumentAnnotator — "Explain with JARVIS" forwards the real selected text via onExplainSelection', () => {
+  let originalGetBoundingClientRect: () => DOMRect;
+
+  beforeEach(() => {
+    resetStore();
+    originalGetBoundingClientRect = Range.prototype.getBoundingClientRect;
+    Range.prototype.getBoundingClientRect = vi.fn(() => ({ top: 10, left: 10, width: 50, height: 14, bottom: 24, right: 60, x: 10, y: 10, toJSON: () => ({}) })) as unknown as () => DOMRect;
+  });
+
+  afterEach(() => {
+    Range.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
+  function renderAnnotatorWithExplain(onExplainSelection: (text: string) => void) {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    act(() => {
+      root.render(
+        <DocumentAnnotator documentId={DOC_ID} renderMode="raw" scrollBoxClassName="test-scroll-box" onExplainSelection={onExplainSelection}>
+          <pre>{FULL_TEXT}</pre>
+        </DocumentAnnotator>,
+      );
+    });
+    return {
+      container,
+      cleanup: () => {
+        act(() => root.unmount());
+        container.remove();
+      },
+    };
+  }
+
+  function selectQuickBrown(container: HTMLElement) {
+    const textNode = container.querySelector('pre')!.firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 4); // "quick brown"
+    range.setEnd(textNode, 15);
+    act(() => {
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+  }
+
+  it('renders the "Explain with JARVIS" button when a callback is supplied', () => {
+    const { container, cleanup } = renderAnnotatorWithExplain(() => {});
+    try {
+      selectQuickBrown(container);
+      expect(findButtonByLabel(container, 'Explain with JARVIS')).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('clicking it calls onExplainSelection with the exact selected text and clears the selection UI afterward', () => {
+    const onExplainSelection = vi.fn();
+    const { container, cleanup } = renderAnnotatorWithExplain(onExplainSelection);
+    try {
+      selectQuickBrown(container);
+      const explainButton = findButtonByLabel(container, 'Explain with JARVIS')!;
+      act(() => {
+        explainButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(onExplainSelection).toHaveBeenCalledTimes(1);
+      expect(onExplainSelection).toHaveBeenCalledWith('quick brown');
+      // Selection UI closes afterward, same as every other selection action.
+      expect(findButtonByLabel(container, 'Explain with JARVIS')).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('does not render the button at all when no onExplainSelection callback is supplied (existing callers unaffected)', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    act(() => {
+      root.render(
+        <DocumentAnnotator documentId={DOC_ID} renderMode="raw" scrollBoxClassName="test-scroll-box">
+          <pre>{FULL_TEXT}</pre>
+        </DocumentAnnotator>,
+      );
+    });
+    try {
+      selectQuickBrown(container);
+      expect(findButtonByLabel(container, 'Explain with JARVIS')).toBeUndefined();
+      // Every pre-existing action is still offered, unaffected by the optional prop's absence.
+      expect(findButtonByLabel(container, 'Text Highlight —')).toBeDefined();
+      expect(findButtonByLabel(container, 'Add to revision')).toBeDefined();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('existing selection actions (e.g. highlight) remain fully functional alongside the new Explain button', () => {
+    const { container, cleanup } = renderAnnotatorWithExplain(() => {});
+    try {
+      selectQuickBrown(container);
+      const highlightButton = findButtonByLabel(container, 'Text Highlight —')!;
+      act(() => {
+        highlightButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const highlights = useAppStore.getState().annotations.filter((a) => a.type === 'textHighlight');
+      expect(highlights).toHaveLength(1);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe('AnnotationLayer — drawing/lasso/eraser still work after moving pointer capture to the wrapper', () => {
   let originalGetBoundingClientRect: () => DOMRect;
 

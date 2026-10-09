@@ -1,4 +1,4 @@
-import { Highlighter, Underline, Strikethrough, StickyNote, Bookmark, Brain, Layers, Star, HelpCircle } from 'lucide-react';
+import { Highlighter, Underline, Strikethrough, StickyNote, Bookmark, Brain, Layers, Star, HelpCircle, Sparkles } from 'lucide-react';
 
 // Premium Study Reader (Phase D) — the floating action bar shown above a live text selection made
 // while no drawing tool is active (see DocumentAnnotator's selectionchange listener). Positioned
@@ -21,6 +21,12 @@ export interface ContextualSelectionToolbarProps {
   onCreateFlashcard: () => void;
   onMarkImportant: () => void;
   onMarkDoubt: () => void;
+  /** Wave 4A, Scope A/B — asks a document-intelligence panel OUTSIDE this toolbar to explain the
+   * current selection via JARVIS. Optional: a caller with no document-intelligence panel wired up
+   * (or a future reuse of this toolbar outside the Repository reader) simply omits it, and the
+   * button doesn't render — this toolbar never knows how the request is grounded/answered, it only
+   * forwards the user's intent, exactly like every other action here. */
+  onExplainWithJarvis?: () => void;
 }
 
 function ActionButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
@@ -41,7 +47,10 @@ function ActionButton({ label, onClick, children }: { label: string; onClick: ()
   );
 }
 
-const TOOLBAR_WIDTH = 328;
+// Base width (9 actions) plus room for the optional 10th (Explain with JARVIS) + its divider —
+// used only for centering math (see clampedLeft below), never as a hard CSS width, so this stays a
+// reasonable approximation whether or not onExplainWithJarvis is actually passed.
+const TOOLBAR_WIDTH = 368;
 
 export function ContextualSelectionToolbar({
   top,
@@ -56,6 +65,7 @@ export function ContextualSelectionToolbar({
   onCreateFlashcard,
   onMarkImportant,
   onMarkDoubt,
+  onExplainWithJarvis,
 }: ContextualSelectionToolbarProps) {
   const clampedLeft = Math.max(8, Math.min(left + width / 2 - TOOLBAR_WIDTH / 2, window.innerWidth - TOOLBAR_WIDTH - 8));
   const clampedTop = Math.max(8, top - 56);
@@ -94,6 +104,14 @@ export function ContextualSelectionToolbar({
       <ActionButton label="Mark doubt" onClick={onMarkDoubt}>
         <HelpCircle className="h-4 w-4" />
       </ActionButton>
+      {onExplainWithJarvis && (
+        <>
+          <div className="mx-0.5 h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+          <ActionButton label="Explain with JARVIS" onClick={onExplainWithJarvis}>
+            <Sparkles className="h-4 w-4" />
+          </ActionButton>
+        </>
+      )}
     </div>
   );
 }

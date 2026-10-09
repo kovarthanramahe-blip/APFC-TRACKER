@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
-import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check, Sparkles } from 'lucide-react';
 import { useAppStore } from '../lib/store';
-import { getWorkspaceMeta } from '../lib/workspace';
+import { getWorkspaceMeta, type WorkspaceKind } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx, formatDate, getLocalDateString } from '../lib/utils';
 import { resolveSyllabusNodeLabel } from '../lib/syllabusNodeLabel';
@@ -31,6 +31,7 @@ import { canEditEntry, canDeleteEntry, EditMetadataModal, DeleteConfirmModal, pr
 import type { ImportedContentMetadata } from '../lib/contentImport';
 import { DocumentAnnotator, type DocumentAnnotatorHandle } from '../components/annotations/DocumentAnnotator';
 import { AnnotationIndex } from '../components/annotations/AnnotationIndex';
+import { DocumentIntelligencePanel } from '../components/annotations/DocumentIntelligencePanel';
 import type { Annotation } from '../lib/annotations';
 
 // Repository Detail / Preview View — a focused, read-only page for a single repository entity,
@@ -83,9 +84,25 @@ export { resolveSyllabusNodeLabel };
  * ONLY place that owns the Raw/Preview toggle both render modes live behind, so it's also the only
  * place that can switch render mode on the Index's behalf before asking the (now newly-mounted)
  * DocumentAnnotator to scroll to + pulse a clicked annotation (see handleIndexNavigate below). */
-function ContentView({ content, documentId }: { content: string; documentId: string }) {
+// Exported (Wave 4A integration-test gate) solely so a test can render the REAL parent-level
+// wiring between DocumentAnnotator's onExplainSelection callback and DocumentIntelligencePanel's
+// initialSelectedText prop — the one integration path neither component's own isolated test file
+// can prove on its own. No behavioural change; this component is otherwise unchanged and still
+// only ever used from this file's own default export below.
+export function ContentView({ content, documentId, activeWorkspaceId, route }: { content: string; documentId: string; activeWorkspaceId: WorkspaceKind; route: string }) {
   const [mode, setMode] = useState<'raw' | 'preview'>('raw');
   const [showIndex, setShowIndex] = useState(false);
+  const [explainSelectionText, setExplainSelectionText] = useState<string | undefined>(undefined);
+  const [showJarvisPanel, setShowJarvisPanel] = useState(false);
+  // Integration-test gate fix — opening the panel while it's ALREADY open (e.g. the header "Ask
+  // JARVIS" button clicked on top of a visible explain result) used to leave the previous
+  // result/mode on screen: `showJarvisPanel` was already true, so `{showJarvisPanel && <...>}`
+  // never unmounted/remounted DocumentIntelligencePanel, and that panel's own initialSelectedText
+  // effect (deliberately) only reacts to a truthy, changed value — never to it becoming undefined.
+  // Bumping this key on every "open" action forces a genuinely fresh panel instance each time,
+  // exactly matching what a user opening a NEW JARVIS request expects, without touching
+  // DocumentIntelligencePanel.tsx's own (approved) race-fix/state logic at all.
+  const [jarvisPanelKey, setJarvisPanelKey] = useState(0);
   const annotatorRef = useRef<DocumentAnnotatorHandle>(null);
 
   function handleIndexNavigate(annotation: Annotation) {
@@ -106,6 +123,18 @@ function ContentView({ content, documentId }: { content: string; documentId: str
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Content</p>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setExplainSelectionText(undefined);
+              setShowJarvisPanel(true);
+              setJarvisPanelKey((k) => k + 1);
+            }}
+            title="Ask JARVIS about this document"
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-brand-200 px-2.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:text-brand-400 dark:hover:bg-brand-500/10"
+          >
+            <Sparkles className="h-3.5 w-3.5" /> Ask JARVIS
+          </button>
           <button
             type="button"
             onClick={() => setShowIndex(true)}
@@ -144,11 +173,31 @@ function ContentView({ content, documentId }: { content: string; documentId: str
         </div>
       </div>
       {mode === 'raw' ? (
-        <DocumentAnnotator ref={annotatorRef} documentId={documentId} renderMode="raw" scrollBoxClassName="max-h-[32rem] rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+        <DocumentAnnotator
+          ref={annotatorRef}
+          documentId={documentId}
+          renderMode="raw"
+          scrollBoxClassName="max-h-[32rem] rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50"
+          onExplainSelection={(text) => {
+            setExplainSelectionText(text);
+            setShowJarvisPanel(true);
+            setJarvisPanelKey((k) => k + 1);
+          }}
+        >
           <pre className="whitespace-pre-wrap break-words p-4 text-sm font-sans text-slate-700 dark:text-slate-200">{content || 'No content.'}</pre>
         </DocumentAnnotator>
       ) : (
-        <DocumentAnnotator ref={annotatorRef} documentId={documentId} renderMode="preview" scrollBoxClassName="max-h-[32rem] rounded-lg border border-slate-200 dark:border-slate-800">
+        <DocumentAnnotator
+          ref={annotatorRef}
+          documentId={documentId}
+          renderMode="preview"
+          scrollBoxClassName="max-h-[32rem] rounded-lg border border-slate-200 dark:border-slate-800"
+          onExplainSelection={(text) => {
+            setExplainSelectionText(text);
+            setShowJarvisPanel(true);
+            setJarvisPanelKey((k) => k + 1);
+          }}
+        >
           <MarkdownPreview content={content} className="p-4" emptyText="Nothing to preview." />
         </DocumentAnnotator>
       )}
@@ -160,6 +209,20 @@ function ContentView({ content, documentId }: { content: string; documentId: str
             setShowIndex(false);
           }}
           onClose={() => setShowIndex(false)}
+        />
+      )}
+      {showJarvisPanel && (
+        <DocumentIntelligencePanel
+          key={jarvisPanelKey}
+          documentId={documentId}
+          rawText={content}
+          activeWorkspaceId={activeWorkspaceId}
+          route={route}
+          initialSelectedText={explainSelectionText}
+          onClose={() => {
+            setShowJarvisPanel(false);
+            setExplainSelectionText(undefined);
+          }}
         />
       )}
     </div>
@@ -458,7 +521,7 @@ export default function RepositoryDetail() {
       )}
 
       <Card className="mb-5 p-4">
-        <ContentView content={rawContent} documentId={`${entry.entityType}:${entry.entityId}`} />
+        <ContentView content={rawContent} documentId={`${entry.entityType}:${entry.entityId}`} activeWorkspaceId={entry.workspaceId} route={`/repository/${entry.entityType}/${entry.entityId}`} />
       </Card>
 
       <Card className="p-4">

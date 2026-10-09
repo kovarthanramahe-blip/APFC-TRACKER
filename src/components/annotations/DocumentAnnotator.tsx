@@ -95,10 +95,21 @@ const DEFAULT_TEXT_MARKUP_COLOR = TEXT_MARKUP_COLORS[0];
 // `studyTags` doc comment) rather than inventing a second revision/flashcard system. Shapes/arrows/
 // lasso-select-and-move UI and the Annotation Index remain later-phase work, not part of this pass.
 
-export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentId: string; renderMode: RenderMode; scrollBoxClassName: string; children: React.ReactNode }>(function DocumentAnnotator(
-  { documentId, renderMode, scrollBoxClassName, children },
-  ref,
-) {
+export const DocumentAnnotator = forwardRef<
+  DocumentAnnotatorHandle,
+  {
+    documentId: string;
+    renderMode: RenderMode;
+    scrollBoxClassName: string;
+    children: React.ReactNode;
+    /** Wave 4A, Scope A/B — forwards the raw, live-selected text up to a document-intelligence
+     * panel OUTSIDE this component (see pages/RepositoryDetail.tsx) when the user taps "Explain
+     * with JARVIS" on the selection toolbar. This component never interprets, grounds, or answers
+     * anything itself — it only ever hands the caller the SAME selection.anchor.quote text every
+     * other selection action here already reads, exactly like its narrow authorization requires. */
+    onExplainSelection?: (selectedText: string) => void;
+  }
+>(function DocumentAnnotator({ documentId, renderMode, scrollBoxClassName, children, onExplainSelection }, ref) {
   const allAnnotations = useAppStore((s) => s.annotations);
   const addAnnotation = useAppStore((s) => s.addAnnotation);
   const updateAnnotationText = useAppStore((s) => s.updateAnnotationText);
@@ -542,6 +553,16 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
     clearSelectionUi();
   }
 
+  /** "Explain with JARVIS" (Wave 4A) — forwards the selection's own already-captured quote text to
+   * the caller's document-intelligence panel and clears the selection UI, exactly like every other
+   * selection action above. Never calls any AI/document-intelligence code itself (that logic lives
+   * entirely outside this component — see onExplainSelection's own doc comment). */
+  function handleExplainSelection() {
+    if (!selection || !onExplainSelection) return;
+    onExplainSelection(selection.anchor.quote);
+    clearSelectionUi();
+  }
+
   /** Add to Revision / Create Flashcard / Mark Important / Mark Doubt: each creates ONE tagged
    * textHighlight rather than a bare, anchor-less tag — see lib/annotations.ts's own `studyTags`
    * doc comment for why this reuses the highlight model instead of a parallel tagging mechanism. */
@@ -646,6 +667,7 @@ export const DocumentAnnotator = forwardRef<DocumentAnnotatorHandle, { documentI
           onCreateFlashcard={() => handleTagSelection('flashcard')}
           onMarkImportant={() => handleTagSelection('important')}
           onMarkDoubt={() => handleTagSelection('doubt')}
+          onExplainWithJarvis={onExplainSelection ? handleExplainSelection : undefined}
         />
       )}
 

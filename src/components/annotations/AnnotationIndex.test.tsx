@@ -92,3 +92,86 @@ describe('AnnotationIndex — rendering real annotations', () => {
     }
   });
 });
+
+describe('AnnotationIndex — Wave 4A Scope C: Add to Revision Queue bridging', () => {
+  beforeEach(resetStore);
+
+  function addTaggedHighlight(tags: ('revision' | 'flashcard')[] = ['revision']) {
+    const anchor = createTextAnchor('A revision-tagged passage of real source text', 0, 8)!;
+    const annotation = createTextHighlight({ documentId: DOC_ID, renderMode: 'raw', anchor, color: '#facc15', studyTags: tags });
+    useAppStore.getState().addAnnotation(annotation);
+    return annotation;
+  }
+
+  function switchToRevisionTab(container: HTMLElement) {
+    const tab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Revision');
+    act(() => {
+      tab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  }
+
+  it('shows an "Add to Revision Queue" button for a revision-tagged item on the Revision tab', () => {
+    addTaggedHighlight(['revision']);
+    const { container, cleanup } = renderIndex();
+    try {
+      switchToRevisionTab(container);
+      const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Add to Revision Queue');
+      expect(button).toBeTruthy();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('clicking it bridges the annotation into the real revisionQueue and flips the button to a confirmed state', () => {
+    const annotation = addTaggedHighlight(['revision']);
+    const { container, cleanup } = renderIndex();
+    try {
+      switchToRevisionTab(container);
+      const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Add to Revision Queue')!;
+      act(() => {
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(container.textContent).toContain('In Revision Queue');
+      const queue = useAppStore.getState().revisionQueue;
+      expect(queue[`annotation:${annotation.id}`]).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('never shows the button for an item without the revision tag, even on the Revision tab', () => {
+    addTaggedHighlight(['flashcard']);
+    const { container, cleanup } = renderIndex();
+    try {
+      switchToRevisionTab(container);
+      const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Add to Revision Queue');
+      expect(button).toBeFalsy();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('never shows the button outside the Revision tab, even for a revision-tagged item visible under "All"', () => {
+    addTaggedHighlight(['revision']);
+    const { container, cleanup } = renderIndex();
+    try {
+      const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Add to Revision Queue');
+      expect(button).toBeFalsy();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('shows the already-queued state immediately when the annotation was bridged in an earlier session', () => {
+    const annotation = addTaggedHighlight(['revision']);
+    useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-01');
+    const { container, cleanup } = renderIndex();
+    try {
+      switchToRevisionTab(container);
+      expect(container.textContent).toContain('In Revision Queue');
+      expect(container.textContent).not.toContain('Add to Revision Queue');
+    } finally {
+      cleanup();
+    }
+  });
+});

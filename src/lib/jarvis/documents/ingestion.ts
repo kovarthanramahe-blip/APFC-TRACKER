@@ -163,12 +163,32 @@ async function resolveNodeStandardFontDataUrl(): Promise<string | undefined> {
   }
 }
 
+/**
+ * Wave 4A browser-compatibility fix — empirically verified (a real Chromium browser, via
+ * Playwright, driving this exact module) to be REQUIRED: pdfjs-dist's PDFWorker only auto-disables
+ * itself under Node (see this function's own caller's header). In a genuine browser it instead
+ * throws `Error: No "GlobalWorkerOptions.workerSrc" specified.` the moment getDocument() is
+ * called — this was never exercised by this phase's own Vitest suite (which only ever runs under
+ * Node), so it went undetected until a real browser run. Fixed the same, already-proven way
+ * lib/contentImport.ts's own (separate, standard-build) PDF path already resolves its worker: a
+ * Vite-only `?url` asset import giving a real, servable URL to pdfjs-dist's own shipped worker
+ * file — reused here for the LEGACY build's own worker instead of a new one. Scoped to the
+ * non-Node branch only, so the existing, already-passing Node/Vitest path (and every assertion in
+ * ingestion.test.ts) is byte-for-byte unchanged.
+ */
+async function configureBrowserPdfWorkerIfNeeded(pdfjsLib: typeof import('pdfjs-dist/legacy/build/pdf.mjs')): Promise<void> {
+  if (typeof process !== 'undefined' && process.versions?.node) return;
+  const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+}
+
 async function extractPdfPages(data: ArrayBuffer): Promise<JarvisExtractedPage[]> {
   // See this file's own header for why the LEGACY build is used here rather than
   // contentImport.ts's worker-based one. No `disableWorker` option is passed (pdfjs-dist has no
   // such typed parameter) — its own PDFWorker already disables the worker thread automatically
   // whenever it detects a Node.js environment, which is exactly the behaviour this needs.
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  await configureBrowserPdfWorkerIfNeeded(pdfjsLib);
   const standardFontDataUrl = await resolveNodeStandardFontDataUrl();
   const pdf = await pdfjsLib.getDocument({ data, useWorkerFetch: false, standardFontDataUrl }).promise;
 

@@ -124,6 +124,26 @@ export interface JarvisRuntimeResult {
 export interface RunJarvisRequestInput {
   context: JarvisContext;
   query: string;
+  /**
+   * Wave 4A acceptance audit — the approved, narrowly-scoped fix for a real reliability gap: this
+   * file's own AI-provider call has always used `query` as BOTH the text handleJarvisRequest()
+   * classifies intent from AND the literal text the provider sees (see the three
+   * `textMessage('user', ...)` call sites below). A caller grounding a request in real retrieved
+   * document evidence (e.g. lib/jarvis/repositoryDocumentIntelligence.ts) has no way to keep that
+   * evidence out of orchestrator.ts's own conservative intent regex while still getting it to the
+   * model, since both uses were the same string. `promptOverride` is purely additive: when a
+   * caller explicitly supplies a non-empty one, it is used ONLY as the literal provider-facing
+   * message (resolveProviderPrompt below); `query` keeps its EXACT existing role — the one and
+   * only input to handleJarvisRequest()/resolveJarvisRoute() for intent classification and
+   * routing, completely unchanged. Every existing caller that never sets this field (every call
+   * site in this codebase today) is byte-for-byte unaffected: resolveProviderPrompt falls back to
+   * `query` whenever `promptOverride` is absent, empty, or whitespace-only, so provider selection,
+   * deterministic fallback, error handling, and cancellation are all untouched by this field's
+   * presence. Reachable only through this typed, internal RunJarvisRequestInput — never from a
+   * URL/query-string/any externally-facing input; a caller sets it in TypeScript code exactly like
+   * every other field here (including `query` itself, which is just as caller-supplied).
+   */
+  promptOverride?: string;
   /** Mirrors resolveJarvisRoute's own input — never defaulted to true automatically; omitted means
    * "no web research requested", exactly like calling resolveJarvisRoute directly would. */
   webResearchExplicitlyRequested?: boolean;
@@ -164,6 +184,18 @@ function deterministicResult(response: JarvisResponse, extra: Omit<JarvisRuntime
 
 function unavailableResult(response: JarvisResponse, routeTarget: JarvisRouteDecision['target'], reason: string, providerHealth?: JarvisAiProviderHealthStatus): JarvisRuntimeResult {
   return { response, provenance: { source: 'no_provider_available', routeTarget, degraded: true, degradedReason: reason, providerHealth } };
+}
+
+/** The ONLY place `promptOverride` is read — resolves what the provider actually sees. An absent,
+ * empty, or whitespace-only override safely falls back to `query` (every existing caller's exact,
+ * unchanged behaviour); the original (untrimmed) override string is used verbatim when genuinely
+ * present, so a caller's own composed formatting (e.g. documentGroundingPrompt.ts's multi-section
+ * layout) is never altered by this file. `query` itself is never touched here or anywhere else in
+ * this function — handleJarvisRequest()/resolveJarvisRoute() above this point have already run
+ * against it unconditionally. */
+function resolveProviderPrompt(input: RunJarvisRequestInput): string {
+  const trimmed = input.promptOverride?.trim();
+  return trimmed ? input.promptOverride! : input.query;
 }
 
 // ================================================================================================
@@ -367,7 +399,7 @@ export async function runJarvisRequest(input: RunJarvisRequestInput): Promise<Ja
   }
 
   try {
-    const aiResponse = await provider.complete({ messages: [textMessage('user', input.query)] });
+    const aiResponse = await provider.complete({ messages: [textMessage('user', resolveProviderPrompt(input))] });
     // NEVER claim a real AI answer unless providerHealth itself genuinely reports model_ready —
     // this is "do not fake an AI-ready status" enforced at the one place that matters: the label
     // attached to the result, not the health value, which is never altered.
@@ -482,7 +514,7 @@ export async function* streamJarvisRequest(input: RunJarvisRequestInput, signal?
   // future provider composed here that doesn't.
   if (!provider.stream) {
     try {
-      const aiResponse = await provider.complete({ messages: [textMessage('user', input.query)], signal });
+      const aiResponse = await provider.complete({ messages: [textMessage('user', resolveProviderPrompt(input))], signal });
       yield {
         result: {
           response: { ...response, responseText: aiResponse.text, requiresFurtherProcessing: false },
@@ -504,7 +536,7 @@ export async function* streamJarvisRequest(input: RunJarvisRequestInput, signal?
   }
 
   try {
-    for await (const event of provider.stream({ messages: [textMessage('user', input.query)], signal })) {
+    for await (const event of provider.stream({ messages: [textMessage('user', resolveProviderPrompt(input))], signal })) {
       if (event.type === 'text_delta') {
         fullText += event.delta;
         yield { textDelta: event.delta };

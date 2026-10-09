@@ -9,6 +9,7 @@ import type { ContentRelationship } from './contentRelationships';
 import type { Note } from './types';
 import { countRelatedContent } from './relatedContentSummary';
 import { createTextHighlight, createBookmark } from './annotations';
+import { createTextAnchor } from './textAnchor';
 import { createFolder } from './folders';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
@@ -125,6 +126,78 @@ describe('store — addToRevisionQueue (Current Affairs revision)', () => {
     expect(useAppStore.getState().revisionQueue['ca-1'].box).toBe(2);
     useAppStore.getState().recordRevisionIncorrect('ca-1', '2026-01-10');
     expect(useAppStore.getState().revisionQueue['ca-1'].box).toBe(1);
+  });
+});
+
+describe('store — bridgeAnnotationToRevisionQueue (Wave 4A, Scope C)', () => {
+  beforeEach(() => useAppStore.setState({ revisionQueue: createRevisionQueue(), annotations: [] }));
+
+  function addTaggedAnnotation(tags: ('revision' | 'flashcard')[] = ['revision']) {
+    const anchor = createTextAnchor('A revision-tagged passage of real source text', 0, 8)!;
+    const annotation = createTextHighlight({ documentId: 'note:doc-1', renderMode: 'raw', anchor, color: '#facc15', studyTags: tags });
+    useAppStore.getState().addAnnotation(annotation);
+    return annotation;
+  }
+
+  it('bridges a revision-tagged annotation into the real revisionQueue, keyed by its namespaced id', () => {
+    const annotation = addTaggedAnnotation(['revision']);
+    const status = useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-08');
+    expect(status).toBe('added');
+    expect(useAppStore.getState().revisionQueue[`annotation:${annotation.id}`]).toEqual({
+      pyqId: `annotation:${annotation.id}`,
+      box: 1,
+      dueDate: '2026-01-08',
+      lastReviewedDate: null,
+      reviewCount: 0,
+    });
+  });
+
+  it('clicking the bridge action twice in a row (same annotation id) never duplicates the entry or resets its progress', () => {
+    const annotation = addTaggedAnnotation(['revision']);
+    const first = useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-08');
+    useAppStore.getState().recordRevisionCorrect(`annotation:${annotation.id}`, '2026-01-08'); // simulate real review progress
+    const second = useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-20'); // clicked again later
+    expect(first).toBe('added');
+    expect(second).toBe('already_exists');
+    const item = useAppStore.getState().revisionQueue[`annotation:${annotation.id}`];
+    expect(item.box).toBe(2); // progress from the real review above is preserved, never reset
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toHaveLength(1); // no duplicate key
+  });
+
+  it('refuses an annotation without the revision tag, and never writes anything to the queue', () => {
+    const annotation = addTaggedAnnotation(['flashcard']);
+    const status = useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-08');
+    expect(status).toBe('cannot_add');
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+  });
+
+  it('returns cannot_add for an id that does not match any current annotation, never throwing', () => {
+    expect(() => useAppStore.getState().bridgeAnnotationToRevisionQueue('does-not-exist', '2026-01-08')).not.toThrow();
+    expect(useAppStore.getState().bridgeAnnotationToRevisionQueue('does-not-exist', '2026-01-08')).toBe('cannot_add');
+  });
+
+  it('bridging an annotation never disturbs an existing, unrelated PYQ revisionQueue entry', () => {
+    useAppStore.getState().recordRevisionCorrect('pyq-1', '2026-01-01'); // real, pre-existing PYQ progress
+    const beforePyqEntry = useAppStore.getState().revisionQueue['pyq-1'];
+    const annotation = addTaggedAnnotation(['revision']);
+    useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-08');
+    expect(useAppStore.getState().revisionQueue['pyq-1']).toEqual(beforePyqEntry);
+  });
+
+  it('survives a full export -> import round trip (the actual persistence/hydration lifecycle this app uses)', () => {
+    const annotation = addTaggedAnnotation(['revision']);
+    useAppStore.getState().bridgeAnnotationToRevisionQueue(annotation.id, '2026-01-08');
+    const key = `annotation:${annotation.id}`;
+    const beforeEntry = useAppStore.getState().revisionQueue[key];
+
+    const exported = exportAllData();
+    // Simulate a fresh session: clear the in-memory store before "reloading" from the export.
+    useAppStore.setState({ revisionQueue: createRevisionQueue(), annotations: [] });
+    expect(useAppStore.getState().revisionQueue[key]).toBeUndefined();
+
+    importAllData(exported);
+    expect(useAppStore.getState().revisionQueue[key]).toEqual(beforeEntry);
+    expect(useAppStore.getState().annotations.find((a) => a.id === annotation.id)).toBeDefined();
   });
 });
 

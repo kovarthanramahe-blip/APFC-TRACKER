@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Clock, Sparkles, Timer, Trophy } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarDays, CheckCircle2, Clock, FileText, Sparkles, Timer, Trophy } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getLocalDateString, cx } from '../lib/utils';
 import { Card, PageHeader, Button, Badge, StatCard, SectionHeader, EmptyState, Tabs, type TabItem, cardEntrance, WorkspaceComingSoon } from '../components/ui/Primitives';
@@ -8,6 +8,8 @@ import { motion } from 'framer-motion';
 import { computeRevisionOSSnapshot, REVISION_BUCKET_ORDER, REVISION_BUCKET_LABEL, type RevisionBucketKey, type RevisionOSItem } from '../lib/revisionOS';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { SYLLABUS } from '../data/syllabus';
+import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
+import type { RelationshipEntityType } from '../lib/contentRelationships';
 
 // Revision OS (Phase 17) — APFC's own first-class revision workspace, built entirely on top of
 // the EXISTING revision engine (lib/revisionQueue.ts + lib/pyqFilters.ts, via lib/revisionOS.ts's
@@ -42,6 +44,20 @@ function matchesFilter(item: RevisionOSItem, filter: FilterKey): boolean {
   return bucketMatchesFilter(item.bucket, filter);
 }
 
+/** `documentId` is always `${entityType}:${entityId}` (see lib/annotations.ts's own
+ * AnnotationBase.documentId doc comment) — splitting on the first ':' recovers both halves for
+ * navigation back to the real Repository entry. Neither half (a fixed entityType literal, or a
+ * uuid()-generated entityId) ever itself contains a ':', so this is a safe, exact split, not a
+ * guess. */
+function repositoryPathForDocumentId(documentId: string): string | null {
+  const separatorIndex = documentId.indexOf(':');
+  if (separatorIndex === -1) return null;
+  const entityType = documentId.slice(0, separatorIndex) as RelationshipEntityType;
+  const entityId = documentId.slice(separatorIndex + 1);
+  if (entityType !== 'note' && entityType !== 'imported_content') return null;
+  return repositoryDetailPathFor(entityType, entityId);
+}
+
 export default function Revision() {
   const navigate = useNavigate();
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -49,6 +65,10 @@ export default function Revision() {
   const bookmarkedPyqIds = useAppStore((s) => s.bookmarkedPyqIds);
   const revisionQueue = useAppStore((s) => s.revisionQueue);
   const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
+  // Wave 4A (2nd round) — the same `annotations` array DocumentAnnotator/AnnotationIndex already
+  // read/write, passed through so bridged annotation entries can be surfaced here too (see
+  // lib/revisionOS.ts's own header). Never a second annotation store/cache.
+  const annotations = useAppStore((s) => s.annotations);
   const [filter, setFilter] = useState<FilterKey>('all');
 
   // Revision <-> Focus OS (Phase 20) — the same subjectId -> colorKey lookup pages/StudyPlan.tsx's
@@ -56,7 +76,10 @@ export default function Revision() {
   const subjectColorById = useMemo(() => new Map(SYLLABUS.map((s) => [s.id, s.colorKey])), []);
 
   const today = useMemo(() => getLocalDateString(), []);
-  const snapshot = useMemo(() => computeRevisionOSSnapshot(pyqAttempts, bookmarkedPyqIds, revisionQueue, today), [pyqAttempts, bookmarkedPyqIds, revisionQueue, today]);
+  const snapshot = useMemo(
+    () => computeRevisionOSSnapshot(pyqAttempts, bookmarkedPyqIds, revisionQueue, today, annotations),
+    [pyqAttempts, bookmarkedPyqIds, revisionQueue, today, annotations],
+  );
 
   const dueNowCount = snapshot.byBucket.overdue.length + snapshot.byBucket.today.length;
   const filteredItems = snapshot.items.filter((item) => matchesFilter(item, filter));
@@ -133,35 +156,62 @@ export default function Revision() {
                               <span className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800', meta.badgeTone === 'danger' ? 'text-danger-600 dark:text-danger-400' : meta.badgeTone === 'warning' ? 'text-warning-600 dark:text-warning-400' : meta.badgeTone === 'jarvis' ? 'text-jarvis-600 dark:text-jarvis-400' : 'text-slate-500 dark:text-slate-400')}>
                                 <BucketIcon className="h-4.5 w-4.5" aria-hidden="true" />
                               </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{item.topicTitle}</p>
-                                <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-                                  <span>{item.subjectTitle}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <span>Box {item.box}</span>
-                                  {item.isNew && (
-                                    <Badge tone="jarvis" className="ml-0.5">
-                                      New
-                                    </Badge>
+                              {item.source === 'pyq' ? (
+                                <>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{item.topicTitle}</p>
+                                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                                      <span>{item.subjectTitle}</span>
+                                      <span aria-hidden="true">·</span>
+                                      <span>Box {item.box}</span>
+                                      {item.isNew && (
+                                        <Badge tone="jarvis" className="ml-0.5">
+                                          New
+                                        </Badge>
+                                      )}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      const colorKey = subjectColorById.get(item.subjectId);
+                                      const params = new URLSearchParams({ context: item.topicTitle });
+                                      if (colorKey) params.set('subject', colorKey);
+                                      navigate(`/pomodoro?${params.toString()}`);
+                                    }}
+                                    className="shrink-0"
+                                  >
+                                    <Timer className="h-3.5 w-3.5" /> Focus
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => navigate(`/syllabus?topicId=${encodeURIComponent(item.topicId)}`)} className="shrink-0">
+                                    View Topic
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{item.preview}</p>
+                                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                                      <Badge tone="neutral" className="gap-1">
+                                        <FileText className="h-3 w-3" /> From your annotations
+                                      </Badge>
+                                      <span aria-hidden="true">·</span>
+                                      <span>Box {item.box}</span>
+                                      {item.isNew && (
+                                        <Badge tone="jarvis" className="ml-0.5">
+                                          New
+                                        </Badge>
+                                      )}
+                                    </p>
+                                  </div>
+                                  {repositoryPathForDocumentId(item.documentId) && (
+                                    <Button variant="ghost" size="sm" onClick={() => navigate(repositoryPathForDocumentId(item.documentId)!)} className="shrink-0">
+                                      View Source
+                                    </Button>
                                   )}
-                                </p>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  const colorKey = subjectColorById.get(item.subjectId);
-                                  const params = new URLSearchParams({ context: item.topicTitle });
-                                  if (colorKey) params.set('subject', colorKey);
-                                  navigate(`/pomodoro?${params.toString()}`);
-                                }}
-                                className="shrink-0"
-                              >
-                                <Timer className="h-3.5 w-3.5" /> Focus
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => navigate(`/syllabus?topicId=${encodeURIComponent(item.topicId)}`)} className="shrink-0">
-                                View Topic
-                              </Button>
+                                </>
+                              )}
                               <Button variant="secondary" size="sm" onClick={() => handleMarkReviewed(item.id)} className="shrink-0">
                                 Mark Reviewed
                               </Button>
