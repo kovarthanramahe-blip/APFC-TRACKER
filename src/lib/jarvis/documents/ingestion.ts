@@ -153,11 +153,11 @@ export function isLikelyScannedPdf(pages: readonly JarvisExtractedPage[]): boole
 async function resolveNodeStandardFontDataUrl(): Promise<string | undefined> {
   if (typeof process === 'undefined' || !process.versions?.node) return undefined;
   try {
-    const { fileURLToPath } = await import('node:url');
+    const { fileURLToPath, pathToFileURL } = await import('node:url');
     const path = await import('node:path');
     const pdfEntryPath = fileURLToPath(import.meta.resolve('pdfjs-dist/legacy/build/pdf.mjs'));
     const packageRoot = path.join(path.dirname(pdfEntryPath), '..', '..');
-    return `${path.join(packageRoot, 'standard_fonts')}${path.sep}`;
+    return pathToFileURL(`${path.join(packageRoot, 'standard_fonts')}${path.sep}`).href;
   } catch {
     return undefined;
   }
