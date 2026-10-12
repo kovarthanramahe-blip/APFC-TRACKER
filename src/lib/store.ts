@@ -37,6 +37,7 @@ import type { RepositoryImportPlan } from './repositoryImport';
 import type { Annotation, NormalizedPoint } from './annotations';
 import { isGeometryAnnotation } from './annotations';
 import { sanitizeAnnotations } from './annotationSanitize';
+import { addAnnotationToRevisionQueue, type AnnotationRevisionBridgeStatus } from './annotationRevisionBridge';
 import type { UpscCseCoverageState, UpscCseSyllabusCoverage } from './upscCseSyllabusCoverage';
 import type { UpscCsePrelimsPyqAttempt } from './upscCsePrelimsPyqAttempt';
 import {
@@ -324,6 +325,14 @@ interface AppState {
    * selection" action; the points passed in are already-clamped normalized coordinates. */
   updateAnnotationPoints: (id: string, points: NormalizedPoint[]) => void;
   deleteAnnotation: (id: string) => void;
+  /** Wave 4A, Scope C — the explicit, idempotent "Add to Revision Queue" bridging action (see
+   * lib/annotationRevisionBridge.ts for the full contract). Distinct from the existing "Add to
+   * revision" toolbar button above (which only ever tags an annotation with studyTags: ['revision']
+   * and is left completely unchanged): this is what a user explicitly triggers afterward to enter
+   * an already-tagged annotation into the real lib/revisionQueue.ts. Looks `annotationId` up in
+   * `annotations` itself (never trusts a caller-supplied annotation object) so the bridge always
+   * acts on the current, persisted annotation. */
+  bridgeAnnotationToRevisionQueue: (annotationId: string, today: string) => AnnotationRevisionBridgeStatus;
 
   // Multi-Workspace OS: which workspace (see lib/workspace.ts) is currently active. Always 'apfc'
   // for now — there is still no switcher UI (Stage 2 makes the mechanism real and tested; a later
@@ -994,6 +1003,14 @@ export const useAppStore = create<AppState>()(
           annotations: state.annotations.map((a) => (a.id === id && isGeometryAnnotation(a) ? { ...a, points, updatedAt: new Date().toISOString() } : a)),
         })),
       deleteAnnotation: (id) => set((state) => ({ annotations: state.annotations.filter((a) => a.id !== id) })),
+      bridgeAnnotationToRevisionQueue: (annotationId, today) => {
+        const state = get();
+        const annotation = state.annotations.find((a) => a.id === annotationId);
+        if (!annotation) return 'cannot_add';
+        const result = addAnnotationToRevisionQueue(state.revisionQueue, annotation, today);
+        if (result.status === 'added') set({ revisionQueue: result.queue });
+        return result.status;
+      },
 
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
       inactiveWorkspaceOwnedData: {},

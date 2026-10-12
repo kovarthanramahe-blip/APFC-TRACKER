@@ -18,6 +18,7 @@ import {
   BookMarked,
   Target,
   Sparkles,
+  Repeat,
   type LucideIcon,
 } from 'lucide-react';
 import type { WorkspaceKind } from '../../lib/workspace';
@@ -63,6 +64,10 @@ const WORKSPACE_NAV_ITEMS: Record<WorkspaceKind, NavItem[]> = {
     { to: '/pyq', label: 'Question Bank', icon: BookOpenCheck },
     { to: '/pyq-test', label: 'PYQs', icon: FileQuestion },
     { to: '/mock-tests', label: 'Mock Tests', icon: FileClock },
+    // Revision OS (Phase 17) — APFC-only (the same gate Revision.tsx itself applies to every
+    // other workspace), since PYQ_BANK (the content it revises) is APFC-only data — follows this
+    // file's own documented convention of only listing an APFC-gated page under this one workspace.
+    { to: '/revision', label: 'Revision', icon: Repeat },
     { to: '/notes', label: 'Notes', icon: NotebookPen },
     { to: '/repository', label: 'Repository', icon: Library },
     { to: '/pomodoro', label: 'Pomodoro', icon: Timer },

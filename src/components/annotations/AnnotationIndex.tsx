@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { X, Search, Highlighter, Underline, Strikethrough, StickyNote, Bookmark, PenLine, Brain, Layers, Star, HelpCircle } from 'lucide-react';
+import { X, Search, Highlighter, Underline, Strikethrough, StickyNote, Bookmark, PenLine, Brain, Layers, Star, HelpCircle, Check } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
 import { annotationsForDocument, type Annotation } from '../../lib/annotations';
 import { ALL_INDEX_CATEGORIES, filterAnnotationIndex, previewTextFor, formatAnnotationTimestamp, type IndexCategory } from '../../lib/annotationIndex';
-import { cx } from '../../lib/utils';
+import { isAnnotationInRevisionQueue } from '../../lib/annotationRevisionBridge';
+import { cx, getLocalDateString } from '../../lib/utils';
 
 // Premium Study Reader — Annotation Index (Phase E). A responsive panel listing every annotation
 // on ONE document (both render modes — see lib/annotationIndex.ts's own header for why this is a
@@ -86,6 +87,42 @@ export interface AnnotationIndexProps {
   onClose: () => void;
 }
 
+/** Wave 4A, Scope C — the explicit "Add to Revision Queue" action for an item already tagged
+ * 'revision' (see lib/annotationRevisionBridge.ts for the full contract). Rendered only inside the
+ * Revision category tab, right where those tagged items are already browsed, rather than cluttering
+ * every other category with a button that would never apply there. Shows one of three states —
+ * never silently no-ops: already queued (done, disabled), just added (brief confirmation), or the
+ * action itself — so the three outcomes lib/annotationRevisionBridge.ts can report (added/
+ * already_exists/cannot_add) are always visible to the user, never swallowed. */
+function AddToRevisionQueueButton({ annotation }: { annotation: Annotation }) {
+  const revisionQueue = useAppStore((s) => s.revisionQueue);
+  const bridgeAnnotationToRevisionQueue = useAppStore((s) => s.bridgeAnnotationToRevisionQueue);
+  const [justAdded, setJustAdded] = useState(false);
+  const alreadyQueued = justAdded || isAnnotationInRevisionQueue(revisionQueue, annotation);
+
+  if (alreadyQueued) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+        <Check className="h-3 w-3" /> In Revision Queue
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        const status = bridgeAnnotationToRevisionQueue(annotation.id, getLocalDateString());
+        if (status === 'added' || status === 'already_exists') setJustAdded(true);
+      }}
+      className="shrink-0 rounded-full border border-brand-200 px-2 py-1 text-[11px] font-medium text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:text-brand-400 dark:hover:bg-brand-500/10"
+    >
+      Add to Revision Queue
+    </button>
+  );
+}
+
 export function AnnotationIndex({ documentId, onNavigate, onClose }: AnnotationIndexProps) {
   const allAnnotations = useAppStore((s) => s.annotations);
   const docAnnotations = annotationsForDocument(allAnnotations, documentId);
@@ -130,12 +167,8 @@ export function AnnotationIndex({ documentId, onNavigate, onClose }: AnnotationI
           ) : (
             <ul className="space-y-1">
               {results.map((a) => (
-                <li key={a.id}>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate(a)}
-                    className="flex w-full items-start gap-2.5 rounded-xl border border-transparent px-2.5 py-2 text-left hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/60"
-                  >
+                <li key={a.id} className="flex items-start gap-1 rounded-xl border border-transparent px-1 hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/60">
+                  <button type="button" onClick={() => onNavigate(a)} className="flex min-w-0 flex-1 items-start gap-2.5 py-2 pl-1.5 text-left">
                     <IndexItemIcon annotation={a} />
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-sm text-slate-700 dark:text-slate-200">{previewTextFor(a)}</p>
@@ -145,6 +178,11 @@ export function AnnotationIndex({ documentId, onNavigate, onClose }: AnnotationI
                       </div>
                     </div>
                   </button>
+                  {category === 'revision' && a.studyTags.includes('revision') && (
+                    <div className="shrink-0 self-center pr-1.5">
+                      <AddToRevisionQueueButton annotation={a} />
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

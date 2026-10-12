@@ -32,6 +32,7 @@ const PhdAnalytics = lazy(() => import('./pages/PhdAnalytics'));
 const PhdResearch = lazy(() => import('./pages/PhdResearch'));
 const WorkingBibliography = lazy(() => import('./pages/WorkingBibliography'));
 const Pomodoro = lazy(() => import('./pages/Pomodoro'));
+const Revision = lazy(() => import('./pages/Revision'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const StudyPlan = lazy(() => import('./pages/StudyPlan'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="/phd-research" element={<PhdResearch />} />
           <Route path="/phd-research/bibliography" element={<WorkingBibliography />} />
           <Route path="/pomodoro" element={<Pomodoro />} />
+          <Route path="/revision" element={<Revision />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/study-plan" element={<StudyPlan />} />
           <Route path="/settings" element={<Settings />} />

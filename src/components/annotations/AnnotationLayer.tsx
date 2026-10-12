@@ -29,11 +29,20 @@ import { cx } from '../../lib/utils';
 // is naturally excluded from drawing by the check below, but this makes no stronger claim than
 // that. A finger touch is never intercepted for drawing — see the pointerType==='touch' early
 // return in handlePointerDown — so normal one-finger scrolling and two-finger pinch-zoom keep
-// working over the annotation layer via this element's own `touch-action` (see the interactive
-// canvas below), even while a drawing tool is selected. While a pen/mouse IS actively drawing,
-// pointermove also calls preventDefault() (pointer capture is already held by then) so no
-// incidental browser gesture can interrupt the stroke — this never applies to a finger touch,
-// which is excluded from the drawing path entirely before this point.
+// working over the annotation layer via this element's own `touch-action` (see the wrapper div
+// below), even while a drawing tool is selected. `touch-action` is a static value, deliberately: a
+// Phase 8F attempt to switch it to 'none' dynamically for the duration of an active gesture was
+// reverted (Phase 8G) after determining it cannot work — the browser/WebView locks in the allowed-
+// gesture determination for a pointer sequence at/before that sequence's first event dispatch (this
+// is the whole point of touch-action: it lets the compositor decide without waiting on a JS round-
+// trip), so a value changed from INSIDE that same gesture's own pointerdown handler — let alone via
+// an async React state commit — cannot retroactively apply to it. Preventing an armed pen/mouse
+// gesture from being stolen as a page pan instead relies entirely on preventDefault() below, called
+// synchronously inside pointerdown/pointermove for that gesture — the correctly-timed mechanism for
+// cancelling a not-yet-committed gesture. While a pen/mouse IS actively drawing, pointermove also
+// calls preventDefault() (pointer capture is already held by then) so no incidental browser gesture
+// can interrupt the stroke — this never applies to a finger touch, which is excluded from the
+// drawing path entirely before this point.
 
 const ERASER_RADIUS = 0.02; // fraction of the content box's diagonal-normalized space
 
@@ -59,9 +68,23 @@ function isStickyNote(a: Annotation): a is StickyNoteAnnotation {
   return a.type === 'stickyNote';
 }
 
-function drawStrokePath(ctx: CanvasRenderingContext2D, stroke: InkAnnotation | HighlighterInkAnnotation, size: { width: number; height: number }) {
-  const style = stroke.type === 'ink' ? styleForPenStyle(stroke.penStyle) : HIGHLIGHTER_STROKE_OPTIONS;
-  const outline = strokeOutline(stroke.points, size.width, size.height, stroke.thickness, style);
+// Exported (alongside drawLivePreviewStroke below) solely so a test can verify, directly and without
+// depending on a real Canvas 2D backend (not available in this project's test environment), which of
+// the two renderers actually calls perfect-freehand — see DocumentAnnotator.selection.test.tsx's own
+// Phase 8J describe block. Neither export changes this module's own runtime behaviour.
+//
+// `precomputedOutline` (optional, Task 2 — stroke outline cache) lets a caller that already has this
+// stroke's outline (see getCachedOutline below) skip recomputing it via strokeOutline/getStroke.
+// Every existing call site/test that omits it is completely unaffected: it still computes the
+// outline fresh, exactly as before, so "calls getStroke exactly once" still holds for those.
+export function drawStrokePath(
+  ctx: CanvasRenderingContext2D,
+  stroke: InkAnnotation | HighlighterInkAnnotation,
+  size: { width: number; height: number },
+  precomputedOutline?: [number, number][],
+) {
+  const outline =
+    precomputedOutline ?? strokeOutline(stroke.points, size.width, size.height, stroke.thickness, stroke.type === 'ink' ? styleForPenStyle(stroke.penStyle) : HIGHLIGHTER_STROKE_OPTIONS);
   if (outline.length === 0) return;
   ctx.save();
   ctx.fillStyle = stroke.color;
@@ -71,6 +94,75 @@ function drawStrokePath(ctx: CanvasRenderingContext2D, stroke: InkAnnotation | H
   for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i][0], outline[i][1]);
   ctx.closePath();
   ctx.fill();
+  ctx.restore();
+}
+
+/** Task 2 — per-stroke outline cache, replacing the earlier DIAGNOSTIC_SKIP_INK_REDRAW workaround
+ * (which simply stopped painting committed ink at all). Keyed by the stroke's own stable `id`; a
+ * cached entry also records the canvas pixel size and the annotation's own `updatedAt` it was
+ * computed for, so either a resize/zoom (which changes every stroke's pixel-space outline) or an
+ * edited stroke (e.g. lasso-moved — same id, new points/updatedAt) is detected and recomputed on its
+ * next use. Committing ONE new stroke costs exactly one getStroke() call, for that stroke; every
+ * other already-cached stroke is reused as-is — this is the whole fix for the O(n)-per-commit cost
+ * this session's own diagnosis measured (see AnnotationLayer's committed-canvas effect below, and
+ * this session's forensic report on Notes vs. Annotation handwriting). */
+interface CachedStrokeOutline {
+  updatedAt: string;
+  width: number;
+  height: number;
+  outline: [number, number][];
+}
+
+function getCachedOutline(cache: Map<string, CachedStrokeOutline>, stroke: InkAnnotation | HighlighterInkAnnotation, size: { width: number; height: number }): [number, number][] {
+  const existing = cache.get(stroke.id);
+  if (existing && existing.updatedAt === stroke.updatedAt && existing.width === size.width && existing.height === size.height) {
+    return existing.outline;
+  }
+  const style = stroke.type === 'ink' ? styleForPenStyle(stroke.penStyle) : HIGHLIGHTER_STROKE_OPTIONS;
+  const outline = strokeOutline(stroke.points, size.width, size.height, stroke.thickness, style);
+  cache.set(stroke.id, { updatedAt: stroke.updatedAt, width: size.width, height: size.height, outline });
+  return outline;
+}
+
+/** Phase 8J — the LIVE, in-progress preview's renderer for ink/highlighter strokes: a plain single
+ * stroked path (ctx.lineTo per point), the same cheap technique NoteEditorDialog.tsx's MiniInkCanvas
+ * already uses and which is proven fast on real Android/Chromium WebView hardware. Deliberately never
+ * calls perfect-freehand (see strokeRendering.ts's own header) — no tangent/normal/outline
+ * computation, no tapering — just a round-capped/joined line whose width is derived once from the
+ * stroke's latest pressure sample. This is ONLY the preview: the committed canvas (see the
+ * strokes-driven effect below) still always renders the finished stroke via
+ * drawStrokePath/strokeOutline for full tapered quality, from the complete, undecimated point array
+ * finishStroke() commits — nothing about final quality or pressure fidelity changes, only what's
+ * drawn WHILE the hand is still moving.
+ *
+ * Phase 8K — `fromIndex` (default 0, so every existing call site/test that omits it still draws the
+ * whole stroke exactly as before) lets a caller draw only the TAIL segment starting at that point
+ * index, connected seamlessly to it, instead of the entire stroke from its first point — see
+ * drawActivePreview's own use of this for why: the Document canvas spans the whole scrollable
+ * document (often far taller than the visible viewport), so redrawing the complete accumulated
+ * stroke from scratch every animation frame means redoing ever-more work as a stroke grows, on a
+ * canvas that can be many times larger than MiniInkCanvas's small, bounded one. Earlier points never
+ * change once captured, so their already-painted pixels never need to be touched again. */
+export function drawLivePreviewStroke(ctx: CanvasRenderingContext2D, stroke: InkAnnotation | HighlighterInkAnnotation, size: { width: number; height: number }, fromIndex = 0) {
+  const pts = stroke.points;
+  if (pts.length < 2 || fromIndex >= pts.length - 1) return;
+  const start = Math.max(0, fromIndex);
+  const lastPressure = pts[pts.length - 1].pressure ?? 0.5;
+  const widthFactor = 0.4 + 0.6 * Math.min(1, Math.max(0, lastPressure));
+  ctx.save();
+  ctx.strokeStyle = stroke.color;
+  ctx.globalAlpha = stroke.opacity;
+  ctx.lineWidth = Math.max(1, stroke.thickness * widthFactor);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  const p0 = toPx(pts[start], size);
+  ctx.moveTo(p0.x, p0.y);
+  for (let i = start + 1; i < pts.length; i++) {
+    const p = toPx(pts[i], size);
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -218,7 +310,18 @@ export function AnnotationLayer({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const committedCanvasRef = useRef<HTMLCanvasElement>(null);
   const activeCanvasRef = useRef<HTMLCanvasElement>(null);
+  // Task 2 — per-stroke outline cache (see getCachedOutline above). A fresh Map per mount is exactly
+  // right: DocumentAnnotator remounts this whole layer via a key change whenever documentId/
+  // renderMode changes (see its own header), so a genuine "reset" already gets a clean cache for
+  // free, with no manual clearing needed.
+  const strokeOutlineCacheRef = useRef<Map<string, CachedStrokeOutline>>(new Map());
   const activePointsRef = useRef<NormalizedPoint[]>([]);
+  // Phase 8K — how many of activePointsRef.current's points have already been PAINTED onto
+  // activeCanvasRef (see drawActivePreview/clearActiveCanvas below) — lets the live preview append
+  // only the newest segment each frame instead of clearing and redrawing the entire accumulated
+  // stroke from scratch every time. Reset to 0 whenever the canvas is actually blank (a fresh
+  // gesture, or a resize that wiped the backing store).
+  const activePaintedCountRef = useRef(0);
   const drawingPointerIdRef = useRef<number | null>(null);
   // Phase 8B — true only while the CURRENT gesture (tracked by drawingPointerIdRef above) was
   // started by a stylus's physical eraser tip (see handlePointerDown's own isStylusEraserTip
@@ -318,18 +421,46 @@ export function AnnotationLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textAnnotations.map((a) => `${a.id}:${a.anchor.start}:${a.anchor.end}:${a.updatedAt}`).join(','), size.width, size.height]);
 
-  function sizeCanvas(canvas: HTMLCanvasElement) {
+  // Phase 8F fix — this used to unconditionally reassign canvas.width/height (and re-run
+  // setTransform) on every call, including once per animation frame while a stroke is actively
+  // being drawn (drawActivePreview calls this every frame — see scheduleActiveDraw). Reassigning a
+  // canvas's width/height ALWAYS clears its entire backing store and resets 2D context state, per
+  // the HTML Canvas spec, even when set to the exact same value — real, avoidable per-frame cost
+  // that was being paid on every frame of every stroke regardless of whether the size had actually
+  // changed (it almost never does mid-stroke; only a live container resize changes it). Skipping the
+  // resize when the CSS pixel size hasn't changed removes that cost without affecting correctness:
+  // clearRect (called right after this, by the caller) still operates in the same CSS-pixel space
+  // the already-applied transform maps correctly.
+  // Returns true only when it actually reassigned canvas.width/height (which always clears the
+  // entire backing store per the Canvas spec) — Phase 8K's incremental live-preview draw (below)
+  // uses this to know when it must fall back to a one-time full repaint instead of assuming
+  // everything painted so far is still there.
+  function sizeCanvas(canvas: HTMLCanvasElement): boolean {
+    const cssWidth = `${size.width}px`;
+    const cssHeight = `${size.height}px`;
+    if (canvas.style.width === cssWidth && canvas.style.height === cssHeight) return false;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.round(size.width * dpr));
     canvas.height = Math.max(1, Math.round(size.height * dpr));
-    canvas.style.width = `${size.width}px`;
-    canvas.style.height = `${size.height}px`;
+    canvas.style.width = cssWidth;
+    canvas.style.height = cssHeight;
     const ctx = canvas.getContext('2d');
     ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return true;
   }
 
   // Redraws every COMMITTED stroke — triggered only by a real prop change (a new/erased stroke, a
   // resize/zoom), never by an in-progress pointer move.
+  //
+  // Task 2 — this effect fires once per finished stroke (JS-drawn OR native-committed, since both
+  // flow into the same `strokes` prop). It used to re-run perfect-freehand (drawStrokePath ->
+  // strokeOutline -> getStroke) for EVERY existing ink/highlighter stroke on every firing, an
+  // O(n)-in-stroke-count cost this project's own history measured as too expensive for hot-path use
+  // on real Android hardware (see the now-removed DIAGNOSTIC_SKIP_INK_REDRAW workaround). Now each
+  // stroke's outline is fetched via getCachedOutline: an unchanged stroke reuses its cached outline
+  // (no getStroke call at all), and only a genuinely new/edited stroke or an actual resize triggers
+  // one fresh computation, for that stroke alone. Stale entries for strokes that no longer exist
+  // (erased, or cleared) are pruned first so the cache never grows unbounded.
   useEffect(() => {
     const canvas = committedCanvasRef.current;
     if (!canvas || size.width === 0) return;
@@ -338,7 +469,17 @@ export function AnnotationLayer({
     if (!ctx) return;
     ctx.clearRect(0, 0, size.width, size.height);
     if (!annotationsVisible) return;
-    for (const stroke of strokes) drawStrokePath(ctx, stroke, size);
+
+    const cache = strokeOutlineCacheRef.current;
+    const liveStrokeIds = new Set(strokes.map((s) => s.id));
+    for (const cachedId of cache.keys()) {
+      if (!liveStrokeIds.has(cachedId)) cache.delete(cachedId);
+    }
+    for (const stroke of strokes) {
+      const outline = getCachedOutline(cache, stroke, size);
+      drawStrokePath(ctx, stroke, size, outline);
+    }
+
     for (const s of shapesAndArrows) {
       if (s.type === 'shape') drawShapeOutline(ctx, s, size);
       else drawArrowPath(ctx, s, size);
@@ -350,17 +491,22 @@ export function AnnotationLayer({
     const canvas = activeCanvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (ctx) ctx.clearRect(0, 0, size.width, size.height);
+    activePaintedCountRef.current = 0;
   }
 
   function drawActivePreview() {
     const canvas = activeCanvasRef.current;
     if (!canvas) return;
-    sizeCanvas(canvas);
+    const resized = sizeCanvas(canvas);
+    if (resized) activePaintedCountRef.current = 0; // the resize above already wiped the backing store
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, size.width, size.height);
-    if (activeTool === 'eraser') return;
+    if (activeTool === 'eraser') {
+      ctx.clearRect(0, 0, size.width, size.height);
+      return;
+    }
     if (activeTool === 'lasso') {
+      ctx.clearRect(0, 0, size.width, size.height);
       if (moveStartRef.current && moveDeltaRef.current) {
         const { x: dx, y: dy } = moveDeltaRef.current;
         for (const a of selectedAnnotations) {
@@ -384,6 +530,7 @@ export function AnnotationLayer({
       return;
     }
     if (isShapeDragTool) {
+      ctx.clearRect(0, 0, size.width, size.height);
       const [p0, p1] = activePointsRef.current;
       if (!p0 || !p1) return;
       if (isArrowTool) {
@@ -393,11 +540,30 @@ export function AnnotationLayer({
       }
       return;
     }
+    // Phase 8J — the live, in-progress preview uses the FULL, undecimated activePointsRef.current
+    // (no point cap, no downsampling) and the cheap drawLivePreviewStroke renderer, never
+    // perfect-freehand's getStroke() — see strokeRendering.ts's own header and drawLivePreviewStroke's
+    // doc comment for why. finishStroke/onCommitStroke below always commits this same full array;
+    // only the committed canvas's redraw (the strokes-driven effect above) ever calls the expensive
+    // full-quality drawStrokePath/strokeOutline path, exactly once per finished stroke.
+    //
+    // Phase 8K — unlike every other branch above, this one does NOT clearRect the canvas each frame:
+    // it paints only the segment(s) added since the last frame (drawLivePreviewStroke's own
+    // fromIndex), appended onto whatever is already there. A full clear+redraw here would touch the
+    // Document canvas's ENTIRE backing store every animation frame — which, unlike MiniInkCanvas's
+    // small bounded canvas, spans the whole scrollable document and can be many times the visible
+    // viewport's area (see DocumentAnnotator.tsx's scrollBoxClassName vs. its children) — real,
+    // avoidable per-frame cost confirmed on physical Android hardware even after Phase 8J removed
+    // perfect-freehand from this same hot path. Earlier segments never need to be touched again once
+    // painted, since captured points never change; clearActiveCanvas (called once per finished
+    // gesture, not per frame) is what actually erases the preview once the committed canvas takes
+    // over.
     const previewStroke: InkAnnotation | HighlighterInkAnnotation =
       activeTool === 'highlighter'
-        ? { id: 'preview', documentId: '', renderMode, pageNumber: 1, studyTags: [], type: 'highlighterInk', color, thickness, opacity, points: activePointsRef.current, createdAt: '', updatedAt: '' }
-        : { id: 'preview', documentId: '', renderMode, pageNumber: 1, studyTags: [], type: 'ink', penStyle, color, thickness, opacity, points: activePointsRef.current, createdAt: '', updatedAt: '' };
-    drawStrokePath(ctx, previewStroke, size);
+        ? { id: 'preview', documentId: '', renderMode, pageNumber: 1, studyTags: [], type: 'highlighterInk', color, thickness, opacity, points: activePointsRef.current as NormalizedPoint[], createdAt: '', updatedAt: '' }
+        : { id: 'preview', documentId: '', renderMode, pageNumber: 1, studyTags: [], type: 'ink', penStyle, color, thickness, opacity, points: activePointsRef.current as NormalizedPoint[], createdAt: '', updatedAt: '' };
+    drawLivePreviewStroke(ctx, previewStroke, size, activePaintedCountRef.current);
+    if (previewStroke.points.length >= 2) activePaintedCountRef.current = previewStroke.points.length - 1;
   }
 
   function scheduleActiveDraw() {
@@ -537,9 +703,15 @@ export function AnnotationLayer({
     const nativeEvent = e.nativeEvent as PointerEvent & { getCoalescedEvents?: () => PointerEvent[] };
     const samples = typeof nativeEvent.getCoalescedEvents === 'function' ? nativeEvent.getCoalescedEvents() : [nativeEvent];
     const toAppend = samples.length > 0 ? samples : [nativeEvent];
+    // Phase 8K — the wrapper's bounding rect is read ONCE for this whole batch, not once per sample
+    // (toRelativePoint's own getBoundingClientRect() call, repeated for every one of a
+    // high-frequency stylus's coalesced samples within a single native event dispatch, was real,
+    // avoidable per-sample DOM-read cost) — the rect cannot change between samples captured within
+    // the same dispatch.
+    const rect = wrapperRef.current!.getBoundingClientRect();
     for (const sample of toAppend) {
       if (points.length >= MAX_POINTS_PER_STROKE) break;
-      points.push(toRelativePoint(sample));
+      points.push(relativePointFromClient(sample.clientX, sample.clientY, rect, sample.pressure));
     }
     scheduleActiveDraw();
   }

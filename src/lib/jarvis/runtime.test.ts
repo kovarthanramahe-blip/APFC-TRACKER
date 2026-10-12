@@ -227,6 +227,90 @@ describe('runJarvisRequest — Android provider composition is genuinely reachab
   });
 });
 
+describe('runJarvisRequest — promptOverride (integration branch, APFC Wave 4A)', () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(() => vi.doUnmock('./ai/android/localLlamaCapacitorPlugin'));
+
+  it('a non-empty promptOverride is sent to the provider verbatim, never `query`', async () => {
+    const completeSpy = vi.fn(async (_request: { prompt: string }) => ({ text: 'grounded answer', finishReason: 'stop' as const }));
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({
+      default: fixturePlugin({
+        getRuntimeStatus: async () => ({ status: 'ready' }),
+        getLoadedModel: async () => ({ model: { modelId: 'stub-model', loadedAt: '2026-01-01T00:00:00Z' } }),
+        complete: completeSpy,
+      }),
+      isLocalLlamaRuntimeAvailable: true,
+    }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    const result = await runJarvisRequest({ context: CONTEXT, query: 'explain this document', promptOverride: 'SOURCE EVIDENCE: the real grounded prompt text.' });
+
+    expect(completeSpy).toHaveBeenCalledTimes(1);
+    expect(completeSpy.mock.calls[0][0].prompt).toContain('SOURCE EVIDENCE: the real grounded prompt text.');
+    expect(result.response.responseText).toBe('grounded answer');
+  });
+
+  it('an absent promptOverride falls back to `query` — every existing caller is byte-for-byte unaffected', async () => {
+    const completeSpy = vi.fn(async (_request: { prompt: string }) => ({ text: 'ok', finishReason: 'stop' as const }));
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({
+      default: fixturePlugin({
+        getRuntimeStatus: async () => ({ status: 'ready' }),
+        getLoadedModel: async () => ({ model: { modelId: 'stub-model', loadedAt: '2026-01-01T00:00:00Z' } }),
+        complete: completeSpy,
+      }),
+      isLocalLlamaRuntimeAvailable: true,
+    }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    await runJarvisRequest({ context: CONTEXT, query: 'explain the preamble' });
+
+    expect(completeSpy.mock.calls[0][0].prompt).toContain('explain the preamble');
+  });
+
+  it('an empty/whitespace-only promptOverride also falls back to `query`, never sent as literally blank', async () => {
+    const completeSpy = vi.fn(async (_request: { prompt: string }) => ({ text: 'ok', finishReason: 'stop' as const }));
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({
+      default: fixturePlugin({
+        getRuntimeStatus: async () => ({ status: 'ready' }),
+        getLoadedModel: async () => ({ model: { modelId: 'stub-model', loadedAt: '2026-01-01T00:00:00Z' } }),
+        complete: completeSpy,
+      }),
+      isLocalLlamaRuntimeAvailable: true,
+    }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    await runJarvisRequest({ context: CONTEXT, query: 'explain the preamble', promptOverride: '   ' });
+
+    expect(completeSpy.mock.calls[0][0].prompt).toContain('explain the preamble');
+  });
+
+  it('promptOverride never affects intent/routing — only `query` is classified, even when promptOverride itself contains a trigger phrase', async () => {
+    const completeSpy = vi.fn(async (_request: { prompt: string }) => ({ text: 'grounded answer', finishReason: 'stop' as const }));
+    vi.doMock('./ai/android/localLlamaCapacitorPlugin', () => ({
+      default: fixturePlugin({
+        getRuntimeStatus: async () => ({ status: 'ready' }),
+        getLoadedModel: async () => ({ model: { modelId: 'stub-model', loadedAt: '2026-01-01T00:00:00Z' } }),
+        complete: completeSpy,
+      }),
+      isLocalLlamaRuntimeAvailable: true,
+    }));
+    const { runJarvisRequest } = await import('./runtime');
+
+    // `query` itself carries no trigger phrase, so routing still reaches the real AI provider —
+    // proving promptOverride's own content (which DOES contain "revision") is never read for
+    // intent classification, only for the literal text the provider sees.
+    const result = await runJarvisRequest({
+      context: CONTEXT,
+      query: 'explain this document',
+      promptOverride: 'The 2019 revision of the Act amended several provisions.',
+      hasDocumentContext: true,
+    });
+
+    expect(completeSpy).toHaveBeenCalledTimes(1);
+    expect(result.response.responseText).toBe('grounded answer');
+  });
+});
+
 describe('runJarvisRequest — provenance is always explicit', () => {
   beforeEach(() => vi.resetModules());
   afterEach(() => vi.doUnmock('./ai/android/localLlamaCapacitorPlugin'));
