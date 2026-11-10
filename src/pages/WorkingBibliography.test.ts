@@ -81,11 +81,12 @@ function importStructuredFile(rawText: string, sourceFilename = 'sources.md') {
 }
 
 /** Mirrors what pages/WorkingBibliography.tsx's handleSaveForm does for a brand-new manual entry. */
-function addManualRecord(input: { title: string; authors?: string; year?: string; tags?: string; category?: string; notes?: string }) {
+function addManualRecord(input: { title: string; authors?: string; year?: string; tags?: string; category?: string; notes?: string; archiveId?: string }) {
   const fields = {
     authors: input.authors ? parseAuthorsInput(input.authors) : undefined,
     year: input.year,
     notes: input.notes,
+    archiveId: input.archiveId,
   };
   const tags = input.tags ? parseTagsInput(input.tags) : [];
   const category = input.category;
@@ -162,6 +163,18 @@ describe('manual creation', () => {
     const [stored] = useAppStore.getState().importedContent;
     expect(stored.rawContent).toContain('Title: Readable Record');
     expect(stored.rawContent).toContain('Jane Smith');
+  });
+
+  // Feedback item — a primary source's archive/shelfmark identifier (e.g. a NAIPUB number) had no
+  // field of its own, so it was being typed into Citation Key as a workaround. archiveId is a
+  // distinct bibliography field now, round-tripped through metadata and rawContent exactly like
+  // every other field here.
+  it('stores a primary source\'s archive/shelfmark id (archiveId) distinctly from citationKey', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    addManualRecord({ title: 'Home Department File 1945', archiveId: 'NAIPUB-1234' });
+    const [stored] = useAppStore.getState().importedContent;
+    expect(getBibliographyFields(stored).archiveId).toBe('NAIPUB-1234');
+    expect(stored.rawContent).toContain('Archive ID: NAIPUB-1234');
   });
 });
 

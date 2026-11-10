@@ -105,14 +105,19 @@ export function isDescriptiveContentType(type: ImportedContentType): boolean {
 // duplicating this logic)
 // ============================================================================================
 
-export const SUPPORTED_IMPORT_EXTENSIONS = ['.md', '.markdown', '.docx', '.pdf', '.txt', '.csv', '.json'] as const;
+/** Image extensions (requirement: "OCR for scanned PDFs/images") — a raster image has no
+ * extractable text layer at all, so it is ALWAYS routed straight to OCR (see extractContentFromFile
+ * below), never attempted as plain text first. */
+export const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'] as const;
+
+export const SUPPORTED_IMPORT_EXTENSIONS = ['.md', '.markdown', '.docx', '.pdf', '.txt', '.csv', '.json', ...SUPPORTED_IMAGE_EXTENSIONS] as const;
 
 /** A conservative initial cap — large files are slow to parse in a mobile WebView and a single
  * huge imported item risks blowing the app's localStorage persistence quota (see lib/store.ts's
  * zustand `persist`, which is shared across every piece of app data, not just notes). */
 export const MAX_IMPORT_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
-export type ImportFileFormat = 'markdown' | 'docx' | 'pdf' | 'text' | 'csv' | 'json' | 'doc' | 'unsupported';
+export type ImportFileFormat = 'markdown' | 'docx' | 'pdf' | 'text' | 'csv' | 'json' | 'doc' | 'image' | 'unsupported';
 
 /** Human-readable labels for ImportFileFormat, shared by every import-preview UI (Notes, PhD
  * Research documents, Working Bibliography, …) so the wording stays consistent in one place. */
@@ -124,12 +129,18 @@ export const IMPORT_FORMAT_LABELS: Record<ImportFileFormat, string> = {
   csv: 'CSV (.csv)',
   json: 'JSON (.json)',
   doc: 'Legacy Word Document (.doc)',
+  image: 'Image (scanned page or photo)',
   unsupported: 'Unsupported',
 };
 
 const LEGACY_DOC_MESSAGE = "Legacy .doc files aren't supported yet. Please save the document as .docx or PDF and upload it again.";
-const NEAR_EMPTY_PDF_MESSAGE = 'This PDF may be scanned/image-based and does not contain extractable text.';
-const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported file type. Please upload a .md, .markdown, .docx, .pdf, .txt, .csv, or .json file.';
+/** Fires only once on-device OCR (see jarvis/ai/ocrProvider.ts) has ALSO been attempted on a
+ * near-empty PDF and still found nothing usable — never the first/only signal shown for a scanned
+ * PDF anymore (see extractMarkdownFromPdf's own OCR fallback below). */
+const NEAR_EMPTY_PDF_MESSAGE = 'This PDF appears to be scanned/image-based. On-device text recognition (OCR) was attempted but could not find readable text — try again with an internet connection (OCR needs one the first time, to download its local model) or a clearer scan.';
+const NEAR_EMPTY_IMAGE_MESSAGE = 'Could not recognise any readable text in this image — try a clearer or higher-resolution photo/scan.';
+const OCR_UNAVAILABLE_MESSAGE = 'Could not run on-device text recognition (OCR) — this needs an internet connection the first time, to download a small local model. Please try again once you have a connection.';
+const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported file type. Please upload a .md, .markdown, .docx, .pdf, .txt, .csv, .json, .png, .jpg, .jpeg, or .webp file.';
 const UNREADABLE_FILE_MESSAGE = "Could not read this file — please check it isn't corrupted and try again.";
 const INVALID_JSON_MESSAGE = "This file doesn't contain valid JSON — please check it isn't corrupted and try again.";
 
@@ -184,6 +195,7 @@ export function getImportFileFormat(filename: string): ImportFileFormat {
   if (lower.endsWith('.csv')) return 'csv';
   if (lower.endsWith('.json')) return 'json';
   if (lower.endsWith('.doc')) return 'doc';
+  if (SUPPORTED_IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) return 'image';
   return 'unsupported';
 }
 
@@ -395,8 +407,101 @@ async function extractMarkdownFromDocx(file: File): Promise<string> {
   return htmlToMarkdown(html);
 }
 
-/** PDF -> per-page text runs (pdfjs-dist) -> best-effort Markdown (buildMarkdownFromPdfPages). */
-async function extractMarkdownFromPdf(file: File): Promise<string> {
+/** How many pages of a likely-scanned PDF get OCR'd before giving up — a conservative bound so a
+ * huge scanned document can't hang the import indefinitely; OCR is inherently much slower than
+ * pdfjs's own text-layer extraction (one on-device model inference per page). Mirrors this file's
+ * existing "conservative, bounded" discipline (see MAX_IMPORT_FILE_SIZE_BYTES). */
+const OCR_MAX_PDF_PAGES = 25;
+const OCR_PDF_RENDER_SCALE = 2;
+
+/**
+ * Real-browser verification of the scanned-PDF OCR path (headless Chromium 141, the latest stable
+ * release available at the time of writing) found that pdfjs-dist@6.3.289's `PDFPageProxy.render()`
+ * unconditionally calls an internal cache helper built on `Map.prototype.getOrInsertComputed` — a
+ * TC39 "Map/Set upsert" method that, confirmed by direct in-browser feature detection, has not yet
+ * shipped in ANY current browser release (Chromium 141 included). Every call to `page.render()`
+ * therefore throws `TypeError: ...getOrInsertComputed is not a function` in every real browser
+ * today, not just this one sandbox — a genuine pdfjs-dist/browser version gap, not a defect in how
+ * this file calls `render()` (its own pre-existing `getTextContent()`-based text extraction never
+ * calls `render()` at all, and is unaffected — see this file's own test suite). This is the standard,
+ * minimal "upsert" polyfill (get-if-present, else compute-set-and-return) — applied only when the
+ * real method is genuinely absent, so it becomes a no-op the moment browsers/pdfjs-dist catch up,
+ * and it is NEVER invoked unless a scanned-PDF OCR attempt actually needs to rasterise a page. */
+interface MapWithUpsert<K, V> extends Map<K, V> {
+  getOrInsertComputed?(key: K, callback: (key: K) => V): V;
+}
+
+function ensureMapUpsertPolyfill(): void {
+  // `Map.prototype.getOrInsertComputed` is not yet part of any TS lib target (it is a TC39
+  // proposal no shipping browser implements yet — see this function's own doc comment), so the
+  // cast below is the only way to feature-detect and patch it without widening this whole file's
+  // `lib` target just for one not-yet-standard method.
+  const proto = Map.prototype as MapWithUpsert<unknown, unknown>;
+  if (typeof proto.getOrInsertComputed === 'function') return;
+  Object.defineProperty(Map.prototype, 'getOrInsertComputed', {
+    value: function <K, V>(this: Map<K, V>, key: K, callback: (key: K) => V): V {
+      if (this.has(key)) return this.get(key) as V;
+      const computed = callback(key);
+      this.set(key, computed);
+      return computed;
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+/** Renders one pdfjs-dist page to a PNG Blob via an in-memory canvas — the one bridge between
+ * pdfjs's page model and jarvis/ai/ocrProvider.ts's own Blob-based input contract. Browser-only
+ * (needs a real 2D canvas context), exactly like this file's own existing DOCX/PDF extraction —
+ * see this file's header. Returns `null` (never throws) if no 2D context is available, which the
+ * caller treats as "skip this page" rather than failing the whole OCR attempt. */
+async function renderPdfPageToPng(page: import('pdfjs-dist').PDFPageProxy): Promise<Blob | null> {
+  ensureMapUpsertPolyfill();
+  const viewport = page.getViewport({ scale: OCR_PDF_RENDER_SCALE });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  if (!canvas.getContext('2d')) return null;
+  await page.render({ canvas, viewport }).promise;
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+}
+
+/**
+ * OCR fallback for a PDF whose text layer is empty (almost certainly scanned/image-only) —
+ * requirement: "OCR for scanned PDFs/images where feasible". Renders up to OCR_MAX_PDF_PAGES pages
+ * to an image and recognises each via jarvis/ai/ocrProvider.ts's real local OCR model, preserving
+ * this file's own `[Page N]` convention (see buildMarkdownFromPdfPages) so page boundaries survive
+ * exactly the same way they would for a normal, text-layer PDF. A page the model can't read (OCR
+ * found nothing, or rendering failed) contributes nothing — never a fabricated "[Page N]" heading
+ * for a page with no real recognised text. Returns '' (never throws) if OCR itself is unavailable
+ * (e.g. the model's first-use download needs a network this device doesn't currently have) or finds
+ * nothing at all on any page — the caller (extractMarkdownFromPdf) treats that exactly like OCR was
+ * never attempted, falling back to its pre-existing near-empty handling.
+ */
+async function ocrPdfPages(pdf: import('pdfjs-dist').PDFDocumentProxy): Promise<string> {
+  const { createOcrProvider } = await import('./jarvis/ai/ocrProvider');
+  const provider = createOcrProvider();
+  const pageCount = Math.min(pdf.numPages, OCR_MAX_PDF_PAGES);
+  const blocks: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const image = await renderPdfPageToPng(page);
+    if (!image) continue;
+    const result = await provider.recognize(image);
+    const pageText = result.text.trim();
+    if (pageText) blocks.push(`[Page ${pageNum}]\n\n${pageText}`);
+  }
+
+  return normalizeText(blocks.join('\n\n'));
+}
+
+/** PDF -> per-page text runs (pdfjs-dist) -> best-effort Markdown (buildMarkdownFromPdfPages),
+ * falling back to on-device OCR (ocrPdfPages) only when that text layer is empty. `ocrApplied`
+ * tells the caller (and, via ExtractedFileContent/ImportedContentProvenance, every later reader)
+ * whether the returned text came from OCR rather than the PDF's own real text layer — never
+ * silently blended or left ambiguous. */
+async function extractMarkdownFromPdf(file: File): Promise<{ text: string; ocrApplied: boolean }> {
   const pdfjsLib = await import('pdfjs-dist');
   const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
   pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -412,15 +517,35 @@ async function extractMarkdownFromPdf(file: File): Promise<string> {
     );
     pages.push(items);
   }
-  return normalizeText(buildMarkdownFromPdfPages(pages));
+  const text = normalizeText(buildMarkdownFromPdfPages(pages));
+  if (!isNearEmptyContent(text)) return { text, ocrApplied: false };
+
+  try {
+    const ocrText = await ocrPdfPages(pdf);
+    if (ocrText && !isNearEmptyContent(ocrText)) return { text: ocrText, ocrApplied: true };
+  } catch {
+    // OCR genuinely unavailable (e.g. no network for its first-use model download) or failed —
+    // fall through to the pre-existing near-empty handling below, exactly as before OCR support
+    // existed. Never a thrown error here: a PDF that can't be OCR'd is not a parse failure.
+  }
+  return { text, ocrApplied: false };
 }
 
 export interface ExtractedFileContent {
   format: ImportFileFormat;
   /** Markdown for markdown/docx/pdf; raw normalised text for .txt; a Markdown table for .csv
    * (see csvRowsToMarkdownTable); pretty-printed JSON text for .json (see JSON.stringify(parsed,
-   * null, 2) below) — never reinterpreted beyond that reformatting. */
+   * null, 2) below); on-device OCR output for 'image', or for a 'pdf' whose real text layer was
+   * empty (see `ocrApplied` below) — never reinterpreted beyond that reformatting. */
   text: string;
+  /** True only when `text` came from jarvis/ai/ocrProvider.ts's local OCR model rather than a
+   * document's own real text layer (always true for 'image'; true for 'pdf' only on the scanned-
+   * page fallback path — see extractMarkdownFromPdf). Omitted (never `false`) for every other
+   * format, matching this file's existing "omit rather than default" discipline (see
+   * ImportedContentMetadata's lectureOrUnitNumber/documentYear). Carried through ImportPreview and
+   * confirmImportedContent into ImportedContentProvenance.ocrApplied so OCR involvement stays
+   * visible on the saved record, never silently indistinguishable from the document's real text. */
+  ocrApplied?: boolean;
 }
 
 export type ExtractionOutcome = { status: 'ok'; content: ExtractedFileContent } | { status: 'error'; message: string };
@@ -440,6 +565,7 @@ export async function extractContentFromFile(file: File, maxBytes: number = MAX_
 
   try {
     let text: string;
+    let ocrApplied = false;
     if (validation.format === 'markdown' || validation.format === 'text') {
       text = normalizeText(await file.text());
     } else if (validation.format === 'docx') {
@@ -457,13 +583,34 @@ export async function extractContentFromFile(file: File, maxBytes: number = MAX_
         return { status: 'error', message: INVALID_JSON_MESSAGE };
       }
       text = JSON.stringify(parsed, null, 2);
+    } else if (validation.format === 'image') {
+      // A raster image has no text layer at all — OCR is the ONLY way to get text out of it, never
+      // a fallback here (unlike the PDF path below, where OCR only runs once the real text layer
+      // has already come back empty).
+      let recognized: string;
+      try {
+        const { createOcrProvider } = await import('./jarvis/ai/ocrProvider');
+        const result = await createOcrProvider().recognize(file);
+        recognized = normalizeText(result.text);
+      } catch {
+        return { status: 'error', message: OCR_UNAVAILABLE_MESSAGE };
+      }
+      if (isNearEmptyContent(recognized)) {
+        return { status: 'error', message: NEAR_EMPTY_IMAGE_MESSAGE };
+      }
+      text = recognized;
+      ocrApplied = true;
     } else {
-      text = await extractMarkdownFromPdf(file);
+      const pdfResult = await extractMarkdownFromPdf(file);
+      text = pdfResult.text;
+      ocrApplied = pdfResult.ocrApplied;
       if (isNearEmptyContent(text)) {
         return { status: 'error', message: NEAR_EMPTY_PDF_MESSAGE };
       }
     }
-    return { status: 'ok', content: { format: validation.format, text } };
+    const content: ExtractedFileContent = { format: validation.format, text };
+    if (ocrApplied) content.ocrApplied = true;
+    return { status: 'ok', content };
   } catch {
     return { status: 'error', message: UNREADABLE_FILE_MESSAGE };
   }
@@ -512,6 +659,14 @@ export interface ImportedContentProvenance {
    * defaulted to 0) on every record created before this field existed, matching this module's own
    * established convention for `origin`/`updatedAt`. */
   importVersion?: number;
+  /** True only when `rawContent` came from on-device OCR (jarvis/ai/ocrProvider.ts) rather than a
+   * document's own real text layer — carried straight from ExtractedFileContent.ocrApplied via
+   * ImportPreview (see confirmImportedContent below). Absent (never `false`) for every record OCR
+   * was never involved in, matching this interface's existing omit-rather-than-default discipline.
+   * The one place this phase's OCR involvement stays visible on a saved record — a reader (the
+   * Repository UI, a citation) can always tell a recognised-from-image passage apart from the
+   * document's own real text, never silently blended as if OCR had perfect, unquestionable fidelity. */
+  ocrApplied?: boolean;
 }
 
 /** The current version of confirmImportedContent/createManualImportedContent's own OUTPUT SHAPE
@@ -542,6 +697,17 @@ export interface ImportedContentMetadata {
    * material is simply every ImportedContent item whose metadata.topicAreaId matches it. Never
    * auto-filled — set only when a user explicitly assigns a document to a Topic Area. */
   topicAreaId?: string;
+  /** Research-document-model strengthening — "collections" (requirement: a research document can
+   * belong to more than one PhD Research Topic Area, the same way a real reference manager lets one
+   * source sit in several collections at once). ADDITIVE and separate from `topicAreaId` above,
+   * never a replacement: `topicAreaId` keeps meaning "the primary Topic Area" exactly as before for
+   * every existing record and caller; `topicAreaIds` holds any FURTHER Topic Area ids the same item
+   * also belongs to. A reader that wants "every Topic Area this item belongs to" must check BOTH
+   * fields — see lib/phdTopicArea.ts's itemBelongsToTopicArea, the one place that union is computed,
+   * rather than re-deriving it ad hoc per call site. Never auto-filled, never deduplicated against
+   * `topicAreaId` here (a caller may freely also repeat it) — this field only exists to ADD
+   * memberships, never to narrow or contradict the primary one. */
+  topicAreaIds?: string[];
   /** A short, user-written summary distinct from `rawContent` (the full body) — e.g. what a
    * repository card/table shows without opening the item. Never auto-filled, never derived from
    * rawContent. Lives in `metadata` (rather than a new top-level ImportedContent field) so it's
@@ -593,6 +759,26 @@ export interface ImportedContentMetadata {
    * Absent means 'unread' — never backfilled onto existing records. Applies to any ImportedContent
    * item in principle, but only ever set by the PhD Research workspace's own UI today. */
   readingStatus?: string;
+  /** Smart Document Upload — lib/documentTypeClassification.ts's own DocumentType/
+   * DocumentTypeStatus (kept as plain strings here, same existing-field discipline as
+   * readingStatus above, rather than importing that module's types into this one).
+   * documentType/documentTypeConfidence/documentTypeRationale are only ever set together, by the
+   * SAME ingestion call that classified this item (see knowledgeIngestion.ts and
+   * ImportToRepositoryModal.tsx's own single-document save path) — never independently, and never
+   * backfilled onto an existing record that predates this field. documentTypeStatus is the one
+   * field a confirm/override UI action changes on its own, independent of the other three: setting
+   * it to 'confirmed' is this module's own signal (see
+   * applyDocumentTypeClassification in documentTypeClassification.ts) that an automatic
+   * reclassification must never silently overwrite documentType again. */
+  documentType?: string;
+  documentTypeConfidence?: number;
+  documentTypeRationale?: string;
+  documentTypeStatus?: string;
+  /** Smart Document Upload — lib/documentTypeClassification.ts's extractLectureOrUnitNumber /
+   * extractDocumentYear. Absent means "no labelled Lecture/Unit/Chapter/Act-year pattern was found
+   * in the text" — never a guessed or defaulted number. */
+  lectureOrUnitNumber?: number;
+  documentYear?: number;
   [key: string]: unknown;
 }
 
@@ -659,6 +845,9 @@ export interface ImportPreview {
   suggestedContentType: ImportedContentType;
   title: string;
   content: string;
+  /** Carried straight from ExtractedFileContent.ocrApplied — see that field's own doc comment.
+   * Threaded through unchanged to confirmImportedContent's provenance.ocrApplied. */
+  ocrApplied?: boolean;
 }
 
 export function buildImportPreview(file: { name: string }, extracted: ExtractedFileContent): ImportPreview {
@@ -668,6 +857,7 @@ export function buildImportPreview(file: { name: string }, extracted: ExtractedF
     suggestedContentType: suggestContentType(file.name),
     title: deriveContentTitle(file.name, extracted.text),
     content: extracted.text,
+    ocrApplied: extracted.ocrApplied,
   };
 }
 
@@ -715,6 +905,7 @@ export function confirmImportedContent(
       sourceHash: options.sourceHash,
       sourceFileSize: options.sourceFileSize,
       importVersion: IMPORT_PIPELINE_VERSION,
+      ocrApplied: preview.ocrApplied,
     },
     metadata: options.metadata,
     updatedAt: now,

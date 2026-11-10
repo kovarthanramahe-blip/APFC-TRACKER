@@ -41,6 +41,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 // Phase 15 — internal-only, deliberately absent from nav.ts/AppShell's sidebar and bottom nav
 // (see the page's own header comment); reachable only by typing /dev/design-system directly.
 const DesignSystemShowcase = lazy(() => import('./pages/DesignSystemShowcase'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 function RouteFallback() {
   return (
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/study-plan" element={<StudyPlan />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/dev/design-system" element={<DesignSystemShowcase />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
       <RewardCelebration />

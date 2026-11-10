@@ -21,7 +21,7 @@ function fixtureRuntime(overrides: Partial<NativeLlamaRuntimeClient> = {}): Nati
 
 const LOADED_MODEL: JarvisAndroidLoadedModel = { modelId: 'stub-model', loadedAt: '2026-01-01T00:00:00Z' };
 
-describe('createLocalLlmLifecycleTracker — the seven named lifecycle states', () => {
+describe('createLocalLlmLifecycleTracker — the eight named lifecycle states', () => {
   it('1. provider_unavailable — when the platform/plugin itself is not available, regardless of what the runtime would report', async () => {
     const runtime = fixtureRuntime({ getStatus: async () => 'ready', getLoadedModel: async () => LOADED_MODEL });
     const tracker = createLocalLlmLifecycleTracker(runtime, { isProviderAvailable: false });
@@ -50,11 +50,11 @@ describe('createLocalLlmLifecycleTracker — the seven named lifecycle states', 
     expect(await tracker.getLifecycleState()).toBe('model_unavailable');
   });
 
-  it('2c. model_unavailable — an "error" status with no prior inference attempt (never reported as inference_failed when nothing was actually attempted)', async () => {
+  it('2c. model_load_failed — an "error" status with no prior inference attempt means the most recent LOAD failed, never reported as inference_failed (nothing was actually attempted) and never collapsed into the generic model_unavailable (Phase 13H)', async () => {
     const runtime = fixtureRuntime({ getStatus: async () => 'error', getLoadedModel: async () => null });
     const tracker = createLocalLlmLifecycleTracker(runtime, { isProviderAvailable: true });
 
-    expect(await tracker.getLifecycleState()).toBe('model_unavailable');
+    expect(await tracker.getLifecycleState()).toBe('model_load_failed');
   });
 
   it('3. model_loading — while a model load is in progress', async () => {
@@ -130,6 +130,37 @@ describe('createLocalLlmLifecycleTracker — the seven named lifecycle states', 
 
     await expect(tracker.complete({ prompt: 'hello' })).rejects.toThrow();
     expect(await tracker.getLifecycleState()).toBe('inference_failed');
+  });
+
+  it('8. model_load_failed is distinct from inference_failed — both can genuinely occur, and a status of "error" is resolved by whether an inference was ever attempted, never by guesswork', async () => {
+    const neverRanInference = fixtureRuntime({ getStatus: async () => 'error', getLoadedModel: async () => null });
+    const afterFailedInference = fixtureRuntime({
+      getStatus: async () => 'error',
+      getLoadedModel: async () => null,
+      complete: async () => {
+        throw new Error('native crash during inference');
+      },
+    });
+
+    const loadFailureTracker = createLocalLlmLifecycleTracker(neverRanInference, { isProviderAvailable: true });
+    expect(await loadFailureTracker.getLifecycleState()).toBe('model_load_failed');
+
+    const inferenceFailureTracker = createLocalLlmLifecycleTracker(afterFailedInference, { isProviderAvailable: true });
+    await expect(inferenceFailureTracker.complete({ prompt: 'hello' })).rejects.toThrow();
+    expect(await inferenceFailureTracker.getLifecycleState()).toBe('inference_failed');
+  });
+
+  it('8b. a failed load is recoverable — once a RETRY succeeds (status flips to "ready" with a loaded model), the tracker reports model_ready, never stuck reporting the old failure', async () => {
+    let hasLoadedModel = false;
+    const runtime = fixtureRuntime({
+      getStatus: async () => (hasLoadedModel ? 'ready' : 'error'),
+      getLoadedModel: async () => (hasLoadedModel ? LOADED_MODEL : null),
+    });
+    const tracker = createLocalLlmLifecycleTracker(runtime, { isProviderAvailable: true });
+
+    expect(await tracker.getLifecycleState()).toBe('model_load_failed');
+    hasLoadedModel = true;
+    expect(await tracker.getLifecycleState()).toBe('model_ready');
   });
 
   it('deterministic fallback: the SAME fixed sequence of states is reported for the SAME sequence of inputs, every run', async () => {

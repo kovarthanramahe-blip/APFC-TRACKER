@@ -203,15 +203,22 @@ html.dark {
 
 body {
   font-family: var(--font-sans);
-  background: #f4f6fb;
-  color: #10172a;
+  /* Phase 2A — soft sage/cream gradient replaces the old hard-coded cool-blue flat fill, now
+     reading from the already-defined --color-primary-* and --color-bg tokens instead of a literal
+     hex, so dark mode (which reassigns those same custom properties on html.dark, below) stays in
+     sync automatically. Restrained two-stop gradient, fixed so it does not repeat oddly on scroll. */
+  background: linear-gradient(160deg, var(--color-primary-50) 0%, var(--color-bg) 55%);
+  background-attachment: fixed;
+  color: var(--color-fg);
   transition: background-color 0.25s ease, color 0.25s ease;
   overscroll-behavior-y: none;
 }
 
 html.dark body {
-  background: #070b16;
-  color: #e7ecf9;
+  /* Dark mode keeps a flat fill (no gradient) — --color-primary-50 is a light tint not designed
+     for a dark backdrop, and dark-mode contrast/behaviour must stay exactly as before. */
+  background: var(--color-bg);
+  color: var(--color-fg);
 }
 
 .font-display {

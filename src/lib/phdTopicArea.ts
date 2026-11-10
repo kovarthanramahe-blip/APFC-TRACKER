@@ -10,6 +10,14 @@
 //
 // Same deterministic discipline as lib/upscCseStudyTask.ts / lib/microTarget.ts: no
 // Date.now()/new Date().toISOString() calls in here — every timestamp is supplied by the caller.
+//
+// AI Library — research-document-model strengthening (multi-collection membership): a real item
+// can belong to more than one Topic Area (metadata.topicAreaId for the primary one, plus
+// metadata.topicAreaIds for any further ones — see contentImport.ts's own doc comment on both
+// fields). itemBelongsToTopicArea below is the one place that union is computed, so every caller
+// (phdAnalytics.ts's linked-content counts, pages/PhdDashboard.tsx) checks membership identically
+// rather than re-deriving the "check both fields" rule itself and risking one call site forgetting
+// the new field.
 
 export interface PhdTopicArea {
   id: string;
@@ -64,4 +72,11 @@ export function searchPhdTopicAreas(areas: readonly PhdTopicArea[], query: strin
 
 export function getPhdTopicAreaById(areas: readonly PhdTopicArea[], id: string): PhdTopicArea | undefined {
   return areas.find((a) => a.id === id);
+}
+
+/** True when `item` belongs to Topic Area `areaId` — via its primary `metadata.topicAreaId` OR any
+ * of its further `metadata.topicAreaIds` (see contentImport.ts's own doc comment on both fields).
+ * The one place this union is checked, so a caller never needs to remember both fields exist. */
+export function itemBelongsToTopicArea(item: { metadata?: { topicAreaId?: string; topicAreaIds?: string[] } }, areaId: string): boolean {
+  return item.metadata?.topicAreaId === areaId || (item.metadata?.topicAreaIds?.includes(areaId) ?? false);
 }

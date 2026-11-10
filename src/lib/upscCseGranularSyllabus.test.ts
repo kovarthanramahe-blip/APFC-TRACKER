@@ -32,9 +32,10 @@ describe('UPSC CSE Granular Syllabus — hierarchy integrity', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('covers all 7 required papers with at least one granularized microsyllabus item each', () => {
+  it('covers all 8 required papers with at least one granularized microsyllabus item each (7 Prelims/GS + Mains Optional Subject since History Optional was added)', () => {
     const paperIds = new Set(UPSC_CSE_GRANULAR_NODES.map((n) => n.paperId));
-    expect(paperIds.size).toBe(7);
+    expect(paperIds.size).toBe(8);
+    expect(paperIds.has('mains-optional')).toBe(true);
   });
 
   it('every node carries its complete parent chain (stage/paperId/subjectId/microsyllabusId/topicId)', () => {
@@ -172,12 +173,29 @@ describe('search across official wording / topic / subtopic / micro-topic', () =
   });
 
   it('Phase 6: finds the new History granular topics and resolves them to their existing microsyllabus parent', () => {
-    const ivc = searchGranularNodes(UPSC_CSE_GRANULAR_NODES, 'Indus Valley')[0];
+    const results = searchGranularNodes(UPSC_CSE_GRANULAR_NODES, 'Indus Valley');
+    const ancientIndiaId = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.title === 'Ancient India')!.id;
+    const ivc = results.find((n) => n.microsyllabusId === ancientIndiaId)!;
     expect(ivc).toBeDefined();
     expect(ivc.level).toBe('topic');
-    const ancientIndiaId = UPSC_CSE_PRELIMS_SYLLABUS.microsyllabus.find((m) => m.title === 'Ancient India')!.id;
-    expect(ivc.microsyllabusId).toBe(ancientIndiaId);
     expect(getTopicsForMicrosyllabus(UPSC_CSE_GRANULAR_NODES, ancientIndiaId).map((t) => t.title)).toContain('Indus Valley Civilization');
+  });
+
+  // Library Mode Audit + History Optional Integration task, Phase 1 Completion — History Optional
+  // Paper I's own "Indus Valley Civilization" unit happens to share its exact title with Prelims
+  // GS-I Ancient India's existing granular topic of the same name. This proves the two are never
+  // conflated: distinct ids, distinct microsyllabusId parents (Prelims Ancient India vs Mains
+  // History Optional Paper I), both genuinely findable by the same search query — the correct,
+  // honest outcome for a real title collision (surface both, let the id/parent disambiguate),
+  // never silently merged or one dropped.
+  it('a title shared between a Prelims GS-I topic and a History Optional Paper I unit ("Indus Valley Civilization") resolves to two distinct, correctly-parented nodes', () => {
+    const results = searchGranularNodes(UPSC_CSE_GRANULAR_NODES, 'Indus Valley');
+    const prelimsIvc = results.find((n) => n.stage === 'prelims');
+    const historyOptionalIvc = results.find((n) => n.stage === 'mains' && n.subjectId === 'mains-optional-history-optional-paper-1');
+    expect(prelimsIvc).toBeDefined();
+    expect(historyOptionalIvc).toBeDefined();
+    expect(prelimsIvc!.id).not.toBe(historyOptionalIvc!.id);
+    expect(prelimsIvc!.microsyllabusId).not.toBe(historyOptionalIvc!.microsyllabusId);
   });
 
   it('Phase 6A: search also reaches the newly covered non-History subjects (Mains GS-III Infrastructure)', () => {

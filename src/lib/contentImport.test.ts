@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import JSZip from 'jszip';
 import {
   SUPPORTED_IMPORT_EXTENSIONS,
@@ -26,6 +26,18 @@ import {
   type ImportedContentType,
   type PdfPageTextItem,
 } from './contentImport';
+
+// Fakes jarvis/ai/ocrProvider.ts entirely (vi.mock) for the image-import tests below — the same
+// "inject/fake the real backend, test the wrapper's own integration logic" convention this codebase
+// already uses for localEmbeddingProvider.test.ts/ocrProvider.test.ts. This verifies
+// extractContentFromFile's OWN image-dispatch/error-handling/provenance-threading logic; it does
+// NOT verify the real OCR/network path (see ocrProvider.ts's own header) or the PDF->OCR fallback
+// (extractMarkdownFromPdf, which — like DOCX below — needs a Vite-only `?url` worker import that
+// cannot resolve under this repo's Node-based Vitest runner at all, independent of OCR).
+const recognizeMock = vi.fn();
+vi.mock('./jarvis/ai/ocrProvider', () => ({
+  createOcrProvider: () => ({ recognize: recognizeMock }),
+}));
 
 // A small, self-contained DOCX builder for real mammoth/turndown extraction tests — a hand-rolled
 // zip of the minimal OOXML parts mammoth needs (no styles.xml: mammoth's DEFAULT style map already
@@ -67,8 +79,20 @@ async function buildDocxFile(paragraphs: { text: string; style?: string }[], fil
 }
 
 describe('1. supported file types', () => {
-  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json', () => {
-    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.csv', '.docx', '.json', '.markdown', '.md', '.pdf', '.txt']);
+  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json/png/jpg/jpeg/webp', () => {
+    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual([
+      '.csv',
+      '.docx',
+      '.jpeg',
+      '.jpg',
+      '.json',
+      '.markdown',
+      '.md',
+      '.pdf',
+      '.png',
+      '.txt',
+      '.webp',
+    ]);
   });
 
   it.each([
@@ -80,7 +104,11 @@ describe('1. supported file types', () => {
     ['data.csv', 'csv'],
     ['data.json', 'json'],
     ['old.doc', 'doc'],
-    ['image.png', 'unsupported'],
+    ['photo.png', 'image'],
+    ['photo.jpg', 'image'],
+    ['photo.jpeg', 'image'],
+    ['photo.webp', 'image'],
+    ['archive.zip', 'unsupported'],
   ] as const)('classifies %s as %s', (filename, expectedFormat) => {
     expect(getImportFileFormat(filename)).toBe(expectedFormat);
   });
@@ -105,10 +133,68 @@ describe('1. supported file types', () => {
     expect(result).toEqual({ status: 'ok', content: { format: 'text', text: 'Just plain notes, no markdown.' } });
   });
 
-  it('extractContentFromFile rejects an unsupported extension without reading it', async () => {
-    const file = new File(['irrelevant'], 'photo.jpg');
+  it('extractContentFromFile rejects a genuinely unsupported extension without reading it', async () => {
+    const file = new File(['irrelevant'], 'archive.zip');
     const result = await extractContentFromFile(file);
     expect(result).toEqual({ status: 'error', message: expect.stringContaining('Unsupported file type') });
+  });
+});
+
+describe('1d. OCR for images (requirement: OCR for scanned PDFs/images — see jarvis/ai/ocrProvider.ts)', () => {
+  beforeEach(() => {
+    recognizeMock.mockReset();
+  });
+
+  it('extractContentFromFile recognises a real image via OCR and flags ocrApplied — never silently indistinguishable from a real text layer', async () => {
+    recognizeMock.mockResolvedValue({ text: 'Recognised page text, long enough to be meaningful.', confidence: 91 });
+    const file = new File(['fake png bytes'], 'scan.png', { type: 'image/png' });
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({
+      status: 'ok',
+      content: { format: 'image', text: 'Recognised page text, long enough to be meaningful.', ocrApplied: true },
+    });
+    expect(recognizeMock).toHaveBeenCalledWith(file);
+  });
+
+  it('a genuinely blank/unreadable image produces an honest, specific "no readable text" error — never a fabricated empty success', async () => {
+    recognizeMock.mockResolvedValue({ text: '   ', confidence: 0 });
+    const file = new File(['fake png bytes'], 'blank.png');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'error', message: expect.stringContaining('Could not recognise any readable text') });
+  });
+
+  it('an unreachable OCR model (e.g. no network for its first-use download) produces its own distinct, honest error — never hangs or silently returns empty text as success', async () => {
+    recognizeMock.mockRejectedValue(new Error('network unavailable'));
+    const file = new File(['fake png bytes'], 'scan.jpg');
+    const result = await extractContentFromFile(file);
+    expect(result).toEqual({ status: 'error', message: expect.stringContaining('on-device text recognition') });
+  });
+
+  it('confirmImportedContent carries ocrApplied from the preview into provenance — the saved record always discloses when OCR produced its text', async () => {
+    recognizeMock.mockResolvedValue({ text: 'Recognised page text, long enough to be meaningful.', confidence: 91 });
+    const file = new File(['fake png bytes'], 'scan.webp');
+    const extracted = await extractContentFromFile(file);
+    expect(extracted.status).toBe('ok');
+    if (extracted.status !== 'ok') return;
+
+    const preview = buildImportPreview(file, extracted.content);
+    expect(preview.ocrApplied).toBe(true);
+
+    const saved = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'document' });
+    expect(saved.provenance.ocrApplied).toBe(true);
+  });
+
+  it('a normal, non-OCR import never carries ocrApplied at all — never a stray `false` on every other record', async () => {
+    const file = new File(['Just plain notes, no markdown.'], 'notes.txt');
+    const extracted = await extractContentFromFile(file);
+    expect(extracted.status).toBe('ok');
+    if (extracted.status !== 'ok') return;
+    expect(extracted.content.ocrApplied).toBeUndefined();
+
+    const preview = buildImportPreview(file, extracted.content);
+    const saved = confirmImportedContent(preview, { workspaceId: 'apfc', contentType: 'document' });
+    expect(saved.provenance.ocrApplied).toBeUndefined();
+    expect(recognizeMock).not.toHaveBeenCalled();
   });
 });
 

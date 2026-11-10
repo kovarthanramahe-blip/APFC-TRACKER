@@ -68,6 +68,14 @@ export function hasMeaningfulData(data: Record<string, unknown>): boolean {
     // Premium Note Organisation (Phase 3B) — a user-created folder is real user data too, same
     // reasoning as importedContent above.
     ((data.folders as unknown[]) ?? []).length,
+    // Knowledge Librarian (P0), Phase 2 — a syllabus classification (confirmed, rejected, or still
+    // awaiting review) is real user data too, same reasoning as importedContent above.
+    ((data.knowledgeClassifications as unknown[]) ?? []).length,
+    // P2.4 — revisionQueue (lib/revisionQueue.ts's RevisionQueue, a Record keyed by item id, same
+    // shape as completedTopics/studyLog above) is real user data too: it is the ONLY record of a
+    // PYQ/Current-Affairs item's Leitner box/dueDate/reviewCount progress — losing it to a wrongly
+    // "empty" verdict here would silently reset a user's whole spaced-repetition history.
+    Object.keys((data.revisionQueue as object) ?? {}).length,
   ];
   return counts.some((c) => c > 0);
 }

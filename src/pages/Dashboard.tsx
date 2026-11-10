@@ -103,7 +103,7 @@ export default function Dashboard() {
       ? Math.round((attempts.reduce((s, a) => s + (a.score / a.maxScore) * 100, 0) / attempts.length) * 10) / 10
       : null;
 
-  const totalFocusMinutes = sessions.filter((s) => s.mode === 'focus').reduce((sum, s) => sum + s.durationMinutes, 0);
+  const totalFocusSessionsCompleted = sessions.filter((s) => s.mode === 'focus').length;
 
   // Unified topic status: combines syllabus coverage + real PYQ performance (lib/topicStatus),
   // the same single source of truth used by Analytics and Syllabus, so "Needs Attention" here
@@ -344,7 +344,12 @@ export default function Dashboard() {
 
       {/* Study Progress Insights (Phase 4 Step 2) */}
       <motion.div {...fadeUp}>
-        <StudyProgressInsightsCard insights={studyProgressInsights} accent={workspaceAccent} progressLabel="Syllabus" />
+        <StudyProgressInsightsCard
+          insights={studyProgressInsights}
+          accent={workspaceAccent}
+          progressLabel="Syllabus"
+          totalSessionsCompleted={totalFocusSessionsCompleted}
+        />
       </motion.div>
 
       {/* Study Activity Trend (Phase 4 Step 4) */}
@@ -398,17 +403,6 @@ export default function Dashboard() {
 
         {/* Focus + weak areas */}
         <motion.div {...fadeUp} className="min-w-0 space-y-6">
-          <Card className="p-5 sm:p-6">
-            <h3 className="mb-4 font-display font-semibold text-slate-800 dark:text-slate-100">Study Time</h3>
-            <div className="flex items-baseline gap-2">
-              <span className="font-display text-3xl font-bold text-slate-900 dark:text-white">{formatMinutes(totalFocusMinutes)}</span>
-              <span className="text-xs text-slate-400">total focused time logged</span>
-            </div>
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              {sessions.filter((s) => s.mode === 'focus').length} Pomodoro sessions completed so far.
-            </p>
-          </Card>
-
           <Card className="p-5 sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <h3 className="font-display font-semibold text-slate-800 dark:text-slate-100">Needs Attention</h3>

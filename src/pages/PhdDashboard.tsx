@@ -22,7 +22,7 @@ import { getLocalDateString, formatDate, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, WorkspaceComingSoon } from '../components/ui/Primitives';
 import { PhdResearchTabs } from '../components/phdResearch/PhdResearchTabs';
 import { computePhdDashboardSnapshot } from '../lib/phdDashboard';
-import { isValidTopicAreaTitle, searchPhdTopicAreas, getPhdTopicAreaById, type PhdTopicArea } from '../lib/phdTopicArea';
+import { isValidTopicAreaTitle, searchPhdTopicAreas, getPhdTopicAreaById, itemBelongsToTopicArea, type PhdTopicArea } from '../lib/phdTopicArea';
 import { isValidMicroTargetTitle, type MicroTarget, type MicroTargetPriority } from '../lib/microTarget';
 import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
@@ -313,7 +313,7 @@ export default function PhdDashboard() {
         ) : (
           <ul className="space-y-1.5">
             {visibleAreas.map((area) => {
-              const linkedCount = importedContent.filter((c) => c.metadata?.topicAreaId === area.id).length;
+              const linkedCount = importedContent.filter((c) => itemBelongsToTopicArea(c, area.id)).length;
               return (
                 <li key={area.id} className="rounded-lg px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
                   {editingAreaId === area.id ? (
@@ -512,8 +512,13 @@ export default function PhdDashboard() {
             {snapshot.recentlyImportedContent.map((c) => (
               <li key={c.id} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                 <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                <Link to={c.contentType === 'bibliography' ? '/phd-research/bibliography' : '/phd-research'} className="truncate hover:underline">
+                <Link to={c.contentType === 'bibliography' ? '/phd-research/bibliography' : '/phd-research'} className="min-w-0 truncate hover:underline">
                   {c.title}
+                  {/* Several sources imported from the same book/source share an identical title
+                      (e.g. one title repeated across several chapters) — the filename is what
+                      actually tells two such entries apart, exactly like PhdResearch.tsx's own
+                      document list already shows it below the title. */}
+                  {c.provenance.sourceFilename && <span className="ml-1.5 text-xs text-slate-400">— {c.provenance.sourceFilename}</span>}
                 </Link>
                 <span className="ml-auto shrink-0 text-[11px] text-slate-400">{formatDate(c.provenance.importedAt.slice(0, 10))}</span>
               </li>

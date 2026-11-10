@@ -11,6 +11,12 @@ import { countRelatedContent } from './relatedContentSummary';
 import { createTextHighlight, createBookmark } from './annotations';
 import { createTextAnchor } from './textAnchor';
 import { createFolder } from './folders';
+import { getLocalDateString } from './utils';
+import { ingestMarkdownAsArticles } from './knowledgeIngestion';
+import { listImportedContentByApfcTopicIncludingClassifications } from './repository';
+import type { KnowledgeClassification } from './knowledgeClassification';
+import type { ApfcTopicTaxonomyEntry } from './apfcSyllabusTaxonomy';
+import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 
 // Focused on Stage 2's revision-queue wiring only — not a broad store audit. The Zustand store
 // works directly outside React for in-memory state (persist's localStorage access is safely
@@ -81,6 +87,44 @@ describe('store — revision queue integration', () => {
     useAppStore.getState().recordRevisionCorrect('q1', '2026-01-08');
     expect(useAppStore.getState().pyqAttempts).toBe(before.pyqAttempts);
     expect(useAppStore.getState().bookmarkedPyqIds).toBe(before.bookmarkedPyqIds);
+  });
+
+  // P2.8 — Revision Review Provenance, exercised through the real store actions (not just the pure
+  // lib/revisionQueue.ts functions directly — see that file's own test for the engine-level cases).
+  describe('lastReviewSource (P2.8)', () => {
+    it('recordRevisionCorrect/Incorrect accept an optional source and store it on the resulting item', () => {
+      useAppStore.getState().recordRevisionCorrect('q1', '2026-01-08', 'quiz');
+      expect(useAppStore.getState().revisionQueue.q1.lastReviewSource).toBe('quiz');
+
+      useAppStore.getState().recordRevisionIncorrect('q2', '2026-01-08', 'self_report');
+      expect(useAppStore.getState().revisionQueue.q2.lastReviewSource).toBe('self_report');
+    });
+
+    it('existing callers that omit the source remain backward compatible: scheduling is unaffected and lastReviewSource is left undefined', () => {
+      useAppStore.getState().recordRevisionCorrect('q1', '2026-01-08'); // no third argument — every pre-P2.8 call site, until updated
+      const item = useAppStore.getState().revisionQueue.q1;
+      expect(item.box).toBe(2);
+      expect(item.reviewCount).toBe(1);
+      expect(item.lastReviewSource).toBeUndefined();
+    });
+
+    it('exportAllData / importAllData round-trips lastReviewSource — review-source metadata is not lost on persistence', () => {
+      useAppStore.getState().recordRevisionCorrect('q1', '2026-01-08', 'quiz');
+      const exported = exportAllData();
+      resetStore();
+      expect(useAppStore.getState().revisionQueue).toEqual({});
+      importAllData(exported);
+      expect(useAppStore.getState().revisionQueue.q1.lastReviewSource).toBe('quiz');
+    });
+
+    it('a legacy export with no lastReviewSource anywhere in the queue still imports and schedules correctly', () => {
+      const legacyExport = JSON.stringify({
+        revisionQueue: { q1: { pyqId: 'q1', box: 3, dueDate: '2026-01-08', lastReviewedDate: '2026-01-01', reviewCount: 4 } },
+      });
+      importAllData(legacyExport);
+      expect(useAppStore.getState().revisionQueue.q1.box).toBe(3);
+      expect(useAppStore.getState().revisionQueue.q1.lastReviewSource).toBeUndefined();
+    });
   });
 });
 
@@ -198,6 +242,114 @@ describe('store — bridgeAnnotationToRevisionQueue (Wave 4A, Scope C)', () => {
     importAllData(exported);
     expect(useAppStore.getState().revisionQueue[key]).toEqual(beforeEntry);
     expect(useAppStore.getState().annotations.find((a) => a.id === annotation.id)).toBeDefined();
+  });
+});
+
+// P1.5 — UPSC CSE Revision OS (pages/Revision.tsx's CseRevisionView, lib/revisionOS.ts's
+// computeCseCurrentAffairsRevisionSnapshot) end-to-end through the REAL store, proving the new
+// feature itself never leaks a revision entry across workspaces — not just the generic
+// revisionQueue swap mechanism (already covered above in "Stage 2 — ... isolation"), but the
+// actual addToRevisionQueue -> switch workspace -> computeCseCurrentAffairsRevisionSnapshot path a
+// real CSE user exercises.
+describe('store — P1.5 UPSC CSE Current Affairs revision end-to-end workspace isolation', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      importedContent: [],
+      revisionQueue: createRevisionQueue(),
+    });
+  }
+  beforeEach(fullReset);
+
+  function cseArticle(id: string): ImportedContent {
+    return {
+      id,
+      workspaceId: 'upsc_cse',
+      contentType: 'current_affairs',
+      title: `CSE article ${id}`,
+      rawContent: 'body',
+      provenance: { importedAt: '2026-01-01T00:00:00.000Z', origin: 'import' },
+    };
+  }
+
+  it('a Current Affairs item added to revision while upsc_cse is active is invisible while apfc is active, and reappears on switching back', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(cseArticle('ca-1'));
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['ca-1']);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+    expect(useAppStore.getState().importedContent).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['ca-1']);
+    expect(useAppStore.getState().importedContent.map((c) => c.id)).toEqual(['ca-1']);
+  });
+
+  it('recordRevisionCorrect/Incorrect on a CSE item while apfc is active would act on APFC\'s own (empty) queue, never reaching back into the archived CSE entry', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(cseArticle('ca-1'));
+    useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-08');
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().recordRevisionCorrect('ca-1', '2026-01-08'); // creates a NEW, separate apfc-scoped entry
+    expect(useAppStore.getState().revisionQueue['ca-1'].box).toBe(2);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    // The original CSE entry is completely untouched by the apfc-side write above.
+    expect(useAppStore.getState().revisionQueue['ca-1'].box).toBe(1);
+    expect(useAppStore.getState().revisionQueue['ca-1'].reviewCount).toBe(0);
+  });
+
+  it('two independent workspaces each see only their own Current Affairs revision items at once', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(cseArticle('cse-ca-1'));
+    useAppStore.getState().addToRevisionQueue('cse-ca-1', '2026-01-08');
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().addToRevisionQueue('apfc-pyq-1', '2026-01-08');
+
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['apfc-pyq-1']);
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(Object.keys(useAppStore.getState().revisionQueue)).toEqual(['cse-ca-1']);
+  });
+
+  // P2.8 — lastReviewSource is just another field on the same per-workspace RevisionItem, so it is
+  // isolated by the exact same whole-field archive/restore swap as everything else — this test
+  // proves that directly, with a colliding id reviewed via a DIFFERENT source in each workspace.
+  it('lastReviewSource is isolated per workspace exactly like the rest of the revision entry, even for a colliding id', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(cseArticle('shared-id'));
+    useAppStore.getState().recordRevisionCorrect('shared-id', '2026-01-08', 'self_report');
+    expect(useAppStore.getState().revisionQueue['shared-id'].lastReviewSource).toBe('self_report');
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().recordRevisionCorrect('shared-id', '2026-01-08', 'quiz'); // a NEW, separate apfc-scoped entry
+    expect(useAppStore.getState().revisionQueue['shared-id'].lastReviewSource).toBe('quiz');
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    // The original CSE entry's own source is completely untouched by the apfc-side write above.
+    expect(useAppStore.getState().revisionQueue['shared-id'].lastReviewSource).toBe('self_report');
+  });
+
+  // P2.9 — the same isolation guarantee, but mirroring the REAL due-revision quiz flow in both
+  // pages/PYQTest.tsx and pages/UpscCsePyqTest.tsx exactly (checkRevisionAnswer's own call shape:
+  // 'quiz', with a genuinely different correct/incorrect outcome per workspace) for a colliding
+  // PYQ id, rather than the more generic recordRevisionCorrect-only case above.
+  it('a colliding PYQ id answered correctly (quiz) in one workspace and incorrectly (quiz) in the other never cross-contaminates box/source', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().recordRevisionCorrect('shared-pyq-id', '2026-01-08', 'quiz'); // CSE: answered correctly
+    expect(useAppStore.getState().revisionQueue['shared-pyq-id']).toMatchObject({ box: 2, lastReviewSource: 'quiz' });
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().recordRevisionIncorrect('shared-pyq-id', '2026-01-08', 'quiz'); // APFC: a NEW, separate entry, answered incorrectly
+    expect(useAppStore.getState().revisionQueue['shared-pyq-id']).toMatchObject({ box: 1, lastReviewSource: 'quiz' });
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    // CSE's own box-2/correct entry is completely untouched by APFC's box-1/incorrect write above.
+    expect(useAppStore.getState().revisionQueue['shared-pyq-id']).toMatchObject({ box: 2, lastReviewSource: 'quiz' });
   });
 });
 
@@ -334,9 +486,11 @@ describe('migrateAppStorage — Multi-Workspace OS Stage 1', () => {
         'completedTopics',
         'contentRelationships',
         'dailyGoalMinutes',
+        'documentEmbeddings',
         'folders',
         'importedContent',
         'inactiveWorkspaceOwnedData',
+        'knowledgeClassifications',
         'notes',
         'personalStudyPlanTasks',
         'phdMicroTargets',
@@ -589,6 +743,260 @@ describe('Multi-Workspace OS Stage 2 — workspace-scoped write paths & isolatio
       importAllData(legacyExport);
       expect(useAppStore.getState().inactiveWorkspaceOwnedData).toEqual({});
     });
+
+    // AI Library — documentEmbeddings is a derived, rebuildable local search index, never
+    // source-of-truth user data (see APP_STORE_PERSIST_VERSION's own Version 16 comment). This is
+    // the one honesty guarantee that decision depends on: it must never silently leak into a
+    // backup file or (since cloudSync.ts reuses exportAllData as its sync payload) into Supabase.
+    it('exportAllData never includes documentEmbeddings, even when some exist', () => {
+      useAppStore.getState().setDocumentEmbeddings([
+        { documentId: 'note:n1', chunkId: 'c1', modelId: 'local-minilm-l6-v2', dimensions: 3, vector: [1, 0, 0], contentHash: 'abc', computedAt: '2026-01-01T00:00:00.000Z' },
+      ]);
+      const json = exportAllData();
+      expect(JSON.parse(json)).not.toHaveProperty('documentEmbeddings');
+    });
+  });
+});
+
+describe('documentEmbeddings — AI Library semantic search index', () => {
+  beforeEach(() => {
+    useAppStore.setState({ notes: [], importedContent: [], documentEmbeddings: [] });
+  });
+
+  it('setDocumentEmbeddings replaces the whole array atomically', () => {
+    const recordA = { documentId: 'note:n1', chunkId: 'c1', modelId: 'm', dimensions: 3, vector: [1, 0, 0], contentHash: 'h1', computedAt: '2026-01-01T00:00:00.000Z' };
+    useAppStore.getState().setDocumentEmbeddings([recordA]);
+    expect(useAppStore.getState().documentEmbeddings).toEqual([recordA]);
+
+    const recordB = { ...recordA, chunkId: 'c2' };
+    useAppStore.getState().setDocumentEmbeddings([recordB]);
+    expect(useAppStore.getState().documentEmbeddings).toEqual([recordB]);
+  });
+
+  it('deleteImportedContent cascades: removes every embedding record for that item, never touches a different item\'s records', () => {
+    useAppStore.getState().addImportedContent({
+      id: 'c1',
+      workspaceId: useAppStore.getState().activeWorkspaceId,
+      contentType: 'document',
+      title: 'Doc 1',
+      rawContent: 'text',
+      provenance: { importedAt: '2026-01-01T00:00:00.000Z', origin: 'manual' },
+    });
+    useAppStore.getState().setDocumentEmbeddings([
+      { documentId: 'imported_content:c1', chunkId: 'c1-chunk', modelId: 'm', dimensions: 3, vector: [1, 0, 0], contentHash: 'h', computedAt: '2026-01-01T00:00:00.000Z' },
+      { documentId: 'imported_content:other', chunkId: 'other-chunk', modelId: 'm', dimensions: 3, vector: [1, 0, 0], contentHash: 'h', computedAt: '2026-01-01T00:00:00.000Z' },
+    ]);
+
+    useAppStore.getState().deleteImportedContent('c1');
+
+    const remaining = useAppStore.getState().documentEmbeddings;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].documentId).toBe('imported_content:other');
+  });
+
+  it('deleteNote cascades the same way for a note-backed embedding record', () => {
+    useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Note', content: 'C', createdAt: 'a', updatedAt: 'b', pinned: false });
+    useAppStore.getState().setDocumentEmbeddings([{ documentId: 'note:n1', chunkId: 'n1-chunk', modelId: 'm', dimensions: 3, vector: [1, 0, 0], contentHash: 'h', computedAt: '2026-01-01T00:00:00.000Z' }]);
+
+    useAppStore.getState().deleteNote('n1');
+
+    expect(useAppStore.getState().documentEmbeddings).toEqual([]);
+  });
+
+  it('migrateAppStorage backfills documentEmbeddings to [] for a pre-Version-16 snapshot', () => {
+    const migrated = migrateAppStorage({ notes: [] }, 15) as { documentEmbeddings: unknown };
+    expect(migrated.documentEmbeddings).toEqual([]);
+  });
+
+  it('migrateAppStorage preserves an already-present documentEmbeddings array unchanged', () => {
+    const existing = [{ documentId: 'note:n1', chunkId: 'c1', modelId: 'm', dimensions: 3, vector: [1], contentHash: 'h', computedAt: '2026-01-01T00:00:00.000Z' }];
+    const migrated = migrateAppStorage({ notes: [], documentEmbeddings: existing }, 15) as { documentEmbeddings: unknown };
+    expect(migrated.documentEmbeddings).toEqual(existing);
+  });
+});
+
+// Phase 2B (R2 + R3) — bumpFocusMinutes/bumpTopicsCompleted/bumpTestsCompleted were consolidated
+// onto a shared bumpStudyLogField helper, and toggleStarredQuestion/toggleBookmarkedPyq onto a
+// shared toggleInArray helper. These actions' public names/signatures are unchanged; this locks in
+// that each still only touches its own field/array and accumulates/toggles correctly.
+describe('store — bumpFocusMinutes/bumpTopicsCompleted/bumpTestsCompleted and toggle* actions (R2/R3 consolidation)', () => {
+  beforeEach(() => {
+    useAppStore.setState({ studyLog: {}, starredQuestionIds: [], bookmarkedPyqIds: [] });
+  });
+
+  it('bumpFocusMinutes accumulates across calls on the same date without touching other fields', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-02-01', 20);
+    useAppStore.getState().bumpFocusMinutes('2026-02-01', 15);
+    const entry = useAppStore.getState().studyLog['2026-02-01'];
+    expect(entry.focusMinutes).toBe(35);
+    expect(entry.topicsCompleted).toBe(0);
+    expect(entry.testsCompleted).toBe(0);
+  });
+
+  it('bumpTopicsCompleted accumulates independently of bumpFocusMinutes on the same date', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-02-02', 10);
+    useAppStore.getState().bumpTopicsCompleted('2026-02-02', 3);
+    useAppStore.getState().bumpTopicsCompleted('2026-02-02', 2);
+    const entry = useAppStore.getState().studyLog['2026-02-02'];
+    expect(entry.focusMinutes).toBe(10);
+    expect(entry.topicsCompleted).toBe(5);
+  });
+
+  it('bumpTestsCompleted increments by exactly one per call', () => {
+    useAppStore.getState().bumpTestsCompleted('2026-02-03');
+    useAppStore.getState().bumpTestsCompleted('2026-02-03');
+    useAppStore.getState().bumpTestsCompleted('2026-02-03');
+    expect(useAppStore.getState().studyLog['2026-02-03'].testsCompleted).toBe(3);
+  });
+
+  it('bump* actions on different dates create independent StudyLogEntry rows', () => {
+    useAppStore.getState().bumpFocusMinutes('2026-02-04', 5);
+    useAppStore.getState().bumpTestsCompleted('2026-02-05');
+    expect(useAppStore.getState().studyLog['2026-02-04'].focusMinutes).toBe(5);
+    expect(useAppStore.getState().studyLog['2026-02-04'].testsCompleted).toBe(0);
+    expect(useAppStore.getState().studyLog['2026-02-05'].testsCompleted).toBe(1);
+  });
+
+  it('toggleStarredQuestion adds then removes an id, leaving other ids untouched', () => {
+    useAppStore.getState().toggleStarredQuestion('q1');
+    useAppStore.getState().toggleStarredQuestion('q2');
+    expect(useAppStore.getState().starredQuestionIds).toEqual(['q1', 'q2']);
+    useAppStore.getState().toggleStarredQuestion('q1');
+    expect(useAppStore.getState().starredQuestionIds).toEqual(['q2']);
+  });
+
+  it('toggleBookmarkedPyq adds then removes an id, leaving other ids untouched', () => {
+    useAppStore.getState().toggleBookmarkedPyq('p1');
+    useAppStore.getState().toggleBookmarkedPyq('p2');
+    expect(useAppStore.getState().bookmarkedPyqIds).toEqual(['p1', 'p2']);
+    useAppStore.getState().toggleBookmarkedPyq('p1');
+    expect(useAppStore.getState().bookmarkedPyqIds).toEqual(['p2']);
+  });
+
+  it('toggleStarredQuestion and toggleBookmarkedPyq operate on independent arrays', () => {
+    useAppStore.getState().toggleStarredQuestion('shared-id');
+    useAppStore.getState().toggleBookmarkedPyq('shared-id');
+    expect(useAppStore.getState().starredQuestionIds).toEqual(['shared-id']);
+    expect(useAppStore.getState().bookmarkedPyqIds).toEqual(['shared-id']);
+
+    useAppStore.getState().toggleStarredQuestion('shared-id');
+    expect(useAppStore.getState().starredQuestionIds).toEqual([]);
+    expect(useAppStore.getState().bookmarkedPyqIds).toEqual(['shared-id']);
+  });
+});
+
+// Phase 2F (R5) — addAttempt/addPyqAttempt were consolidated onto a shared
+// stampWorkspaceAndBumpTestsCompleted helper; addUpscCsePrelimsPyqAttempt was deliberately left
+// untouched since it differs materially (no workspaceId field on its type, no testsCompleted
+// bump). These tests pin both the shared behavior and the preserved difference.
+describe('store — addAttempt/addPyqAttempt/addUpscCsePrelimsPyqAttempt (R5 consolidation)', () => {
+  beforeEach(() => {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      attempts: [],
+      pyqAttempts: [],
+      upscCsePrelimsPyqAttempts: [],
+      studyLog: {},
+    });
+  });
+
+  const mockTestAttempt = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id,
+    blueprintId: 'b1',
+    blueprintTitle: 'T',
+    startedAt: 'a',
+    submittedAt: 'b',
+    durationMinutes: 10,
+    questionIds: [],
+    answers: {},
+    correctCount: 0,
+    wrongCount: 0,
+    skippedCount: 0,
+    score: 0,
+    maxScore: 0,
+    subjectBreakdown: {},
+    ...overrides,
+  });
+
+  const pyqAttempt = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id,
+    submittedAt: 'a',
+    year: 2020 as const,
+    subject: 'polity',
+    topicId: 't-1',
+    questionIds: [],
+    answers: {},
+    correctCount: 0,
+    wrongCount: 0,
+    unansweredCount: 0,
+    score: 0,
+    accuracy: 0,
+    ...overrides,
+  });
+
+  const upscCsePrelimsAttempt = (id: string) => ({
+    id,
+    submittedAt: 'a',
+    year: 'all' as const,
+    paper: 'all',
+    subject: 'all',
+    microsyllabusId: 'all',
+    questionIds: [],
+    answers: {},
+    correctCount: 0,
+    wrongCount: 0,
+    unansweredCount: 0,
+    accuracy: 0,
+  });
+
+  it('addAttempt stamps the active workspace and bumps today\'s testsCompleted', () => {
+    useAppStore.getState().addAttempt(mockTestAttempt('a1') as any);
+    const state = useAppStore.getState();
+    expect(state.attempts[0].workspaceId).toBe('apfc');
+    expect(state.studyLog[getLocalDateString()].testsCompleted).toBe(1);
+  });
+
+  it('addAttempt does not override an attempt that already carries a workspaceId', () => {
+    useAppStore.getState().addAttempt(mockTestAttempt('a1', { workspaceId: 'upsc_cse' }) as any);
+    expect(useAppStore.getState().attempts[0].workspaceId).toBe('upsc_cse');
+  });
+
+  it('addPyqAttempt stamps the active workspace and bumps today\'s testsCompleted', () => {
+    useAppStore.getState().addPyqAttempt(pyqAttempt('p1') as any);
+    const state = useAppStore.getState();
+    expect(state.pyqAttempts[0].workspaceId).toBe('apfc');
+    expect(state.studyLog[getLocalDateString()].testsCompleted).toBe(1);
+  });
+
+  it('addAttempt and addPyqAttempt each bump the SAME studyLog entry independently (both count toward one day\'s total)', () => {
+    useAppStore.getState().addAttempt(mockTestAttempt('a1') as any);
+    useAppStore.getState().addPyqAttempt(pyqAttempt('p1') as any);
+    useAppStore.getState().addPyqAttempt(pyqAttempt('p2') as any);
+    expect(useAppStore.getState().studyLog[getLocalDateString()].testsCompleted).toBe(3);
+  });
+
+  it('addAttempt/addPyqAttempt prepend (most recent first), not append', () => {
+    useAppStore.getState().addAttempt(mockTestAttempt('a1') as any);
+    useAppStore.getState().addAttempt(mockTestAttempt('a2') as any);
+    expect(useAppStore.getState().attempts.map((a) => a.id)).toEqual(['a2', 'a1']);
+  });
+
+  it('addUpscCsePrelimsPyqAttempt prepends the attempt unchanged — no workspaceId stamp (preserved difference)', () => {
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(upscCsePrelimsAttempt('u1'));
+    const stored = useAppStore.getState().upscCsePrelimsPyqAttempts[0];
+    expect(stored).toEqual(upscCsePrelimsAttempt('u1'));
+    expect((stored as unknown as Record<string, unknown>).workspaceId).toBeUndefined();
+  });
+
+  it('addUpscCsePrelimsPyqAttempt does NOT bump testsCompleted (preserved pre-existing difference, not touched by R5)', () => {
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(upscCsePrelimsAttempt('u1'));
+    expect(useAppStore.getState().studyLog[getLocalDateString()]).toBeUndefined();
+  });
+
+  it('addUpscCsePrelimsPyqAttempt prepends (most recent first), same ordering convention as the other two', () => {
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(upscCsePrelimsAttempt('u1'));
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(upscCsePrelimsAttempt('u2'));
+    expect(useAppStore.getState().upscCsePrelimsPyqAttempts.map((a) => a.id)).toEqual(['u2', 'u1']);
   });
 });
 
@@ -2166,5 +2574,541 @@ describe('Premium Note Organisation — folders + bulk organisation actions', ()
       expect(useAppStore.getState().annotations).toEqual([annotation]);
       expect(useAppStore.getState().annotations[0].documentId).toBe('imported_content:doc-1');
     });
+  });
+});
+
+// Knowledge Librarian (P0), Phase 2 — knowledgeClassifications, workspace-scoped exactly like
+// importedContent/contentRelationships/folders above (see lib/store.ts's WorkspaceOwnedData), plus
+// addKnowledgeIngestionBatch — the one store action lib/knowledgeIngestion.ts's already-tested-in-
+// isolation ingestMarkdownAsArticles batch is actually persisted through.
+describe('Knowledge Librarian (P0) — knowledgeClassifications + addKnowledgeIngestionBatch', () => {
+  function fullReset() {
+    useAppStore.setState({
+      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
+      inactiveWorkspaceOwnedData: {},
+      notes: [],
+      importedContent: [],
+      contentRelationships: [],
+      knowledgeClassifications: [],
+    });
+  }
+  beforeEach(fullReset);
+
+  const TOPICS: ApfcTopicTaxonomyEntry[] = [
+    { subjectId: 'economy', subjectTitle: 'Economy', topicId: 'topic-inflation', topicTitle: 'Inflation and Monetary Policy' },
+    { subjectId: 'polity', subjectTitle: 'Polity', topicId: 'topic-parliament', topicTitle: 'Parliament and Legislature' },
+  ];
+
+  function buildBatch(rawContent: string) {
+    return ingestMarkdownAsArticles({
+      workspaceId: 'apfc',
+      filename: 'clippings.md',
+      rawContent,
+      originalFormat: 'markdown',
+      candidateTopics: TOPICS,
+    });
+  }
+
+  function classificationFixture(overrides: Partial<KnowledgeClassification> = {}): KnowledgeClassification {
+    return {
+      id: overrides.id ?? 'k1',
+      workspaceId: overrides.workspaceId ?? 'apfc',
+      itemId: overrides.itemId ?? 'item-1',
+      itemType: overrides.itemType ?? 'imported_content',
+      taxonomy: overrides.taxonomy ?? 'apfc',
+      topicId: overrides.topicId ?? 'topic-inflation',
+      confidence: overrides.confidence ?? 0.6,
+      rationale: overrides.rationale ?? 'Matched terms: inflation',
+      status: overrides.status ?? 'proposed',
+      source: overrides.source ?? 'lexical',
+      createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
+      updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  describe('addKnowledgeIngestionBatch', () => {
+    it('persists the original document, every extracted article, their relationships, and their classifications in one call', () => {
+      const batch = buildBatch('## Inflation Rises\nInflation and monetary policy concerns dominate the discussion on rising prices.');
+      useAppStore.getState().addKnowledgeIngestionBatch(batch);
+
+      const state = useAppStore.getState();
+      expect(state.importedContent.find((c) => c.id === batch.originalDocument.id)).toBeDefined();
+      expect(state.importedContent.find((c) => c.id === batch.articles[0].id)).toBeDefined();
+      expect(state.contentRelationships).toHaveLength(1);
+      expect(state.knowledgeClassifications.length).toBeGreaterThan(0);
+      expect(state.knowledgeClassifications[0].itemId).toBe(batch.articles[0].id);
+    });
+
+    it('still persists the original document even when zero articles were extracted (empty file)', () => {
+      const batch = buildBatch('');
+      useAppStore.getState().addKnowledgeIngestionBatch(batch);
+      const state = useAppStore.getState();
+      expect(state.importedContent).toHaveLength(1);
+      expect(state.importedContent[0].id).toBe(batch.originalDocument.id);
+      expect(state.contentRelationships).toEqual([]);
+      expect(state.knowledgeClassifications).toEqual([]);
+    });
+
+    it('never touches the separate notes collection', () => {
+      useAppStore.getState().upsertNote({ id: 'n1', subject: 'general', title: 'Real note', content: 'x', createdAt: 'a', updatedAt: 'a', pinned: false });
+      useAppStore.getState().addKnowledgeIngestionBatch(buildBatch('## A\nInflation and monetary policy text here for the article body.'));
+      expect(useAppStore.getState().notes).toHaveLength(1);
+      expect(useAppStore.getState().notes[0].title).toBe('Real note');
+    });
+  });
+
+  describe('confirmKnowledgeClassification / rejectKnowledgeClassification / addManualKnowledgeClassification / deleteKnowledgeClassification', () => {
+    it('confirmKnowledgeClassification sets status to confirmed', () => {
+      useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1' })] });
+      useAppStore.getState().confirmKnowledgeClassification('k1');
+      expect(useAppStore.getState().knowledgeClassifications[0].status).toBe('confirmed');
+    });
+
+    it('confirmKnowledgeClassification backfills ImportedContentMetadata.apfcTopicId when the item has none yet', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1', topicId: 'topic-inflation' })] });
+      useAppStore.getState().confirmKnowledgeClassification('k1');
+      expect(useAppStore.getState().importedContent[0].metadata?.apfcTopicId).toBe('topic-inflation');
+    });
+
+    it('confirmKnowledgeClassification never overwrites an already-set apfcTopicId (the first confirmed topic stays primary)', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+        metadata: { apfcTopicId: 'topic-parliament' },
+      });
+      useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1', topicId: 'topic-inflation' })] });
+      useAppStore.getState().confirmKnowledgeClassification('k1');
+      expect(useAppStore.getState().importedContent[0].metadata?.apfcTopicId).toBe('topic-parliament');
+      expect(useAppStore.getState().knowledgeClassifications[0].status).toBe('confirmed');
+    });
+
+    it('rejectKnowledgeClassification sets status to rejected, never touching apfcTopicId', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1' })] });
+      useAppStore.getState().rejectKnowledgeClassification('k1');
+      expect(useAppStore.getState().knowledgeClassifications[0].status).toBe('rejected');
+      expect(useAppStore.getState().importedContent[0].metadata?.apfcTopicId).toBeUndefined();
+    });
+
+    it('addManualKnowledgeClassification adds a confirmed, manual-source record stamped with the active workspace', () => {
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      const added = useAppStore.getState().knowledgeClassifications[0];
+      expect(added.status).toBe('confirmed');
+      expect(added.source).toBe('manual');
+      expect(added.workspaceId).toBe('apfc');
+    });
+
+    // Knowledge Librarian P0.1 hardening — bug found while adding the multi-topic cross-linking
+    // regression test: addManualKnowledgeClassification is born already 'confirmed' (see
+    // createManualClassification), so it never passes through confirmKnowledgeClassification and
+    // previously never backfilled the legacy apfcTopicId field at all.
+    it('addManualKnowledgeClassification backfills the item\'s primary apfcTopicId when it has none yet (same as confirmKnowledgeClassification)', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      expect(useAppStore.getState().importedContent[0].metadata?.apfcTopicId).toBe('topic-inflation');
+    });
+
+    it('addManualKnowledgeClassification never overwrites an already-set primary apfcTopicId with a second topic', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+        metadata: { apfcTopicId: 'topic-parliament' },
+      });
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      expect(useAppStore.getState().importedContent[0].metadata?.apfcTopicId).toBe('topic-parliament');
+      expect(useAppStore.getState().knowledgeClassifications.find((c) => c.topicId === 'topic-inflation')?.status).toBe('confirmed');
+    });
+
+    // Knowledge Librarian P0.1 hardening — duplicate-classification prevention, store level.
+    describe('addManualKnowledgeClassification — duplicate (itemId, topicId) prevention', () => {
+      it('never creates a second record when called twice for the exact same item+topic', () => {
+        useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+        useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+        expect(useAppStore.getState().knowledgeClassifications).toHaveLength(1);
+      });
+
+      it('leaves an existing CONFIRMED record untouched on a duplicate add — no change, no second row', () => {
+        useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1', topicId: 'topic-inflation', status: 'confirmed', source: 'lexical', confidence: 0.6 })] });
+        useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+        const items = useAppStore.getState().knowledgeClassifications;
+        expect(items).toHaveLength(1);
+        expect(items[0].id).toBe('k1');
+        expect(items[0].source).toBe('lexical'); // completely untouched, not overwritten by the manual attempt
+        expect(items[0].confidence).toBe(0.6);
+      });
+
+      it('never resurrects an existing REJECTED record on a duplicate add — stays rejected, no second row', () => {
+        useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1', topicId: 'topic-inflation', status: 'rejected' })] });
+        useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+        const items = useAppStore.getState().knowledgeClassifications;
+        expect(items).toHaveLength(1);
+        expect(items[0].id).toBe('k1');
+        expect(items[0].status).toBe('rejected');
+      });
+
+      it('a different topic on the same item is still added as its own, separate record (multi-topic support preserved)', () => {
+        useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+        useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-parliament' });
+        expect(useAppStore.getState().knowledgeClassifications).toHaveLength(2);
+      });
+
+      it('the reclassification workflow (confirmKnowledgeClassification on a rejected row) updates the SAME record, never adding a second one', () => {
+        useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1', topicId: 'topic-inflation', status: 'rejected' })] });
+        useAppStore.getState().confirmKnowledgeClassification('k1');
+        const items = useAppStore.getState().knowledgeClassifications;
+        expect(items).toHaveLength(1);
+        expect(items[0].id).toBe('k1');
+        expect(items[0].status).toBe('confirmed');
+      });
+    });
+
+    it('deleteKnowledgeClassification removes exactly the matching record', () => {
+      useAppStore.setState({ knowledgeClassifications: [classificationFixture({ id: 'k1' }), classificationFixture({ id: 'k2' })] });
+      useAppStore.getState().deleteKnowledgeClassification('k1');
+      expect(useAppStore.getState().knowledgeClassifications.map((c) => c.id)).toEqual(['k2']);
+    });
+  });
+
+  describe('deleteImportedContent cascade', () => {
+    it('deleting an item removes its dangling classifications too', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      useAppStore.setState({
+        knowledgeClassifications: [classificationFixture({ id: 'k1', itemId: 'item-1' }), classificationFixture({ id: 'k2', itemId: 'other-item' })],
+      });
+      useAppStore.getState().deleteImportedContent('item-1');
+      expect(useAppStore.getState().knowledgeClassifications.map((c) => c.id)).toEqual(['k2']);
+    });
+  });
+
+  // P2.4 (Revision Data Integrity, Fix B) — the same cascade discipline as the classifications test
+  // just above, applied to lib/revisionQueue.ts's RevisionQueue: an id added to revision via
+  // addToRevisionQueue (RepositoryDetail.tsx's "Add to Revision" button, Current Affairs only) is
+  // never left scheduling a review for content that no longer exists.
+  describe('deleteImportedContent cascade — revisionQueue', () => {
+    function caFixture(id: string, title: string) {
+      return { id, workspaceId: 'upsc_cse' as const, contentType: 'current_affairs' as const, title, rawContent: 'x', provenance: { importedAt: '2026-01-01T00:00:00.000Z' } };
+    }
+
+    it('deleting an item with a queued revision entry removes that entry too', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addImportedContent(caFixture('ca-1', 'Article with revision'));
+      useAppStore.getState().addToRevisionQueue('ca-1', '2026-01-01');
+      expect(useAppStore.getState().revisionQueue['ca-1']).toBeDefined();
+
+      useAppStore.getState().deleteImportedContent('ca-1');
+      expect(useAppStore.getState().revisionQueue['ca-1']).toBeUndefined();
+    });
+
+    it('deleting an item with no queued revision entry does not throw and leaves the queue untouched', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addImportedContent(caFixture('ca-2', 'Article without revision'));
+      expect(useAppStore.getState().revisionQueue).toEqual({});
+
+      expect(() => useAppStore.getState().deleteImportedContent('ca-2')).not.toThrow();
+      expect(useAppStore.getState().revisionQueue).toEqual({});
+    });
+
+    it('deleting one item leaves an unrelated item\'s own revision entry completely untouched', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addImportedContent(caFixture('ca-3', 'Delete me'));
+      useAppStore.getState().addImportedContent(caFixture('ca-4', 'Keep me'));
+      useAppStore.getState().addToRevisionQueue('ca-3', '2026-01-01');
+      useAppStore.getState().addToRevisionQueue('ca-4', '2026-01-01');
+      const keptEntryBefore = useAppStore.getState().revisionQueue['ca-4'];
+
+      useAppStore.getState().deleteImportedContent('ca-3');
+
+      expect(useAppStore.getState().revisionQueue['ca-3']).toBeUndefined();
+      expect(useAppStore.getState().revisionQueue['ca-4']).toBe(keptEntryBefore); // same object reference — not even recreated
+    });
+
+    it('workspace isolation: switching away and back leaves an unrelated workspace\'s own revisionQueue (and this item\'s entry) intact', () => {
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      useAppStore.getState().addImportedContent(caFixture('ca-5', 'CSE article'));
+      useAppStore.getState().addToRevisionQueue('ca-5', '2026-01-01');
+
+      // Switch to APFC — CSE's revisionQueue (holding ca-5) is archived away; APFC gets its own.
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      useAppStore.getState().recordRevisionCorrect('pyq-apfc-1', '2026-01-01');
+      // An id that doesn't exist in the now-active (APFC) workspace must never reach into the
+      // archived CSE queue sitting in inactiveWorkspaceOwnedData.
+      useAppStore.getState().deleteImportedContent('ca-5');
+      expect(useAppStore.getState().revisionQueue['pyq-apfc-1']).toBeDefined();
+
+      // Switch back to CSE — ca-5's entry must still be exactly there, untouched.
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().revisionQueue['ca-5']).toBeDefined();
+    });
+  });
+
+  describe('workspace isolation (mandatory)', () => {
+    it('APFC classifications never appear after switching to another workspace, and are restored on switching back', () => {
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+      expect(useAppStore.getState().knowledgeClassifications).toEqual([]);
+      useAppStore.getState().setActiveWorkspaceId('apfc');
+      expect(useAppStore.getState().knowledgeClassifications).toHaveLength(1);
+    });
+  });
+
+  describe('persistence / migration', () => {
+    it('a pre-Version-15 persisted blob (no knowledgeClassifications field at all) migrates to knowledgeClassifications: []', () => {
+      const oldBlob = { notes: [], activeWorkspaceId: 'apfc', inactiveWorkspaceOwnedData: {} };
+      const migrated = migrateAppStorage(oldBlob, 14) as any;
+      expect(migrated.knowledgeClassifications).toEqual([]);
+    });
+
+    it('migration backfills knowledgeClassifications INSIDE every archived inactiveWorkspaceOwnedData snapshot too', () => {
+      const oldBlob = { inactiveWorkspaceOwnedData: { upsc_cse: { notes: [] } } };
+      const migrated = migrateAppStorage(oldBlob, 14) as any;
+      expect(migrated.inactiveWorkspaceOwnedData.upsc_cse.knowledgeClassifications).toEqual([]);
+    });
+
+    it('migration is idempotent and preserves existing knowledgeClassifications untouched', () => {
+      const withData = { knowledgeClassifications: [classificationFixture({ id: 'kept' })] };
+      const migrated = migrateAppStorage(withData, 14) as any;
+      expect(migrated.knowledgeClassifications).toEqual([classificationFixture({ id: 'kept' })]);
+    });
+
+    it('a no-op migration (already current version) leaves knowledgeClassifications completely untouched', () => {
+      const current = { knowledgeClassifications: [classificationFixture({ id: 'kept' })] };
+      const migrated = migrateAppStorage(current, APP_STORE_PERSIST_VERSION) as any;
+      expect(migrated.knowledgeClassifications).toEqual([classificationFixture({ id: 'kept' })]);
+    });
+  });
+
+  describe('export / import', () => {
+    it('exportAllData / importAllData round-trip knowledgeClassifications for the active workspace', () => {
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      const json = exportAllData();
+      fullReset();
+      expect(useAppStore.getState().knowledgeClassifications).toEqual([]);
+      importAllData(json);
+      expect(useAppStore.getState().knowledgeClassifications).toHaveLength(1);
+    });
+
+    it('importAllData defaults knowledgeClassifications to [] for an older export that predates this field', () => {
+      const legacyExport = JSON.stringify({ completedTopics: {}, notes: [] });
+      importAllData(legacyExport);
+      expect(useAppStore.getState().knowledgeClassifications).toEqual([]);
+    });
+  });
+
+  describe('cloud-sync payload inclusion', () => {
+    it('hasMeaningfulData recognizes a device whose ONLY data is a knowledge classification', () => {
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      const payload = JSON.parse(exportAllData());
+      expect(hasMeaningfulData(payload)).toBe(true);
+    });
+  });
+
+  describe('regression: existing importedContent/contentRelationships behaviour is unaffected', () => {
+    it('adding a manual classification never touches importedContent or contentRelationships', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'note',
+        title: 'Existing',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      expect(useAppStore.getState().importedContent).toHaveLength(1);
+      expect(useAppStore.getState().contentRelationships).toEqual([]);
+    });
+  });
+
+  // Knowledge Librarian P0.1 hardening — end-to-end regression, through the real store, for the
+  // "one item confirmed against two different topics appears under both exactly once" requirement.
+  describe('multi-topic cross-linking (P0.1 hardening)', () => {
+    it('an item confirmed against two different topics is discoverable from both topics, each exactly once', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-inflation' });
+      useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: 'topic-parliament' });
+
+      const state = useAppStore.getState();
+      // Both were added via addManualKnowledgeClassification, which always confirms immediately —
+      // so both are already 'confirmed' with no extra confirm step needed.
+      expect(state.knowledgeClassifications.filter((c) => c.itemId === 'item-1' && c.status === 'confirmed')).toHaveLength(2);
+
+      const underInflation = listImportedContentByApfcTopicIncludingClassifications(state.importedContent, 'topic-inflation', state.knowledgeClassifications);
+      const underParliament = listImportedContentByApfcTopicIncludingClassifications(state.importedContent, 'topic-parliament', state.knowledgeClassifications);
+      expect(underInflation.map((i) => i.id)).toEqual(['item-1']);
+      expect(underParliament.map((i) => i.id)).toEqual(['item-1']);
+
+      // The legacy primary field only ever reflects the FIRST confirm (store.ts's own documented
+      // behaviour) — confirming this is unchanged by the hardening, since it's a different,
+      // deliberately-preserved mechanism from the wider classification-based lookup above.
+      expect(state.importedContent[0].metadata?.apfcTopicId).toBe('topic-inflation');
+    });
+
+    it('a rejected classification for a topic never makes the item appear under that topic', () => {
+      useAppStore.getState().addImportedContent({
+        id: 'item-1',
+        workspaceId: 'apfc',
+        contentType: 'current_affairs',
+        title: 'Article',
+        rawContent: 'x',
+        provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+      });
+      // A rejected classification for a SECOND topic on the same item — the "never appears"
+      // assertion below is about this genuinely rejected pairing.
+      useAppStore.setState({
+        knowledgeClassifications: [
+          { id: 'k-rejected', workspaceId: 'apfc', itemId: 'item-1', itemType: 'imported_content', taxonomy: 'apfc', topicId: 'topic-parliament', confidence: 0.5, rationale: 'r', status: 'rejected', source: 'lexical', createdAt: 'a', updatedAt: 'a' },
+        ],
+      });
+
+      const state = useAppStore.getState();
+      const underParliament = listImportedContentByApfcTopicIncludingClassifications(state.importedContent, 'topic-parliament', state.knowledgeClassifications);
+      expect(underParliament).toEqual([]);
+    });
+  });
+});
+
+// Library Mode Audit + History Optional Integration task, Phase 1 Completion — real classification
+// against the new History Optional granular topics, exercised through the real store actions
+// (addManualKnowledgeClassification/confirmKnowledgeClassification/rejectKnowledgeClassification),
+// not just the pure taxonomy helpers covered in upscCseKnowledgeTaxonomy.test.ts.
+describe('History Optional classification — correction persistence, workspace isolation, export/import', () => {
+  function reset() {
+    useAppStore.setState({
+      activeWorkspaceId: 'apfc',
+      inactiveWorkspaceOwnedData: {},
+      importedContent: [],
+      knowledgeClassifications: [],
+    });
+  }
+  beforeEach(reset);
+
+  const sourcesTopicId = UPSC_CSE_GRANULAR_NODES.find((n) => n.level === 'topic' && n.microsyllabusId === 'mains-optional-history-optional-paper-1-sources')!.id;
+
+  function article(id: string) {
+    return {
+      id,
+      workspaceId: 'upsc_cse' as const,
+      contentType: 'note' as const,
+      title: 'Note on ancient sources',
+      rawContent: 'x',
+      provenance: { importedAt: '2026-01-01T00:00:00.000Z' },
+    };
+  }
+
+  it('a manual classification against a real History Optional topic can be confirmed, then corrected (reclassified), and the correction persists without losing the note', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(article('note-1'));
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'note-1', itemType: 'imported_content', topicId: sourcesTopicId });
+    const first = useAppStore.getState().knowledgeClassifications.find((c) => c.itemId === 'note-1')!;
+    expect(first.topicId).toBe(sourcesTopicId);
+    expect(first.status).toBe('confirmed'); // manual classifications are born confirmed
+
+    // Correction: the user picks a different, equally real History Optional topic instead.
+    const indusTopicId = UPSC_CSE_GRANULAR_NODES.find((n) => n.level === 'topic' && n.microsyllabusId === 'mains-optional-history-optional-paper-1-indus-valley-civilization')!.id;
+    useAppStore.getState().rejectKnowledgeClassification(first.id);
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'note-1', itemType: 'imported_content', topicId: indusTopicId });
+
+    const classifications = useAppStore.getState().knowledgeClassifications.filter((c) => c.itemId === 'note-1');
+    expect(classifications.find((c) => c.topicId === sourcesTopicId)!.status).toBe('rejected');
+    expect(classifications.find((c) => c.topicId === indusTopicId)!.status).toBe('confirmed');
+    // The original note itself is never touched/duplicated by any of this.
+    expect(useAppStore.getState().importedContent).toEqual([article('note-1')]);
+  });
+
+  it('a note can carry classifications against BOTH a History Optional topic and an unrelated GS-I History topic at once — multiple classifications, no duplication of the note', () => {
+    const gs1HistoryTopic = UPSC_CSE_GRANULAR_NODES.find((n) => n.level === 'topic' && n.paperId === 'mains-gs1')!;
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(article('note-2'));
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'note-2', itemType: 'imported_content', topicId: sourcesTopicId });
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'note-2', itemType: 'imported_content', topicId: gs1HistoryTopic.id });
+
+    const topicIds = useAppStore.getState().knowledgeClassifications.filter((c) => c.itemId === 'note-2').map((c) => c.topicId);
+    expect(topicIds.sort()).toEqual([sourcesTopicId, gs1HistoryTopic.id].sort());
+    expect(useAppStore.getState().importedContent).toHaveLength(1); // still exactly one note, never duplicated
+  });
+
+  it('a History Optional classification created in upsc_cse is invisible while apfc is active, and restored on switching back (workspace isolation)', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(article('note-3'));
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'note-3', itemType: 'imported_content', topicId: sourcesTopicId });
+    expect(useAppStore.getState().knowledgeClassifications).toHaveLength(1);
+
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    expect(useAppStore.getState().knowledgeClassifications).toEqual([]);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().knowledgeClassifications).toHaveLength(1);
+    expect(useAppStore.getState().knowledgeClassifications[0].topicId).toBe(sourcesTopicId);
+  });
+
+  it('a History Optional classification survives exportAllData / importAllData (simulated reload)', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    useAppStore.getState().addImportedContent(article('note-4'));
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'note-4', itemType: 'imported_content', topicId: sourcesTopicId });
+    const json = exportAllData();
+
+    reset();
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().knowledgeClassifications).toEqual([]);
+
+    importAllData(json);
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().knowledgeClassifications.find((c) => c.itemId === 'note-4')?.topicId).toBe(sourcesTopicId);
+  });
+
+  it('GS-I\'s own granular History topics and APFC\'s own taxonomy are completely unaffected by History Optional', () => {
+    const gs1HistoryTopics = UPSC_CSE_GRANULAR_NODES.filter((n) => n.level === 'topic' && n.paperId === 'mains-gs1');
+    expect(gs1HistoryTopics.length).toBeGreaterThan(0);
+    // None of GS-I's own topic ids were renamed/touched — they still resolve independently of the
+    // new History Optional subject ids, which live under a completely different paperId.
+    for (const topic of gs1HistoryTopics) {
+      expect(topic.paperId).not.toBe('mains-optional');
+    }
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'apfc-note', itemType: 'imported_content', topicId: 'topic-inflation' });
+    expect(useAppStore.getState().knowledgeClassifications[0].taxonomy).toBe('apfc');
   });
 });

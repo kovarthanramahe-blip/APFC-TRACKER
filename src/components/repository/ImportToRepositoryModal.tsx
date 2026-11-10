@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, X, AlertTriangle, CheckCircle2, ArrowRight, ShieldAlert, Copy } from 'lucide-react';
+import { Upload, X, AlertTriangle, CheckCircle2, ArrowRight, ShieldAlert, Copy, Newspaper } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
 import { getWorkspaceMeta } from '../../lib/workspace';
 import { Badge, Button } from '../ui/Primitives';
@@ -23,6 +23,8 @@ import { getPapersForStage, getSubjectsForPaper, getMicrosyllabusForSubject, res
 import { resolveGranularBreadcrumb } from '../../lib/upscCseGranularSyllabus';
 import { runFileImport } from '../../lib/importPipeline';
 import type { DuplicateMatchResult } from '../../lib/importDuplicates';
+import { ingestMarkdownAsArticles, buildDocumentTypeMetadata, type KnowledgeIngestionBatch } from '../../lib/knowledgeIngestion';
+import { DOCUMENT_TYPE_LABELS } from '../../lib/documentTypeClassification';
 import {
   REPOSITORY_CONTENT_TYPE_REGISTRY,
   getRepositoryContentTypeMeta,
@@ -171,6 +173,7 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const addImportedContent = useAppStore((s) => s.addImportedContent);
+  const addKnowledgeIngestionBatch = useAppStore((s) => s.addKnowledgeIngestionBatch);
   const upsertNote = useAppStore((s) => s.upsertNote);
   const importedContent = useAppStore((s) => s.importedContent);
   const folders = useAppStore((s) => s.folders);
@@ -212,8 +215,40 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
   const [syllabusNodeIdInput, setSyllabusNodeIdInput] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedEntry, setSavedEntry] = useState<RepositoryEntry | null>(null);
+  // Knowledge Librarian (P0), Phase 2 — Markdown multi-article extraction. Opt-in, OFF by default,
+  // and only ever offered for a markdown file (see the JSX below) — every existing single-item
+  // import flow (note/research_document/bibliography/current_affairs/etc.) is completely unchanged
+  // when this stays unchecked, which is every import before this stage and every import a user
+  // doesn't explicitly opt into this for.
+  const [splitIntoArticles, setSplitIntoArticles] = useState(false);
+  const [savedArticleCount, setSavedArticleCount] = useState<number | null>(null);
 
   const syllabusNodeOptions = useMemo(buildSyllabusNodeOptions, []);
+
+  // Built fresh whenever the toggle/preview changes — lib/knowledgeIngestion.ts's
+  // ingestMarkdownAsArticles is pure and synchronous, so recomputing it on every relevant change
+  // (rather than only on Confirm) is what lets the preview below show the user EXACTLY what will
+  // be saved, including every extraction warning, before they commit to anything.
+  const ingestionBatch: KnowledgeIngestionBatch | null = useMemo(() => {
+    if (!splitIntoArticles || !preview) return null;
+    return ingestMarkdownAsArticles({
+      workspaceId: activeWorkspaceId,
+      filename: preview.sourceFilename,
+      rawContent: preview.content,
+      originalFormat: preview.originalFormat,
+      sourceHash,
+      sourceFileSize: fileSizeBytes ?? undefined,
+    });
+  }, [splitIntoArticles, preview, activeWorkspaceId, sourceHash, fileSizeBytes]);
+
+  // Smart Document Upload — shown in the preview stage below so the user sees the proposed
+  // document type BEFORE confirming the save, same "preview exactly what will be saved" principle
+  // as ingestionBatch above. Not computed when splitting into articles — that path shows each
+  // article's own predicted type instead (ingestionBatch.articles[i].metadata), set separately.
+  const documentTypePreview = useMemo(() => {
+    if (splitIntoArticles || !preview) return null;
+    return buildDocumentTypeMetadata(preview.content, pendingFile?.name ?? preview.sourceFilename);
+  }, [splitIntoArticles, preview, pendingFile]);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -252,6 +287,8 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     setSourceInput('');
     setSyllabusNodeIdInput('');
     setSaveError(null);
+    setSplitIntoArticles(false);
+    setSavedArticleCount(null);
     setStage('preview');
   }
 
@@ -259,6 +296,14 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     if (!preview) return;
     setSaveError(null);
     try {
+      if (splitIntoArticles) {
+        if (!ingestionBatch) return;
+        addKnowledgeIngestionBatch(ingestionBatch);
+        setSavedEntry(repositoryEntryFromImportedContent(ingestionBatch.originalDocument));
+        setSavedArticleCount(ingestionBatch.articles.length);
+        setStage('success');
+        return;
+      }
       if (selectedType === 'note') {
         const newNote: Note = {
           id: uuid(),
@@ -290,7 +335,11 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
           workspaceId: activeWorkspaceId,
           contentType: selectedType,
           title: titleInput.trim() || preview.title,
-          metadata,
+          // Smart Document Upload — the SAME documentTypePreview already shown to the user above is
+          // what gets saved here (the multi-article path below has its own, identical wiring in
+          // knowledgeIngestion.ts); the user's own metadata fields (tags/category/description/etc.,
+          // all still empty on a brand-new item) always win on any future overlap.
+          metadata: { ...documentTypePreview, ...metadata },
           sourceHash,
           sourceFileSize: fileSizeBytes ?? undefined,
         });
@@ -321,6 +370,8 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
     setSyllabusNodeIdInput('');
     setSaveError(null);
     setSavedEntry(null);
+    setSplitIntoArticles(false);
+    setSavedArticleCount(null);
   }
 
   const typeMeta = getRepositoryContentTypeMeta(selectedType);
@@ -409,6 +460,15 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                 <p>
                   <span className="font-medium text-slate-600 dark:text-slate-300">Provenance:</span> Imported file, not yet saved
                 </p>
+                {documentTypePreview && documentTypePreview.documentTypeStatus !== 'unclassified' && (
+                  <p>
+                    <span className="font-medium text-slate-600 dark:text-slate-300">Predicted document type:</span>{' '}
+                    {DOCUMENT_TYPE_LABELS[documentTypePreview.documentType as keyof typeof DOCUMENT_TYPE_LABELS]}
+                    {documentTypePreview.documentTypeStatus === 'needs_review' && ' (needs review — conflicting signals)'}
+                    {documentTypePreview.lectureOrUnitNumber !== undefined && ` · #${documentTypePreview.lectureOrUnitNumber}`}
+                    {documentTypePreview.documentYear !== undefined && ` · ${documentTypePreview.documentYear}`}
+                  </p>
+                )}
               </div>
 
               {duplicates?.exactMatch && (
@@ -431,6 +491,65 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                 </div>
               )}
 
+              {preview.originalFormat === 'markdown' && (
+                <label className="flex items-start gap-2 rounded-xl border border-slate-200 dark:border-slate-800 p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={splitIntoArticles}
+                    onChange={(e) => setSplitIntoArticles(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 dark:border-slate-700"
+                  />
+                  <span>
+                    <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-200">
+                      <Newspaper className="h-4 w-4" /> This file contains multiple articles
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-400">
+                      Split it into separate, individually classifiable Current Affairs items instead of importing it as one document. The original file is
+                      always saved in full either way.
+                    </span>
+                  </span>
+                </label>
+              )}
+
+              {splitIntoArticles && ingestionBatch && (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 text-sm text-slate-600 dark:text-slate-300">
+                    <p className="font-medium text-slate-700 dark:text-slate-200">
+                      {ingestionBatch.articles.length === 0
+                        ? 'No separate articles could be extracted from this file.'
+                        : `${ingestionBatch.articles.length} article${ingestionBatch.articles.length === 1 ? '' : 's'} will be extracted.`}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">The original file is always saved in full, unchanged, alongside the extracted articles.</p>
+                  </div>
+
+                  {ingestionBatch.warnings.length > 0 && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <ul className="list-disc space-y-1 pl-4">
+                        {ingestionBatch.warnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {ingestionBatch.articles.length > 0 && (
+                    <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                      {ingestionBatch.articles.map((a) => (
+                        <div key={a.id} className="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs">
+                          <p className="truncate font-medium text-slate-700 dark:text-slate-200">{a.title}</p>
+                          {(a.metadata?.eventDate || a.metadata?.source) && (
+                            <p className="mt-0.5 text-slate-400">{[a.metadata?.eventDate, a.metadata?.source].filter(Boolean).join(' · ')}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!splitIntoArticles && (
+                <>
               <div>
                 <label htmlFor="import-content-type" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
                   Content type
@@ -592,6 +711,8 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
                   Archive immediately
                 </label>
               </div>
+                </>
+              )}
 
               <div>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Content preview</p>
@@ -626,7 +747,11 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
             <div className="space-y-4">
               <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
                 <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-                <p>Saved to your repository.</p>
+                <p>
+                  {savedArticleCount !== null
+                    ? `Saved — ${savedArticleCount} article${savedArticleCount === 1 ? '' : 's'} extracted, plus the original document.`
+                    : 'Saved to your repository.'}
+                </p>
               </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 space-y-2">
                 <p className="font-display font-semibold text-slate-800 dark:text-slate-100">{savedEntry.title}</p>
@@ -656,7 +781,7 @@ export function ImportToRepositoryModal({ onClose }: { onClose: () => void }) {
               <Button variant="secondary" onClick={resetToPick}>
                 Cancel
               </Button>
-              <Button onClick={handleConfirm} disabled={!titleInput.trim()}>
+              <Button onClick={handleConfirm} disabled={splitIntoArticles ? !ingestionBatch : !titleInput.trim()}>
                 Confirm &amp; Save
               </Button>
             </>

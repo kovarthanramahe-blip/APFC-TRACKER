@@ -36,6 +36,7 @@
 //     from unvalidated caller input.
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -44,6 +45,27 @@ struct llama_model;
 struct llama_context;
 
 namespace jarvis {
+
+// Phase 13H — the pure, llama.cpp-independent core of llama_cpp_backend.cpp's own
+// findThinkTokenId: scans token ids [0, nVocab) via the caller-supplied `getText` lookup and
+// returns the first one whose text is an EXACT match (never substring/prefix) for `targetText`,
+// or -1 if none matches. Defined here (header-only template) specifically so it has zero
+// dependency on <llama.h> or any real llama.cpp vocabulary type — it can be exercised by a plain
+// host-compiled unit test with a fake lookup, without the NDK/submodule this file's own real
+// callers require. findThinkTokenId (llama_cpp_backend.cpp) delegates to this unchanged; this is
+// an extraction for testability, never a second, independently-maintained implementation.
+namespace detail {
+template <typename TextLookup>
+inline int32_t findExactTokenId(int32_t nVocab, const char* targetText, TextLookup getText) {
+    for (int32_t token = 0; token < nVocab; ++token) {
+        const char* text = getText(token);
+        if (text != nullptr && std::strcmp(text, targetText) == 0) {
+            return token;
+        }
+    }
+    return -1;
+}
+}  // namespace detail
 
 enum class LlamaCppLoadResult { kSuccess, kAlreadyLoaded, kFileNotFound, kLoadFailed };
 
@@ -109,6 +131,14 @@ private:
      * model/vocabulary — complete() must then behave exactly as it did before this phase, never
      * fabricating a suppression that isn't actually possible. */
     int32_t thinkTokenId_ = -1;
+
+    /** Phase 13H — a plain, mutex_-protected counter incremented once per complete() call,
+     * logged alongside that call's own timing lines so the "inference started" and "inference
+     * completed" logcat lines for the SAME request can be tied together even if other log output
+     * is interleaved between them. Never crosses the JNI boundary, never changes any method
+     * signature — purely a same-process logging aid, reset to 0 only by process restart (not by
+     * unloadModel(), unlike thinkTokenId_, since it identifies REQUESTS, not model state). */
+    uint64_t requestSeq_ = 0;
 };
 
 }  // namespace jarvis

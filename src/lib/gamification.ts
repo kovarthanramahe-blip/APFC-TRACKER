@@ -210,9 +210,11 @@ export function getGamificationSnapshot(inputs: GamificationInputs): Gamificatio
   };
 }
 
-// Shared selector hook so pages (Dashboard, Analytics) don't each re-wire
-// the same store fields — one source of truth for the derived snapshot.
-export function useGamification(): GamificationSnapshot {
+// Shared by useGamification/useRewards — both need the exact same 6 store fields to build their
+// own GamificationInputs. Returns a value that's reference-stable across renders unless one of
+// those 6 fields actually changed, so each caller's own useMemo(..., [inputs]) below only
+// recomputes exactly when the old per-hook useMemo(..., [the 6 fields]) would have.
+function useGamificationInputs(): GamificationInputs {
   const completedTopics = useAppStore((s) => s.completedTopics);
   const attempts = useAppStore((s) => s.attempts);
   const sessions = useAppStore((s) => s.sessions);
@@ -221,9 +223,16 @@ export function useGamification(): GamificationSnapshot {
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
 
   return useMemo(
-    () => getGamificationSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts }),
+    () => ({ completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts }),
     [completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts],
   );
+}
+
+// Shared selector hook so pages (Dashboard, Analytics) don't each re-wire
+// the same store fields — one source of truth for the derived snapshot.
+export function useGamification(): GamificationSnapshot {
+  const inputs = useGamificationInputs();
+  return useMemo(() => getGamificationSnapshot(inputs), [inputs]);
 }
 
 // --- Rewards ------------------------------------------------------------
@@ -355,17 +364,8 @@ export function getRewardsSnapshot(inputs: GamificationInputs): RewardsSnapshot 
 }
 
 export function useRewards(): RewardsSnapshot {
-  const completedTopics = useAppStore((s) => s.completedTopics);
-  const attempts = useAppStore((s) => s.attempts);
-  const sessions = useAppStore((s) => s.sessions);
-  const studyLog = useAppStore((s) => s.studyLog);
-  const starredQuestionIds = useAppStore((s) => s.starredQuestionIds);
-  const pyqAttempts = useAppStore((s) => s.pyqAttempts);
-
-  return useMemo(
-    () => getRewardsSnapshot({ completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts }),
-    [completedTopics, attempts, sessions, studyLog, starredQuestionIds, pyqAttempts],
-  );
+  const inputs = useGamificationInputs();
+  return useMemo(() => getRewardsSnapshot(inputs), [inputs]);
 }
 
 // --- Context-aware encouragement -----------------------------------------

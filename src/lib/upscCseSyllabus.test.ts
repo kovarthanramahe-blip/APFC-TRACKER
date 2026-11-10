@@ -280,12 +280,88 @@ describe('UPSC CSE Syllabus Foundation — required Mains coverage', () => {
     expect(items).toContain('Case Studies');
   });
 
-  it('Optional Subject is an extensible placeholder (exactly one placeholder subject/item, not fabricated content)', () => {
+  it('Optional Subject: the generic "not yet selected" placeholder remains a single, unfabricated item', () => {
     const optional = UPSC_CSE_MAINS_SYLLABUS.papers.find((p) => p.title === 'Optional Subject')!;
     const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional.id);
-    expect(subjects.length).toBe(1);
-    const items = getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, subjects[0].id);
+    const notSelected = subjects.find((s) => s.title === 'Optional Subject Not Yet Selected')!;
+    expect(notSelected).toBeDefined();
+    const items = getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, notSelected.id);
     expect(items.length).toBe(1);
+  });
+
+  // Library Mode Audit + History Optional Integration task, Phase B — History Optional added as
+  // two real, distinct, separately-filterable subjects under the SAME Optional Subject paper. Real
+  // unit-level syllabus content is deliberately NOT populated here (see
+  // data/upscCseMainsSyllabus.ts's own header for the verification blocker) — these tests only
+  // cover the structural scaffold, matching what was actually implemented.
+  describe('History Optional (structural scaffold — Phase B)', () => {
+    const optional = () => UPSC_CSE_MAINS_SYLLABUS.papers.find((p) => p.title === 'Optional Subject')!;
+
+    it('Paper I and Paper II exist as two distinct, separately-filterable subjects under Optional Subject', () => {
+      const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional().id);
+      const paper1 = subjects.find((s) => s.title === 'History Optional — Paper I');
+      const paper2 = subjects.find((s) => s.title === 'History Optional — Paper II');
+      expect(paper1).toBeDefined();
+      expect(paper2).toBeDefined();
+      expect(paper1!.id).not.toBe(paper2!.id);
+    });
+
+    it('History Optional subject ids are stable and completely distinct from GS-I\'s own "History" subject', () => {
+      const gs1 = UPSC_CSE_MAINS_SYLLABUS.papers.find((p) => p.title === 'General Studies I')!;
+      const gs1History = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, gs1.id).find((s) => s.title === 'History')!;
+      const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional().id);
+      const paper1 = subjects.find((s) => s.title === 'History Optional — Paper I')!;
+      const paper2 = subjects.find((s) => s.title === 'History Optional — Paper II')!;
+      expect(paper1.id).toBe('mains-optional-history-optional-paper-1');
+      expect(paper2.id).toBe('mains-optional-history-optional-paper-2');
+      expect(gs1History.id).not.toBe(paper1.id);
+      expect(gs1History.id).not.toBe(paper2.id);
+    });
+
+    // Phase 1 Completion — the pending-verification placeholder was replaced with the real
+    // Paper I (24 units) / Paper II (27 units) hierarchy from a user-supplied source document.
+    it('Paper I has exactly 24 real units, Paper II exactly 27, each with real title/description text (no placeholder remains)', () => {
+      const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional().id);
+      const paper1 = subjects.find((s) => s.title === 'History Optional — Paper I')!;
+      const paper2 = subjects.find((s) => s.title === 'History Optional — Paper II')!;
+      const paper1Items = getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, paper1.id);
+      const paper2Items = getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, paper2.id);
+      expect(paper1Items).toHaveLength(24);
+      expect(paper2Items).toHaveLength(27);
+      expect(paper1Items.every((i) => i.title !== 'Official Syllabus Units — Pending Verification')).toBe(true);
+      expect(paper2Items.every((i) => i.title !== 'Official Syllabus Units — Pending Verification')).toBe(true);
+      expect(paper1Items.every((i) => i.description.length > 0)).toBe(true);
+      expect(paper2Items.every((i) => i.description.length > 0)).toBe(true);
+    });
+
+    it('spot-checks real, verbatim-preserved unit text on both papers, including a unit whose supplied heading had stray coaching-site hyperlink markup stripped', () => {
+      const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional().id);
+      const paper1 = subjects.find((s) => s.title === 'History Optional — Paper I')!;
+      const paper2 = subjects.find((s) => s.title === 'History Optional — Paper II')!;
+      const sources = getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, paper1.id).find((i) => i.title === 'Sources')!;
+      expect(sources.description).toContain('Archaeological sources');
+      expect(sources.description).toContain('Greek, Chinese and Arab writers');
+      const otherStrands = getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, paper2.id).find((i) => i.title === 'Other strands in the National Movement')!;
+      expect(otherStrands.title).not.toContain('[');
+      expect(otherStrands.title).not.toContain('lotusarise');
+      expect(otherStrands.description).toContain('Subhas Chandra Bose');
+    });
+
+    it('every History Optional unit id is unique and distinct across both papers', () => {
+      const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional().id);
+      const paper1 = subjects.find((s) => s.title === 'History Optional — Paper I')!;
+      const paper2 = subjects.find((s) => s.title === 'History Optional — Paper II')!;
+      const ids = [...getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, paper1.id), ...getMicrosyllabusForSubject(UPSC_CSE_MAINS_SYLLABUS, paper2.id)].map((i) => i.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids.length).toBe(51);
+    });
+
+    it('the generic "not yet selected" placeholder still exists alongside the two new real subjects', () => {
+      const subjects = getSubjectsForPaper(UPSC_CSE_MAINS_SYLLABUS, optional().id);
+      expect(subjects.map((s) => s.title).sort()).toEqual(
+        ['History Optional — Paper I', 'History Optional — Paper II', 'Optional Subject Not Yet Selected'].sort(),
+      );
+    });
   });
 });
 

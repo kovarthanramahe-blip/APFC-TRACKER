@@ -15,6 +15,10 @@ describe('deriveJarvisUiRuntimeStatus', () => {
     expect(deriveJarvisUiRuntimeStatus('model_loading')).toBe('model_loading');
   });
 
+  it('"model_load_failed" maps to its own distinct "model_load_failed" — never collapsed into "model_unavailable" (Phase 13H)', () => {
+    expect(deriveJarvisUiRuntimeStatus('model_load_failed')).toBe('model_load_failed');
+  });
+
   it('"model_ready" and every in-flight-request state (inference_running/completed/failed) all map to "model_ready" — one request\'s outcome never changes whether the loaded model itself is still ready', () => {
     expect(deriveJarvisUiRuntimeStatus('model_ready')).toBe('model_ready');
     expect(deriveJarvisUiRuntimeStatus('inference_running')).toBe('model_ready');
@@ -33,5 +37,9 @@ describe('JARVIS_UI_RUNTIME_STATUS_LABEL', () => {
     expect(JARVIS_UI_RUNTIME_STATUS_LABEL.model_loading).toBe('Loading Model');
     expect(JARVIS_UI_RUNTIME_STATUS_LABEL.model_unavailable).toBe('Model Unavailable');
     expect(JARVIS_UI_RUNTIME_STATUS_LABEL.deterministic).toBe('Deterministic Mode');
+  });
+
+  it('provides a distinct fifth label for a genuinely failed load attempt (Phase 13H)', () => {
+    expect(JARVIS_UI_RUNTIME_STATUS_LABEL.model_load_failed).toBe('Model Load Failed');
   });
 });

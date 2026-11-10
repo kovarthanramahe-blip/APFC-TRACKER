@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper, Milestone } from 'lucide-react';
+import { Search, Tag, X, Library, ArrowRight, SlidersHorizontal, Upload, Pencil, Trash2, AlertTriangle, Eye, Download, UploadCloud, FileQuestion, Archive, Newspaper, Milestone, GraduationCap } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
@@ -8,12 +8,14 @@ import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
 import { resolveSyllabusNodeLabel } from '../lib/syllabusNodeLabel';
 import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
+import { listReviewQueue } from '../lib/knowledgeClassification';
 import {
   queryRepository,
   listRepositoryEntries,
   listImportedContentForWorkspace,
   listNotesForWorkspace,
   computeRepositoryStatistics,
+  getImportedContentById,
   REPOSITORY_CONTENT_TYPE_REGISTRY,
   getRepositoryContentTypeMeta,
   repositoryContentTypeSupports,
@@ -35,6 +37,7 @@ import { PinToggle } from '../components/organisation/PinToggle';
 import { ArchiveToggle } from '../components/organisation/ArchiveToggle';
 import { BulkActionBar } from '../components/organisation/BulkActionBar';
 import { SelectionCheckbox } from '../components/organisation/SelectionCheckbox';
+import { LibrarySearchPanel } from '../components/repository/LibrarySearchPanel';
 import { buildFolderTree, flattenFolderTree } from '../lib/folders';
 
 // Global Repository UI — a single, read-only browse/search surface across everything
@@ -127,7 +130,7 @@ function ResultCard({
       </div>
       <Link
         to={repositoryDetailPathFor(entry.entityType, entry.entityId)}
-        className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 rounded"
+        className="font-display font-semibold text-slate-800 dark:text-slate-100 truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 rounded"
       >
         {title}
       </Link>
@@ -150,7 +153,7 @@ function ResultCard({
           <Link
             to={repositoryDetailPathFor(entry.entityType, entry.entityId)}
             aria-label={`View details: ${title} (${meta.label})`}
-            className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
+            className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60"
           >
             <Eye className="h-3 w-3" /> View
           </Link>
@@ -158,7 +161,7 @@ function ResultCard({
             <Link
               to={target.to}
               aria-label={`${target.label}: ${title} (${meta.label})`}
-              className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 hover:bg-brand-100 dark:hover:bg-brand-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
+              className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-500/10 hover:bg-primary-100 dark:hover:bg-primary-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60"
             >
               {target.label} <ArrowRight className="h-3 w-3" />
             </Link>
@@ -194,13 +197,14 @@ function buildEditedMetadata(tagsInput: string, categoryInput: string, descripti
 /**
  * EditMetadataModal's own form only has fields for title/contentType/tags/category/description —
  * it builds `metadata` fresh from those, with no idea folderId/isPinned/isArchived (Premium Note
- * Organisation) or eventDate/source/syllabusNodeId (UPSC CSE Current Affairs) exist. A plain
- * metadata edit must never silently wipe any of them, so they're carried over from the item's own
- * current state before `metadata` is replaced wholesale (updateImportedContent does a shallow
- * replace of the whole metadata object, not a deep merge — see lib/store.ts's updateImportedContent).
- * `original` is the item's real, pre-edit ImportedContent (only place eventDate/source/
- * syllabusNodeId live); a field genuinely absent on it stays absent here too — never defaulted.
- * Shared by both pages/Repository.tsx and pages/RepositoryDetail.tsx's own handleEditSave.
+ * Organisation), eventDate/source/syllabusNodeId (UPSC CSE Current Affairs), apfcTopicId (Knowledge
+ * Library), or topicAreaId/topicAreaIds (PhD Research Topic Areas — contentImport.ts's own doc
+ * comment on both fields) exist. A plain metadata edit must never silently wipe any of them, so
+ * they're carried over from the item's own current state before `metadata` is replaced wholesale
+ * (updateImportedContent does a shallow replace of the whole metadata object, not a deep merge —
+ * see lib/store.ts's updateImportedContent). `original` is the item's real, pre-edit ImportedContent
+ * (the only place these fields live); a field genuinely absent on it stays absent here too — never
+ * defaulted. Shared by both pages/Repository.tsx and pages/RepositoryDetail.tsx's own handleEditSave.
  */
 export function preserveUneditedMetadata(
   editedMetadata: ImportedContentMetadata | undefined,
@@ -216,6 +220,8 @@ export function preserveUneditedMetadata(
     ...(original?.metadata?.source !== undefined ? { source: original.metadata.source } : {}),
     ...(original?.metadata?.syllabusNodeId !== undefined ? { syllabusNodeId: original.metadata.syllabusNodeId } : {}),
     ...(original?.metadata?.apfcTopicId !== undefined ? { apfcTopicId: original.metadata.apfcTopicId } : {}),
+    ...(original?.metadata?.topicAreaId !== undefined ? { topicAreaId: original.metadata.topicAreaId } : {}),
+    ...(original?.metadata?.topicAreaIds !== undefined ? { topicAreaIds: original.metadata.topicAreaIds } : {}),
   };
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
@@ -283,7 +289,7 @@ export function EditMetadataModal({
               value={titleInput}
               onChange={(e) => setTitleInput(e.target.value)}
               placeholder="Title"
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
             />
           </div>
           <div>
@@ -294,7 +300,7 @@ export function EditMetadataModal({
               id="edit-content-type"
               value={contentTypeInput}
               onChange={(e) => setContentTypeInput(e.target.value as RepositoryContentType)}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
             >
               {EDITABLE_CONTENT_TYPES.map((meta) => (
                 <option key={meta.type} value={meta.type}>
@@ -314,7 +320,7 @@ export function EditMetadataModal({
                 onChange={(e) => setDescriptionInput(e.target.value)}
                 placeholder="A short summary shown on the repository card…"
                 rows={2}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               />
             </div>
           )}
@@ -328,7 +334,7 @@ export function EditMetadataModal({
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
                 placeholder="e.g. fieldwork, chapter-1"
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               />
             </div>
           )}
@@ -343,7 +349,7 @@ export function EditMetadataModal({
                 value={categoryInput}
                 onChange={(e) => setCategoryInput(e.target.value)}
                 placeholder="e.g. Literature Review"
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               />
               <datalist id="repository-edit-category-suggestions">
                 {existingCategories.map((c) => (
@@ -418,6 +424,9 @@ export default function Repository() {
   const accent = getWorkspaceAccent(activeWorkspaceId);
   const importedContent = useAppStore((s) => s.importedContent);
   const notes = useAppStore((s) => s.notes);
+  const knowledgeClassifications = useAppStore((s) => s.knowledgeClassifications);
+  const documentEmbeddings = useAppStore((s) => s.documentEmbeddings);
+  const setDocumentEmbeddings = useAppStore((s) => s.setDocumentEmbeddings);
   const addImportedContent = useAppStore((s) => s.addImportedContent);
   const updateImportedContent = useAppStore((s) => s.updateImportedContent);
   const deleteImportedContent = useAppStore((s) => s.deleteImportedContent);
@@ -473,29 +482,44 @@ export default function Repository() {
   const workspaceNotes = useMemo(() => listNotesForWorkspace(notes, activeWorkspaceId), [notes, activeWorkspaceId]);
   const allEntries = useMemo(() => listRepositoryEntries(workspaceContent, workspaceNotes), [workspaceContent, workspaceNotes]);
   const statistics = useMemo(() => computeRepositoryStatistics(allEntries), [allEntries]);
+  // Knowledge Librarian P0.1 — minimal review-queue surface: every classification still awaiting a
+  // human decision (lib/knowledgeClassification.ts's listReviewQueue, most-confident first),
+  // already workspace-scoped for free (knowledgeClassifications only ever holds the active
+  // workspace's own records — see lib/store.ts's setActiveWorkspaceId swap).
+  const reviewQueue = useMemo(() => listReviewQueue(knowledgeClassifications), [knowledgeClassifications]);
 
   const availableCategories = useMemo(() => collectImportedContentCategories(workspaceContent), [workspaceContent]);
   const availableTags = useMemo(() => collectImportedContentTags(workspaceContent), [workspaceContent]);
 
   const results = useMemo(
     () =>
-      queryRepository(importedContent, notes, {
-        workspaceId: activeWorkspaceId,
-        contentType: selectedContentType || undefined,
-        contentTypes: selectedContentType ? undefined : (contentTypesForLibraryView(libraryView) ?? undefined),
-        syllabusNodeId: syllabusNodeIdFilter,
-        apfcTopicId: apfcTopicIdFilter,
-        search: searchQuery,
-        tags: selectedTags,
-        category: selectedCategory || undefined,
-        folderId: selectedFolderId,
-        pinnedOnly,
-        archived: showArchived,
-        sort: sortOrder,
-      }),
+      queryRepository(
+        importedContent,
+        notes,
+        {
+          workspaceId: activeWorkspaceId,
+          contentType: selectedContentType || undefined,
+          contentTypes: selectedContentType ? undefined : (contentTypesForLibraryView(libraryView) ?? undefined),
+          syllabusNodeId: syllabusNodeIdFilter,
+          apfcTopicId: apfcTopicIdFilter,
+          search: searchQuery,
+          tags: selectedTags,
+          category: selectedCategory || undefined,
+          folderId: selectedFolderId,
+          pinnedOnly,
+          archived: showArchived,
+          sort: sortOrder,
+        },
+        // Knowledge Librarian P0.1 hardening — widens an apfcTopicId filter to also surface items
+        // confirmed against this topic via lib/knowledgeClassification.ts, not just the legacy
+        // single metadata.apfcTopicId field (see queryRepository's own doc comment). A no-op for
+        // every other filter here.
+        knowledgeClassifications,
+      ),
     [
       importedContent,
       notes,
+      knowledgeClassifications,
       activeWorkspaceId,
       libraryView,
       selectedContentType,
@@ -731,7 +755,7 @@ export default function Repository() {
           arrived via a syllabus page's "N linked" link (see pages/UpscCseSyllabus.tsx); removable,
           never a permanent part of the page's chrome. */}
       {topicFilterLabel && (
-        <div className="mb-5 flex items-center gap-1.5 self-start rounded-full bg-brand-50 dark:bg-brand-500/10 px-3 py-1.5 text-sm text-brand-700 dark:text-brand-300">
+        <div className="mb-5 flex items-center gap-1.5 self-start rounded-full bg-primary-50 dark:bg-primary-500/10 px-3 py-1.5 text-sm text-primary-700 dark:text-primary-400">
           <Milestone className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">
             Linked to <span className="font-medium">{topicFilterLabel}</span>
@@ -740,7 +764,7 @@ export default function Repository() {
             type="button"
             onClick={clearTopicFilter}
             aria-label="Clear topic filter"
-            className="shrink-0 rounded-full p-0.5 hover:bg-brand-100 dark:hover:bg-brand-500/20"
+            className="shrink-0 rounded-full p-0.5 hover:bg-primary-100 dark:hover:bg-primary-500/20"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -766,6 +790,48 @@ export default function Repository() {
         </div>
       </Card>
 
+      <LibrarySearchPanel
+        notes={notes}
+        importedContent={importedContent}
+        knowledgeClassifications={knowledgeClassifications}
+        documentEmbeddings={documentEmbeddings}
+        onSetDocumentEmbeddings={setDocumentEmbeddings}
+        workspaceId={activeWorkspaceId}
+      />
+
+      {reviewQueue.length > 0 && (
+        <Card className="mb-5 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <GraduationCap className="h-3.5 w-3.5" /> Classifications awaiting review
+            </p>
+            <Badge tone="warning">{reviewQueue.length}</Badge>
+          </div>
+          <div className="space-y-1.5">
+            {reviewQueue.slice(0, 5).map((c) => {
+              const item = getImportedContentById(importedContent, c.itemId);
+              if (!item) return null;
+              const path = resolveApfcTopicPath(c.topicId);
+              return (
+                <Link
+                  key={c.id}
+                  to={repositoryDetailPathFor('imported_content', c.itemId)}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                >
+                  <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{item.title || 'Untitled'}</span>
+                  <span className="shrink-0 text-xs text-slate-400">
+                    {path ? path.topic.title : c.topicId} · {Math.round(c.confidence * 100)}%
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+          {reviewQueue.length > 5 && (
+            <p className="mt-2 text-xs text-slate-400">+{reviewQueue.length - 5} more — open each item to confirm or reject.</p>
+          )}
+        </Card>
+      )}
+
       {allEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Library className="h-10 w-10 text-slate-300 dark:text-slate-700 mb-3" />
@@ -789,7 +855,7 @@ export default function Repository() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search title or content…"
                   aria-label="Search repository"
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent py-2 pl-9 pr-3 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent py-2 pl-9 pr-3 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                 />
               </div>
 
@@ -805,7 +871,7 @@ export default function Repository() {
                   if (next) setLibraryView('all');
                 }}
                 aria-label="Filter by content type"
-                className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               >
                 <option value="">All content types</option>
                 {REPOSITORY_CONTENT_TYPE_REGISTRY.map((meta) => (
@@ -825,7 +891,7 @@ export default function Repository() {
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value)}
                     aria-label="Filter by category"
-                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                   >
                     <option value="">All categories</option>
                     {availableCategories.map((c) => (
@@ -845,7 +911,7 @@ export default function Repository() {
                 value={sortOrder}
                 onChange={(e) => setSortOrder(e.target.value as ImportedContentSortOrder)}
                 aria-label="Sort by"
-                className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               >
                 {SORT_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -864,7 +930,7 @@ export default function Repository() {
                     value={selectedFolderId === undefined ? '' : (selectedFolderId ?? '__root__')}
                     onChange={(e) => setSelectedFolderId(e.target.value === '' ? undefined : e.target.value === '__root__' ? null : e.target.value)}
                     aria-label="Filter by folder"
-                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                   >
                     <option value="">All folders</option>
                     <option value="__root__">Unfiled (Root)</option>

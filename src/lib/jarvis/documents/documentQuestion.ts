@@ -14,7 +14,11 @@ import { retrieveChunksForQuery, type JarvisDocumentRetrievalQuery, type JarvisR
  * never re-wraps or rewrites the source text. */
 const CITATION_QUOTE_MAX_LENGTH = 200;
 
-function citationForChunk(chunk: JarvisDocumentChunk): JarvisDocumentCitation {
+/** Exported (AI Library, semantic search) so a caller ranking chunks by a DIFFERENT retrieval mode
+ * (jarvis/documents/embeddingIndex.ts's semanticSearchChunks) can still build the exact same,
+ * single-source-of-truth citation shape for its own results — never a second, divergent citation
+ * builder. Behaviour is completely unchanged for every existing caller of this file. */
+export function citationForChunk(chunk: JarvisDocumentChunk): JarvisDocumentCitation {
   const quote = chunk.text.length > CITATION_QUOTE_MAX_LENGTH ? `${chunk.text.slice(0, CITATION_QUOTE_MAX_LENGTH)}…` : chunk.text;
   return { documentId: chunk.documentId, chunkId: chunk.id, page: chunk.startPage, quote };
 }

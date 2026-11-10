@@ -28,6 +28,7 @@ import {
 import { getNoteFolderId, isNoteArchived, queryNotes } from './noteOrganization';
 import type { Note } from './types';
 import type { ContentRelationship, RelationshipEntityType } from './contentRelationships';
+import type { KnowledgeClassification } from './knowledgeClassification';
 
 // Unified Repository Foundation.
 //
@@ -295,6 +296,62 @@ export function listImportedContentByApfcTopic(items: readonly ImportedContent[]
   return items.filter((item) => item.metadata?.apfcTopicId === apfcTopicId);
 }
 
+/**
+ * Knowledge Librarian P0.1 hardening — "Syllabus -> Knowledge" made bidirectionally complete.
+ * `listImportedContentByApfcTopic` above (the LEGACY single-primary-topic lookup, kept completely
+ * unchanged and still used as-is by lib/store.ts's confirmKnowledgeClassification backfill) only
+ * ever finds an item via its ONE `metadata.apfcTopicId`. Since an item can now be CONFIRMED against
+ * several topics (see lib/knowledgeClassification.ts), relying on that single field alone makes
+ * every topic after the first one invisible from its own syllabus page. This function widens the
+ * match to BOTH signals at once:
+ *   - the legacy `metadata.apfcTopicId` (preserved, unchanged, still the only thing written by
+ *     lib/store.ts's confirm action — this function never writes anything, purely a wider READ);
+ *   - any CONFIRMED lib/knowledgeClassification.ts record for this exact topic ('proposed' and
+ *     'rejected' are deliberately excluded — a still-pending or explicitly-rejected classification
+ *     is never "linked" from the topic's own page).
+ * An item matching via BOTH signals (its legacy primary topic query) still appears exactly ONCE:
+ * the two id sets are unioned before filtering `items`, so result membership is a plain boolean
+ * per item, never a per-match duplicate row.
+ */
+export function listImportedContentByApfcTopicIncludingClassifications(
+  items: readonly ImportedContent[],
+  apfcTopicId: string,
+  classifications: readonly KnowledgeClassification[] = [],
+): ImportedContent[] {
+  const confirmedItemIds = new Set(
+    classifications.filter((c) => c.topicId === apfcTopicId && c.status === 'confirmed' && c.itemType === 'imported_content').map((c) => c.itemId),
+  );
+  return items.filter((item) => item.metadata?.apfcTopicId === apfcTopicId || confirmedItemIds.has(item.id));
+}
+
+/**
+ * P1.2 — the UPSC CSE equivalent of listImportedContentByApfcTopicIncludingClassifications above,
+ * widening `listImportedContentBySyllabusNode`'s legacy `metadata.syllabusNodeId` match to also
+ * include any CONFIRMED lib/knowledgeClassification.ts record for this exact granular topic id.
+ * Before this, a CSE Knowledge Librarian classification (added in P1.1) was invisible from both
+ * pages/UpscCseSyllabus.tsx's own "N linked" badge and this module's `queryRepository` dispatch —
+ * both read ONLY the legacy field, which nothing in the CSE classify/confirm flow ever writes (see
+ * lib/store.ts's confirmKnowledgeClassification, which only backfills `metadata.apfcTopicId` and
+ * only for `taxonomy === 'apfc'`). This mirrors the APFC function's own semantics exactly:
+ * 'proposed'/'rejected' classifications are excluded, matches are deduplicated by item id, and the
+ * legacy field is preserved, never written by this purely-READ function. Filters by
+ * `taxonomy === 'upsc_cse'` (the APFC sibling has no equivalent taxonomy guard, since that field
+ * didn't exist when it was written) so a topicId that happened to collide across taxonomies could
+ * never cross-match here.
+ */
+export function listImportedContentBySyllabusNodeIncludingClassifications(
+  items: readonly ImportedContent[],
+  syllabusNodeId: string,
+  classifications: readonly KnowledgeClassification[] = [],
+): ImportedContent[] {
+  const confirmedItemIds = new Set(
+    classifications
+      .filter((c) => c.topicId === syllabusNodeId && c.status === 'confirmed' && c.itemType === 'imported_content' && c.taxonomy === 'upsc_cse')
+      .map((c) => c.itemId),
+  );
+  return items.filter((item) => item.metadata?.syllabusNodeId === syllabusNodeId || confirmedItemIds.has(item.id));
+}
+
 export interface RepositoryQuery {
   workspaceId: WorkspaceKind;
   contentType?: RepositoryContentType;
@@ -392,11 +449,22 @@ export function sortRepositoryEntries(entries: readonly RepositoryEntry[], order
  * Notes have no tags/category of their own, so an active tags or category filter naturally excludes
  * every note (a note never has any of the wanted tags, never matches a wanted category) — this
  * requires no special-casing here, it falls out of Note's actual shape.
+ *
+ * `classifications` (Knowledge Librarian P0.1 hardening) is optional and defaults to `[]` — every
+ * existing caller/test that doesn't pass it behaves EXACTLY as before (an `apfcTopicId` query then
+ * only ever matches via the legacy `metadata.apfcTopicId` field, same as prior to this hardening
+ * pass). Passing the live `knowledgeClassifications` array (as pages/Repository.tsx now does)
+ * widens an `apfcTopicId` match to also include confirmed classifications for that topic — see
+ * listImportedContentByApfcTopicIncludingClassifications's own header for the exact semantics
+ * (confirmed only, deduplicated, legacy field preserved). P1.2 — the same `classifications` array
+ * now also widens a `syllabusNodeId` query the identical way, via
+ * listImportedContentBySyllabusNodeIncludingClassifications.
  */
 export function queryRepository(
   importedContent: readonly ImportedContent[],
   notes: readonly Note[],
   query: RepositoryQuery,
+  classifications: readonly KnowledgeClassification[] = [],
 ): RepositoryEntry[] {
   const scopedContent = listImportedContentForWorkspace(importedContent, query.workspaceId);
   const scopedNotes = listNotesForWorkspace(notes, query.workspaceId);
@@ -420,8 +488,8 @@ export function queryRepository(
   // node/topic, composable with every filter above. Mutually exclusive in practice (a caller picks
   // at most one workspace's identifier at a time), but nothing here enforces that — passing both
   // simply ANDs them together, same as any other two filters would.
-  if (query.syllabusNodeId) matchedContent = listImportedContentBySyllabusNode(matchedContent, query.syllabusNodeId);
-  if (query.apfcTopicId) matchedContent = listImportedContentByApfcTopic(matchedContent, query.apfcTopicId);
+  if (query.syllabusNodeId) matchedContent = listImportedContentBySyllabusNodeIncludingClassifications(matchedContent, query.syllabusNodeId, classifications);
+  if (query.apfcTopicId) matchedContent = listImportedContentByApfcTopicIncludingClassifications(matchedContent, query.apfcTopicId, classifications);
 
   // Tags/category/syllabus-node/APFC-topic filters never match a Note by construction (Note has
   // none of these fields) — only a content-type filter that excludes 'note' needs to explicitly

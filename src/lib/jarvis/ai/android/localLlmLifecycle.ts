@@ -1,9 +1,17 @@
 // JARVIS Phase 13A — Local LLM lifecycle state (Android).
 //
 // Extends the EXISTING native-runtime contract (nativeLlamaRuntimeContract.ts, Phase 10) with a
-// richer, explicit 7-state view this phase's own brief names: provider unavailable, model
-// unavailable, model loading, model ready, inference running, inference failed, inference
-// completed. This is NOT a new native/plugin contract — NativeLlamaRuntimeClient,
+// richer, explicit view this phase's own brief names: provider unavailable, model unavailable,
+// model loading, model ready, inference running, inference failed, inference completed.
+//
+// Phase 13H adds an EIGHTH state, 'model_load_failed': the native runtime's own `status === 'error'`
+// previously collapsed onto 'model_unavailable' whenever no inference had ever run — which lost
+// the distinction between "no model has been attempted yet" and "a load was just attempted and
+// the native side genuinely failed it" (the native Android runtime only ever reports that error
+// status as the outcome of a loadModel() attempt). Surfacing that distinction lets the UI show a
+// real error state and a retry action instead of silently looking identical to "never tried".
+// This is NOT a new
+// native/plugin contract — NativeLlamaRuntimeClient,
 // JarvisAndroidRuntimeStatus, and toAndroidProviderHealthStatus are all unchanged (see the import
 // below: only types/values already defined by Phase 10, never redefined here). This sandbox has no
 // Android NDK/SDK (confirmed in every earlier phase's own report), so this phase deliberately
@@ -26,6 +34,7 @@ export type JarvisLocalLlmLifecycleState =
   | 'provider_unavailable'
   | 'model_unavailable'
   | 'model_loading'
+  | 'model_load_failed'
   | 'model_ready'
   | 'inference_running'
   | 'inference_failed'
@@ -63,7 +72,11 @@ export function createLocalLlmLifecycleTracker(runtime: NativeLlamaRuntimeClient
     const status = await runtime.getStatus();
     if (status === 'unavailable') return 'provider_unavailable';
     if (status === 'loading') return 'model_loading';
-    if (status === 'error') return lastInferenceOutcome === 'failed' ? 'inference_failed' : 'model_unavailable';
+    // Phase 13H — 'error' with a prior FAILED INFERENCE (a model was loaded and a complete() call
+    // on it then threw) is still 'inference_failed', exactly as before. 'error' with no inference
+    // ever run is a failed LOAD attempt, not "never tried" — see this file's own header for why
+    // 'model_unavailable' used to swallow that distinction.
+    if (status === 'error') return lastInferenceOutcome === 'failed' ? 'inference_failed' : 'model_load_failed';
 
     const loadedModel = await runtime.getLoadedModel();
     if (status === 'ready' && loadedModel !== null) {

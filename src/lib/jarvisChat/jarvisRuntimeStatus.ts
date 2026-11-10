@@ -2,9 +2,14 @@
 // statuses this phase's own brief names: "Local AI Ready", "Loading Model", "Model Unavailable",
 // "Deterministic Mode". No new lifecycle concept — JarvisLocalLlmLifecycleState (Phase 13A,
 // localLlmLifecycle.ts) is the single source of truth; this file only relabels it for display.
+//
+// Phase 13H adds a FIFTH UI status, 'model_load_failed', mirroring that same file's own new
+// 'model_load_failed' lifecycle state — surfaced distinctly so a user who taps "Load model" and
+// hits a genuine native failure sees an honest error, not the same "Model Unavailable" copy shown
+// before any attempt was ever made.
 import type { JarvisLocalLlmLifecycleState } from '../jarvis/ai/android/localLlmLifecycle';
 
-export type JarvisUiRuntimeStatus = 'deterministic' | 'model_unavailable' | 'model_loading' | 'model_ready';
+export type JarvisUiRuntimeStatus = 'deterministic' | 'model_unavailable' | 'model_loading' | 'model_load_failed' | 'model_ready';
 
 /** `'not_android'` is this file's own sentinel for "the platform can never have a local LLM at
  * all" (web, iOS, or any non-Android Capacitor target — see localLlamaCapacitorPlugin.ts's own
@@ -29,6 +34,8 @@ export function deriveJarvisUiRuntimeStatus(state: JarvisRuntimeStatusInput): Ja
       return 'model_unavailable';
     case 'model_loading':
       return 'model_loading';
+    case 'model_load_failed':
+      return 'model_load_failed';
     case 'model_ready':
     case 'inference_running':
     case 'inference_completed':
@@ -41,5 +48,6 @@ export const JARVIS_UI_RUNTIME_STATUS_LABEL: Readonly<Record<JarvisUiRuntimeStat
   deterministic: 'Deterministic Mode',
   model_unavailable: 'Model Unavailable',
   model_loading: 'Loading Model',
+  model_load_failed: 'Model Load Failed',
   model_ready: 'Local AI Ready',
 };

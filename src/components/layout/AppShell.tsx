@@ -65,7 +65,7 @@ function ThemeSwitch() {
           {theme === key && (
             <motion.span
               layoutId="theme-pill"
-              className="absolute inset-0 rounded-full bg-brand-600"
+              className="absolute inset-0 rounded-full bg-primary-600"
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             />
           )}

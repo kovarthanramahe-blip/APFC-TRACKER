@@ -7,7 +7,6 @@ import {
   ListChecks,
   CheckCircle2,
   XCircle,
-  MinusCircle,
   RotateCcw,
   ArrowLeft,
   BookOpen,
@@ -25,6 +24,7 @@ import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, ProgressBar, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { shuffle, BookmarkButton, StatTile, StatusBadge, SelectChip } from '../components/ui/QuestionTestPrimitives';
 import { FormattedText } from '../components/ui/FormattedText';
 import type { UpscCsePrelimsBatchPyq } from '../lib/upscCsePrelimsPyqBatchImport';
 import type { UpscCsePrelimsPyqAttempt } from '../lib/upscCsePrelimsPyqAttempt';
@@ -49,7 +49,6 @@ import {
   computeUpscCsePrelimsRepeatedMistakes,
   selectUpscCsePrelimsRepeatedMistakePracticeIds,
   upscCsePrelimsQuestionStatus as statusOf,
-  type UpscCsePrelimsQuestionStatus as QuestionStatus,
   type UpscCsePrelimsMicrosyllabusPerformance,
 } from '../lib/upscCsePrelimsPyqPerformance';
 import { getMicrosyllabusItemById } from '../lib/upscCseSyllabus';
@@ -87,88 +86,9 @@ const AVAILABLE_PAPERS = getAvailablePapers(UPSC_CSE_PRELIMS_PYQ_BANK);
 
 const SCORING: QuestionSessionScoring<UpscCsePrelimsBatchPyq> = { marksCorrect: 1, marksWrong: 0, statusOf };
 
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
 function microsyllabusLabel(id: string): string {
   if (id === UNMAPPED_MICROSYLLABUS) return 'Needs Review';
   return getMicrosyllabusItemById(UPSC_CSE_PRELIMS_SYLLABUS, id)?.title ?? id;
-}
-
-function BookmarkButton({ pyqId }: { pyqId: string }) {
-  const isBookmarked = useAppStore((s) => s.bookmarkedPyqIds.includes(pyqId));
-  const toggleBookmarkedPyq = useAppStore((s) => s.toggleBookmarkedPyq);
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        toggleBookmarkedPyq(pyqId);
-      }}
-      title={isBookmarked ? 'Remove from revision' : 'Mark for revision'}
-      className={cx('shrink-0 rounded-lg p-1.5 transition-colors', isBookmarked ? 'text-gold-500' : 'text-slate-300 hover:text-gold-500 dark:text-slate-600')}
-    >
-      <Star className={cx('h-4.5 w-4.5', isBookmarked && 'fill-gold-400')} />
-    </button>
-  );
-}
-
-function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
-  const tones: Record<string, string> = {
-    neutral: 'text-slate-800 dark:text-slate-100',
-    success: 'text-emerald-600 dark:text-emerald-400',
-    danger: 'text-rose-600 dark:text-rose-400',
-    brand: 'text-brand-600 dark:text-brand-400',
-  };
-  return (
-    <Card className="p-4 text-center">
-      <p className={cx('font-display text-xl font-bold', tones[tone])}>{value}</p>
-      <p className="mt-0.5 text-[11px] text-slate-400">{label}</p>
-    </Card>
-  );
-}
-
-function StatusBadge({ status }: { status: QuestionStatus }) {
-  if (status === 'correct') {
-    return (
-      <Badge tone="success">
-        <CheckCircle2 className="h-3 w-3" /> Correct
-      </Badge>
-    );
-  }
-  if (status === 'wrong') {
-    return (
-      <Badge tone="danger">
-        <XCircle className="h-3 w-3" /> Wrong
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="neutral">
-      <MinusCircle className="h-3 w-3" /> Unanswered
-    </Badge>
-  );
-}
-
-function SelectChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cx(
-        'inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors',
-        active
-          ? 'bg-brand-600 text-white border-brand-600'
-          : 'bg-transparent text-slate-500 border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:text-slate-400',
-      )}
-    >
-      {children}
-    </button>
-  );
 }
 
 function MicrosyllabusRow({ row }: { row: UpscCsePrelimsMicrosyllabusPerformance }) {
@@ -438,11 +358,12 @@ export default function UpscCsePyqTest() {
     if (!q || reviseChecked || reviseRecordedRef.current.has(q.id)) return;
     reviseRecordedRef.current.add(q.id);
     const today = getLocalDateString();
+    // P2.8 — a real checked answer, never a self-report: 'quiz'.
     if (q.correctOptionId !== undefined && reviseAnswer === q.correctOptionId) {
-      recordRevisionCorrect(q.id, today);
+      recordRevisionCorrect(q.id, today, 'quiz');
       setReviseCorrectCount((c) => c + 1);
     } else {
-      recordRevisionIncorrect(q.id, today);
+      recordRevisionIncorrect(q.id, today, 'quiz');
     }
     setReviseChecked(true);
   }
@@ -686,7 +607,7 @@ export default function UpscCsePyqTest() {
                     </div>
                     <p className="text-sm font-medium text-slate-800 dark:text-slate-100 line-clamp-2">{q.question}</p>
                   </div>
-                  <BookmarkButton pyqId={q.id} />
+                  <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove from revision" notBookmarkedTitle="Mark for revision" />
                 </div>
               </Card>
             ))}
@@ -752,7 +673,7 @@ export default function UpscCsePyqTest() {
         <Card className="p-5 sm:p-6">
           <div className="mb-3 flex items-center justify-between gap-2">
             <Badge tone="neutral">{microsyllabusLabel(questionMicrosyllabusId(q))}</Badge>
-            <BookmarkButton pyqId={q.id} />
+            <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove from revision" notBookmarkedTitle="Mark for revision" />
           </div>
           <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
 
@@ -1004,7 +925,7 @@ export default function UpscCsePyqTest() {
               <Badge tone={q.mappingStatus === 'mapped' ? 'brand' : 'warning'}>{microsyllabusLabel(microId)}</Badge>
               <StatusBadge status={status} />
             </div>
-            <BookmarkButton pyqId={q.id} />
+            <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove from revision" notBookmarkedTitle="Mark for revision" />
           </div>
           <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
 
@@ -1118,7 +1039,7 @@ export default function UpscCsePyqTest() {
       <Card className="p-5 sm:p-6">
         <div className="mb-3 flex items-center justify-between gap-2">
           <Badge tone="neutral">{questionSubject(q)}</Badge>
-          <BookmarkButton pyqId={q.id} />
+          <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove from revision" notBookmarkedTitle="Mark for revision" />
         </div>
         <motion.div key={q.id} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
           <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />

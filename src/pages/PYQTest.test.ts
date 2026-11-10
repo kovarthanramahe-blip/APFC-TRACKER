@@ -103,6 +103,49 @@ describe('PYQ Test page — existing "Revise Now" flow still works (Phase 6 Step
     useAppStore.getState().recordRevisionCorrect(q.id, '2026-01-02');
     expect(useAppStore.getState().revisionQueue[q.id].box).toBe(2);
   });
+
+  // P2.8 — pages/PYQTest.tsx's own checkRevisionAnswer now passes 'quiz' as the third argument to
+  // both actions (a real checked answer, see that function's own P2.8 comment). This proves doing
+  // so neither changes the scheduling outcome (identical box progression to the untouched test
+  // immediately above) nor gets misclassified: the real due-revision quiz path records 'quiz', never
+  // 'self_report' or no source at all.
+  it('the due-revision quiz path (checkRevisionAnswer passing \'quiz\') schedules identically to before and is never misclassified as self-reported', () => {
+    const q = PYQ_BANK[0];
+    useAppStore.getState().recordRevisionIncorrect(q.id, '2026-01-01', 'quiz');
+    expect(useAppStore.getState().revisionQueue[q.id].box).toBe(1);
+    expect(useAppStore.getState().revisionQueue[q.id].lastReviewSource).toBe('quiz');
+
+    useAppStore.getState().recordRevisionCorrect(q.id, '2026-01-02', 'quiz');
+    expect(useAppStore.getState().revisionQueue[q.id].box).toBe(2); // identical to the no-source case above
+    expect(useAppStore.getState().revisionQueue[q.id].lastReviewSource).toBe('quiz');
+  });
+
+  // P2.9 — handleSubmit (ordinary practice test submission, which calls addPyqAttempt — see this
+  // file's own grep-verified call map) is architecturally SEPARATE from checkRevisionAnswer (the
+  // due-revision quiz flow): the page never calls recordRevisionCorrect/Incorrect from handleSubmit.
+  // This proves that separation directly, rather than merely assuming it from reading the source.
+  it('an ordinary practice submission (addPyqAttempt) never touches the revision queue', () => {
+    const q = PYQ_BANK[0];
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+    useAppStore.getState().addPyqAttempt(fixtureAttempt({ questionIds: [q.id], answers: { [q.id]: q.correctOptionId } }));
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+  });
+
+  // P2.9 — checkRevisionAnswer processes one question at a time (reviseQuestions[reviseIndex]) and
+  // records against that question's OWN id only. This proves a sibling item already in the due list
+  // is completely untouched (same object reference) by answering a different one.
+  it('answering one due-revision question changes only that question\'s own revision entry — a sibling item in the same due list is untouched', () => {
+    const [q1, q2] = PYQ_BANK;
+    useAppStore.getState().recordRevisionIncorrect(q1.id, '2026-01-01', 'quiz');
+    useAppStore.getState().recordRevisionIncorrect(q2.id, '2026-01-01', 'quiz');
+    const q2Before = useAppStore.getState().revisionQueue[q2.id];
+
+    // Mirrors checkRevisionAnswer's own call shape exactly: one question answered correctly.
+    useAppStore.getState().recordRevisionCorrect(q1.id, '2026-01-02', 'quiz');
+
+    expect(useAppStore.getState().revisionQueue[q1.id].box).toBe(2);
+    expect(useAppStore.getState().revisionQueue[q2.id]).toBe(q2Before); // same reference — not even recreated
+  });
 });
 
 describe('PYQ Test page — existing "Practice Weak Topics" flow still works (Phase 6 Step 3 regression)', () => {

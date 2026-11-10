@@ -135,7 +135,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
  * tokens). Button's own rendered output is unchanged — this is the same strings it used inline
  * before, just named. */
 export const BUTTON_VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/30',
+  primary: 'bg-primary-600 text-white hover:bg-primary-700 shadow-sm shadow-primary-600/30',
   // Design system — secondary used to be a borderless flat fill (bg-slate-100), which on a Card's
   // own near-white `.surface` background reads as barely-there — a secondary action next to a
   // primary one lost most of its own visual identity as a distinct, clickable control. A subtle

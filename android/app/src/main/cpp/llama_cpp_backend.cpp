@@ -154,13 +154,11 @@ bool fileExists(const std::string& path) {
 // size) — called ONLY once, from loadModel(), never per-request.
 int32_t findThinkTokenId(const llama_vocab* vocab) {
     const int32_t nVocab = llama_vocab_n_tokens(vocab);
-    for (int32_t token = 0; token < nVocab; ++token) {
-        const char* text = llama_vocab_get_text(vocab, token);
-        if (text != nullptr && std::strcmp(text, kThinkTokenText) == 0) {
-            return token;
-        }
-    }
-    return -1;
+    // Phase 13H — delegates to the header-only, llama.cpp-independent core (see
+    // llama_cpp_backend.h's own jarvis::detail::findExactTokenId) rather than repeating the scan
+    // here; behaviour is byte-for-byte unchanged — this is an extraction for host-testability,
+    // never a second implementation to keep in sync.
+    return jarvis::detail::findExactTokenId(nVocab, kThinkTokenText, [vocab](int32_t token) { return llama_vocab_get_text(vocab, token); });
 }
 
 }  // namespace
@@ -201,8 +199,18 @@ LlamaCppLoadResult LlamaCppBackend::loadModel(const std::string& modelFilePath) 
         return LlamaCppLoadResult::kAlreadyLoaded;
     }
 
+    // Phase 13H — monotonic timing around the two genuinely expensive calls below
+    // (llama_model_load_from_file, llama_init_from_model), logged once this call resolves either
+    // way. Never logs the model file path's contents, only the path string itself (already logged
+    // unconditionally by every branch below before this phase) and a duration — no prompt/user
+    // data is in scope here at all, this function only ever receives a filesystem path.
+    const auto loadStartedAt = std::chrono::steady_clock::now();
+    const auto loadElapsedMs = [loadStartedAt]() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - loadStartedAt).count();
+    };
+
     if (!fileExists(modelFilePath)) {
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "loadModel: file not found: %s", modelFilePath.c_str());
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "loadModel: file not found: %s (elapsedMs=%lld)", modelFilePath.c_str(), static_cast<long long>(loadElapsedMs()));
         loadInProgress_.store(false);
         return LlamaCppLoadResult::kFileNotFound;
     }
@@ -214,7 +222,8 @@ LlamaCppLoadResult LlamaCppBackend::loadModel(const std::string& modelFilePath) 
 
     llama_model* model = llama_model_load_from_file(modelFilePath.c_str(), modelParams);
     if (model == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "loadModel: llama_model_load_from_file failed: %s", modelFilePath.c_str());
+        __android_log_print(
+            ANDROID_LOG_ERROR, kLogTag, "loadModel: llama_model_load_from_file failed: %s (elapsedMs=%lld)", modelFilePath.c_str(), static_cast<long long>(loadElapsedMs()));
         loadInProgress_.store(false);
         return LlamaCppLoadResult::kLoadFailed;
     }
@@ -228,7 +237,8 @@ LlamaCppLoadResult LlamaCppBackend::loadModel(const std::string& modelFilePath) 
 
     llama_context* context = llama_init_from_model(model, ctxParams);
     if (context == nullptr) {
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "loadModel: llama_init_from_model failed: %s", modelFilePath.c_str());
+        __android_log_print(
+            ANDROID_LOG_ERROR, kLogTag, "loadModel: llama_init_from_model failed: %s (elapsedMs=%lld)", modelFilePath.c_str(), static_cast<long long>(loadElapsedMs()));
         llama_model_free(model);
         loadInProgress_.store(false);
         return LlamaCppLoadResult::kLoadFailed;
@@ -249,11 +259,15 @@ LlamaCppLoadResult LlamaCppBackend::loadModel(const std::string& modelFilePath) 
     // text match, nothing fuzzier).
     thinkTokenId_ = findThinkTokenId(llama_model_get_vocab(model_));
 
+    // Phase 13H — this IS the model-load duration diagnostics should treat as "cold start" cost:
+    // everything from the moment loadModel() took the lock to the point a usable context exists.
+    const long long loadMs = static_cast<long long>(loadElapsedMs());
+
     __android_log_print(
         ANDROID_LOG_INFO, kLogTag,
-        "loadModel: real llama.cpp model loaded, context created (path=%s, chatTemplate=%s, threads=%d, n_ctx=%d, thinkTokenFound=%s, thinkTokenId=%d)",
+        "loadModel: real llama.cpp model loaded, context created (path=%s, chatTemplate=%s, threads=%d, n_ctx=%d, thinkTokenFound=%s, thinkTokenId=%d, loadMs=%lld)",
         modelFilePath.c_str(), tmplCheck != nullptr ? "embedded" : "none-falling-back-to-raw-prompt", ctxParams.n_threads, kContextSize,
-        thinkTokenId_ >= 0 ? "true" : "false", thinkTokenId_);
+        thinkTokenId_ >= 0 ? "true" : "false", thinkTokenId_, loadMs);
     return LlamaCppLoadResult::kSuccess;
 }
 
@@ -324,12 +338,24 @@ LlamaCppCompletionStatus LlamaCppBackend::complete(
     // sampled through a chain that bans this exact token id — see the generation loop below.
     const bool thinkingSuppressed = thinkTokenId_ >= 0;
 
+    // Phase 13H — requestSeq_ ties this call's "started"/"completed" log lines together; never
+    // crosses the JNI boundary, never logged with the prompt's own text (only its byte length,
+    // exactly as Phase 13D's own line already did) — no prompt content or user data is logged
+    // anywhere in this function, before or after this change.
+    const uint64_t requestSeq = ++requestSeq_;
+
     __android_log_print(
         ANDROID_LOG_INFO, kLogTag,
-        "complete: inference started (promptChars=%zu, maxOutputTokens=%d, threads=%d, n_ctx=%d, thinkingSuppressed=%s)",
-        prompt.size(), maxOutputTokens, clampedThreadCount(), kContextSize, thinkingSuppressed ? "true" : "false");
+        "complete: inference started (requestSeq=%llu, promptChars=%zu, maxOutputTokens=%d, threads=%d, n_ctx=%d, thinkingSuppressed=%s)",
+        static_cast<unsigned long long>(requestSeq), prompt.size(), maxOutputTokens, clampedThreadCount(), kContextSize, thinkingSuppressed ? "true" : "false");
 
     const auto inferenceStartedAt = std::chrono::steady_clock::now();
+    // Phase 13H — set once, the first time the generation loop below samples a token (generated
+    // == 0), regardless of whether that token turns out to be EOG/empty — this is "time to first
+    // token", not "time to first non-empty output", so a model that decides to stop immediately
+    // still gets an honest, real TTFT rather than none at all.
+    bool hasFirstToken = false;
+    std::chrono::steady_clock::time_point firstTokenAt{};
 
     // --- Tokenize the (possibly chat-templated) prompt ---
     const int maxPromptTokens = static_cast<int>(formattedPrompt.size()) + kTokenizeHeadroom;
@@ -399,6 +425,11 @@ LlamaCppCompletionStatus LlamaCppBackend::complete(
         const llama_token newToken = llama_sampler_sample(activeSampler, context_, -1);
         llama_sampler_accept(activeSampler, newToken);
 
+        if (generated == 0) {
+            hasFirstToken = true;
+            firstTokenAt = std::chrono::steady_clock::now();
+        }
+
         if (llama_vocab_is_eog(vocab, newToken)) {
             break;
         }
@@ -438,17 +469,25 @@ LlamaCppCompletionStatus LlamaCppBackend::complete(
     const auto inferenceEndedAt = std::chrono::steady_clock::now();
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(inferenceEndedAt - inferenceStartedAt).count();
     const double tokensPerSec = (elapsedMs > 0 && generated > 0) ? (static_cast<double>(generated) * 1000.0 / static_cast<double>(elapsedMs)) : 0.0;
+    // Phase 13H — time to first generated token, isolated from total duration. -1 (never a
+    // fabricated 0) when the loop never reached generated == 0 at all (e.g. cancelled or rejected
+    // before sampling anything).
+    const long long ttftMs =
+        hasFirstToken ? static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(firstTokenAt - inferenceStartedAt).count()) : -1;
 
-    // One concise line per completion — never per-token (Phase 13D's own Part H).
+    // One concise line per completion — never per-token (Phase 13D's own Part H). requestSeq ties
+    // this back to the matching "inference started" line above.
     switch (status) {
         case LlamaCppCompletionStatus::kCompleted:
             __android_log_print(
                 ANDROID_LOG_INFO, kLogTag,
-                "complete: inference completed (promptTokens=%d, generatedTokens=%d, elapsedMs=%lld, tokensPerSec=%.2f)",
-                nPromptTokens, generated, static_cast<long long>(elapsedMs), tokensPerSec);
+                "complete: inference completed (requestSeq=%llu, promptTokens=%d, generatedTokens=%d, ttftMs=%lld, elapsedMs=%lld, tokensPerSec=%.2f)",
+                static_cast<unsigned long long>(requestSeq), nPromptTokens, generated, ttftMs, static_cast<long long>(elapsedMs), tokensPerSec);
             break;
         case LlamaCppCompletionStatus::kCancelled:
-            __android_log_print(ANDROID_LOG_INFO, kLogTag, "complete: inference cancelled (generatedTokens=%d, elapsedMs=%lld)", generated, static_cast<long long>(elapsedMs));
+            __android_log_print(
+                ANDROID_LOG_INFO, kLogTag, "complete: inference cancelled (requestSeq=%llu, generatedTokens=%d, ttftMs=%lld, elapsedMs=%lld)",
+                static_cast<unsigned long long>(requestSeq), generated, ttftMs, static_cast<long long>(elapsedMs));
             break;
         case LlamaCppCompletionStatus::kError:
             // Already logged at the specific failure site above.

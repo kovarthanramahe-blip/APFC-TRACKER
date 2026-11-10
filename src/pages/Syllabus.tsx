@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target, CheckCircle2, CircleDashed, Trophy, Timer } from 'lucide-react';
+import { ChevronDown, Check, RotateCcw, Search, NotebookPen, AlertTriangle, ListChecks, Target, CheckCircle2, CircleDashed, Trophy, Timer, Link2 } from 'lucide-react';
 import { PYQ_BANK } from '../data/pyq';
 import { getSyllabusForWorkspace } from '../data/registry';
 import { useAppStore } from '../lib/store';
+import { listImportedContentByApfcTopicIncludingClassifications } from '../lib/repository';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { computePyqPerformance } from '../lib/pyqPerformance';
@@ -39,6 +40,8 @@ export default function Syllabus() {
   const accent = getWorkspaceAccent(activeWorkspaceId);
   const completedTopics = useAppStore((s) => s.completedTopics);
   const notes = useAppStore((s) => s.notes);
+  const importedContent = useAppStore((s) => s.importedContent);
+  const knowledgeClassifications = useAppStore((s) => s.knowledgeClassifications);
   const pyqAttempts = useAppStore((s) => s.pyqAttempts);
   const toggleTopic = useAppStore((s) => s.toggleTopic);
   const markSubjectTopics = useAppStore((s) => s.markSubjectTopics);
@@ -289,6 +292,15 @@ export default function Syllabus() {
                           const isDeepLinked = topic.id === deepLinkTopicId;
                           const noteCount = countNotesByTopic(notes, topic.id);
                           const pyqCount = pyqCountByTopic.get(topic.id) ?? 0;
+                          // Knowledge Librarian (P0), Phase 2 — "Syllabus -> Knowledge": how many
+                          // repository items carry this topic, either as their legacy primary
+                          // ImportedContentMetadata.apfcTopicId OR via a CONFIRMED
+                          // lib/knowledgeClassification.ts record (P0.1 hardening — an item
+                          // confirmed against a second/third topic is now discoverable from EVERY
+                          // one of its confirmed topics' own pages, not just the first). Mirrors
+                          // pages/UpscCseSyllabus.tsx's own identical "N linked" pattern for its
+                          // syllabusNodeId.
+                          const linkedArticleCount = listImportedContentByApfcTopicIncludingClassifications(importedContent, topic.id, knowledgeClassifications).length;
                           const status = topicStatusById.get(topic.id);
                           const hasPerformanceSignal = !!status && status.pyqAttempted >= MIN_PYQ_ATTEMPTS_FOR_SIGNAL && status.pyqAccuracy !== null;
                           return (
@@ -346,6 +358,16 @@ export default function Syllabus() {
                                 >
                                   <Target className="h-4 w-4" />
                                   {pyqCount}
+                                </Link>
+                              )}
+                              {linkedArticleCount > 0 && (
+                                <Link
+                                  to={`/repository?apfcTopicId=${encodeURIComponent(topic.id)}`}
+                                  title={`${linkedArticleCount} knowledge item${linkedArticleCount === 1 ? '' : 's'} linked to this topic`}
+                                  className={cx('shrink-0 flex items-center gap-1 rounded-lg p-2 text-xs font-medium', accent.text)}
+                                >
+                                  <Link2 className="h-4 w-4" />
+                                  {linkedArticleCount}
                                 </Link>
                               )}
                               <Link

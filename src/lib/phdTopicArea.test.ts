@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { isValidTopicAreaTitle, createPhdTopicArea, updatePhdTopicArea, deletePhdTopicArea, searchPhdTopicAreas, getPhdTopicAreaById, type PhdTopicArea } from './phdTopicArea';
+import {
+  isValidTopicAreaTitle,
+  createPhdTopicArea,
+  updatePhdTopicArea,
+  deletePhdTopicArea,
+  searchPhdTopicAreas,
+  getPhdTopicAreaById,
+  itemBelongsToTopicArea,
+  type PhdTopicArea,
+} from './phdTopicArea';
 
 describe('isValidTopicAreaTitle', () => {
   it('accepts a non-blank title, rejects blank/whitespace', () => {
@@ -86,5 +95,22 @@ describe('getPhdTopicAreaById', () => {
     const areas: PhdTopicArea[] = [{ id: 'a1', title: 'A', createdAt: 'x', updatedAt: 'x' }];
     expect(getPhdTopicAreaById(areas, 'a1')).toBe(areas[0]);
     expect(getPhdTopicAreaById(areas, 'missing')).toBeUndefined();
+  });
+});
+
+describe('itemBelongsToTopicArea — multi-collection membership (research-document-model strengthening)', () => {
+  it('matches via the primary topicAreaId, exactly like the pre-existing equality check it replaces', () => {
+    expect(itemBelongsToTopicArea({ metadata: { topicAreaId: 'a1' } }, 'a1')).toBe(true);
+    expect(itemBelongsToTopicArea({ metadata: { topicAreaId: 'a2' } }, 'a1')).toBe(false);
+  });
+
+  it('also matches via topicAreaIds — a record can belong to more than one collection', () => {
+    expect(itemBelongsToTopicArea({ metadata: { topicAreaId: 'a1', topicAreaIds: ['a2', 'a3'] } }, 'a2')).toBe(true);
+    expect(itemBelongsToTopicArea({ metadata: { topicAreaId: 'a1', topicAreaIds: ['a2', 'a3'] } }, 'a3')).toBe(true);
+  });
+
+  it('a record with no metadata at all, or no topic-area fields, belongs to nothing — never a false positive', () => {
+    expect(itemBelongsToTopicArea({}, 'a1')).toBe(false);
+    expect(itemBelongsToTopicArea({ metadata: {} }, 'a1')).toBe(false);
   });
 });

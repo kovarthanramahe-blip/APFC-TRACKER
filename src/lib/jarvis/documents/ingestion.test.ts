@@ -265,6 +265,57 @@ describe('buildDocumentChunks — provenance + deterministic ordering', () => {
     const { chunks } = buildDocumentChunks({ documentId: 'doc-4', extracted });
     expect(new Set(chunks.map((c) => c.id)).size).toBe(chunks.length);
   });
+
+  // Regression tests — heading-search coverage fix: splitByHeadings strips the heading line out
+  // of the section body it hands to the chunker, so the heading's own words were previously never
+  // searchable via chunk.text (only section.title carried them, which keywordSearchChunks never
+  // reads). Fixed by prepending the title into the section's first chunk only.
+  describe('heading-search coverage fix (title included in chunk text, headings path only)', () => {
+    it('prepends a non-paginated section\'s own heading into its first chunk\'s text', () => {
+      const extracted: JarvisExtractedDocument = { format: 'markdown', text: '# Provident Fund Appellate Jurisdiction\n\nBody text with different words.' };
+      const { chunks } = buildDocumentChunks({ documentId: 'doc-heading', extracted });
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].text).toContain('Provident Fund Appellate Jurisdiction');
+      expect(chunks[0].text).toContain('Body text with different words.');
+    });
+
+    it('never duplicates the title across every chunk of a long section split into several pieces', () => {
+      const longBody = Array.from({ length: 10 }, (_, i) => `Paragraph ${i} with enough filler text to force a chunk split across the configured limit.`).join('\n\n');
+      const extracted: JarvisExtractedDocument = { format: 'markdown', text: `# Long Section Heading\n\n${longBody}` };
+      const { chunks } = buildDocumentChunks({ documentId: 'doc-long', extracted, maxChunkChars: 150 });
+      expect(chunks.length).toBeGreaterThan(1); // confirms the section really did split into >1 chunk
+      expect(chunks[0].text).toContain('Long Section Heading');
+      for (const chunk of chunks.slice(1)) {
+        expect(chunk.text).not.toContain('Long Section Heading');
+      }
+    });
+
+    it('a section with no heading (untitled leading text) is completely unaffected — no prefix fabricated', () => {
+      const extracted: JarvisExtractedDocument = { format: 'markdown', text: 'Untitled leading text with no heading at all.' };
+      const { chunks, sections } = buildDocumentChunks({ documentId: 'doc-untitled', extracted });
+      expect(sections[0].title).toBeUndefined();
+      expect(chunks[0].text).toBe('Untitled leading text with no heading at all.');
+    });
+
+    it('the PDF-page path is completely unaffected by this fix — no title is ever prepended there', () => {
+      const extracted: JarvisExtractedDocument = {
+        format: 'pdf',
+        text: '[Page 1]\n\nPage text only.',
+        pages: [{ pageNumber: 1, text: 'Page text only.' }],
+      };
+      const { chunks } = buildDocumentChunks({ documentId: 'doc-pdf', extracted });
+      expect(chunks[0].text).toBe('Page text only.');
+    });
+
+    it('section.title and chunk ids/order are unchanged by this fix — only chunk.text gained the prefix', () => {
+      const extracted: JarvisExtractedDocument = { format: 'markdown', text: '# Chapter One\n\nSome content.' };
+      const { chunks, sections } = buildDocumentChunks({ documentId: 'doc-citation', extracted });
+      expect(sections[0].title).toBe('Chapter One');
+      expect(chunks[0].id).toBe('doc-citation::chunk-0');
+      expect(chunks[0].sectionId).toBe(sections[0].id);
+      expect(chunks[0].order).toBe(0);
+    });
+  });
 });
 
 describe('prepareSummarizationPlan — Part 10, composition over the existing Phase 6 planner', () => {

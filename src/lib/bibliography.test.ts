@@ -84,6 +84,7 @@ DOI: 10.1000/xyz123
 ISBN: 978-0-00-000000-0
 URL: https://example.com/paper
 Citation Key: Smith2020
+Archive ID: NAIPUB-1234
 Tags: fieldwork, chapter-1
 Category: Literature Review
 Notes: Key paper on the topic.`;
@@ -104,10 +105,19 @@ Notes: Key paper on the topic.`;
       isbn: '978-0-00-000000-0',
       url: 'https://example.com/paper',
       citationKey: 'Smith2020',
+      archiveId: 'NAIPUB-1234',
       notes: 'Key paper on the topic.',
     });
     expect(record.tags).toEqual(['fieldwork', 'chapter-1']);
     expect(record.category).toBe('Literature Review');
+  });
+
+  it('recognises "Archive:", "Shelfmark:" and "Call Number:" as aliases for archiveId — the feedback item this field closes (an archive number previously had nowhere else to go but the citation key)', () => {
+    const aliases = ['Archive ID', 'Archive', 'Shelfmark', 'Call Number'];
+    for (const alias of aliases) {
+      const result = parseBibliographyRecords(`Title: A Primary Source\n${alias}: NAI/HOME/1945/42`);
+      expect(result.records[0].fields.archiveId).toBe('NAI/HOME/1945/42');
+    }
   });
 
   it('parses multiple records separated by a "---" line', () => {
@@ -198,6 +208,37 @@ describe('formatBibliographyRecordAsText — round trip with the parser', () => 
   it('omits lines for unset fields', () => {
     const text = formatBibliographyRecordAsText({ title: 'Bare Record', fields: {} });
     expect(text).toBe('Title: Bare Record');
+  });
+
+  it('round-trips accessedDate/language — the research-document-model strengthening (standard citation fields for online/multilingual sources)', () => {
+    const fields: BibliographyFields = {
+      containerTitle: 'Ministry of Finance website',
+      accessedDate: '2026-03-14',
+      language: 'Hindi',
+    };
+    const text = formatBibliographyRecordAsText({ title: 'Budget Circular', fields });
+    expect(text).toContain('Accessed Date: 2026-03-14');
+    expect(text).toContain('Language: Hindi');
+    const result = parseBibliographyRecords(text);
+    expect(result.records[0].fields).toEqual(fields);
+  });
+
+  it('round-trips archiveId — a primary source\'s own archive/shelfmark identifier, distinct from citationKey', () => {
+    const fields: BibliographyFields = {
+      citationKey: 'NAI1945',
+      archiveId: 'NAIPUB-1234',
+    };
+    const text = formatBibliographyRecordAsText({ title: 'Home Department File', fields });
+    expect(text).toContain('Citation Key: NAI1945');
+    expect(text).toContain('Archive ID: NAIPUB-1234');
+    const result = parseBibliographyRecords(text);
+    expect(result.records[0].fields).toEqual(fields);
+  });
+
+  it('parses Accessed/Lang aliases case-insensitively, same convention as every other field alias', () => {
+    const result = parseBibliographyRecords('Title: Online Source\nAccessed: 2025-11-02\nLang: English');
+    expect(result.records[0].fields.accessedDate).toBe('2025-11-02');
+    expect(result.records[0].fields.language).toBe('English');
   });
 });
 

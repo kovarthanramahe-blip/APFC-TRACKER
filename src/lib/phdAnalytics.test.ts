@@ -75,6 +75,20 @@ describe('computePhdAnalytics — Topic Area analytics', () => {
     expect(area2.linkedContentCount).toBe(0);
     expect(area2.activeTargetCount).toBe(1);
   });
+
+  it('also counts content linked via the additive topicAreaIds field — a document can belong to more than one Topic Area (research-document-model strengthening)', () => {
+    const topicAreas = [topicArea({ id: 'area-1' }), topicArea({ id: 'area-2', title: 'Famine Policy' })];
+    const importedContent = [
+      content({ id: 'c1', metadata: { topicAreaId: 'area-1', topicAreaIds: ['area-2'] } }), // belongs to both
+      content({ id: 'c2', metadata: { topicAreaId: 'area-2' } }),
+    ];
+    const snapshot = computePhdAnalytics(baseInput({ topicAreas, importedContent, today: '2026-09-22' }));
+
+    const area1 = snapshot.topicAreas.find((t) => t.topicArea.id === 'area-1')!;
+    expect(area1.linkedContentCount).toBe(1);
+    const area2 = snapshot.topicAreas.find((t) => t.topicArea.id === 'area-2')!;
+    expect(area2.linkedContentCount).toBe(2);
+  });
 });
 
 describe('computePhdAnalytics — research material counts', () => {

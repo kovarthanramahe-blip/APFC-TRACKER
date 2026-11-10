@@ -56,7 +56,10 @@ export function useJarvisRuntimeStatus(): UseJarvisRuntimeStatusResult {
     if (availability.status === 'model_found') {
       setModelDisplayName(availability.descriptor.modelId.replace(/\.gguf$/i, ''));
       setModelSizeBytes(availability.descriptor.sizeBytes);
-      setCanLoadModel(lifecycleState === 'model_unavailable');
+      // Phase 13H — a genuinely present model file can be (re)loaded both from the "never
+      // attempted" state AND after a previous load attempt failed (model_load_failed) — a user
+      // must be able to retry, not just the very first time.
+      setCanLoadModel(lifecycleState === 'model_unavailable' || lifecycleState === 'model_load_failed');
     } else {
       setModelDisplayName(undefined);
       setModelSizeBytes(undefined);
@@ -70,6 +73,12 @@ export function useJarvisRuntimeStatus(): UseJarvisRuntimeStatusResult {
 
   const loadModel = useCallback(async () => {
     if (!isLocalLlamaRuntimeAvailable) return;
+    // Phase 13H — defensive, UI-level guard against a duplicate concurrent load: the native
+    // layer (NativeLlamaRuntime.kt's own loadModel()) already rejects a second call while one is
+    // LOADING or already READY, so this can never cause a real double-load; it only avoids an
+    // extra, pointless describeAvailableModel()/loadModel() round trip if this is called again
+    // (e.g. a fast double-tap) while a load this hook itself already kicked off is still in flight.
+    if (status === 'model_loading') return;
     const backend = createAndroidLocalLlmModelBackend(LocalLlamaRuntime);
     const availability = await backend.describeAvailableModel();
     if (availability.status !== 'model_found') {
@@ -83,7 +92,7 @@ export function useJarvisRuntimeStatus(): UseJarvisRuntimeStatusResult {
     } finally {
       await refresh();
     }
-  }, [refresh]);
+  }, [refresh, status]);
 
   return { status, modelDisplayName, modelSizeBytes, canLoadModel, loadModel, refresh };
 }

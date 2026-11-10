@@ -278,6 +278,46 @@ describe('UPSC CSE PYQ Test page — existing "Revise Now" flow still works (Pha
     const due = getDueItems(useAppStore.getState().revisionQueue, [qid], '2026-01-02');
     expect(due.some((d) => d.pyqId === qid)).toBe(false); // just advanced, not due again same day
   });
+
+  // P2.8 — this page's own checkRevisionAnswer now passes 'quiz' as the third argument to both
+  // actions (a real checked answer). Proves this neither changes the scheduling outcome (identical
+  // box progression to the no-source test immediately above) nor gets misclassified.
+  it('the due-revision quiz path (checkRevisionAnswer passing \'quiz\') schedules identically to before and is never misclassified as self-reported', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const qid = UPSC_CSE_PRELIMS_PYQ_BANK[0].id;
+    useAppStore.getState().recordRevisionIncorrect(qid, '2026-01-01', 'quiz');
+    expect(useAppStore.getState().revisionQueue[qid].box).toBe(1);
+    expect(useAppStore.getState().revisionQueue[qid].lastReviewSource).toBe('quiz');
+    useAppStore.getState().recordRevisionCorrect(qid, '2026-01-02', 'quiz');
+    expect(useAppStore.getState().revisionQueue[qid].box).toBe(2);
+    expect(useAppStore.getState().revisionQueue[qid].lastReviewSource).toBe('quiz');
+  });
+
+  // P2.9 — handleSubmit (ordinary practice submission, which calls addUpscCsePrelimsPyqAttempt —
+  // see this file's own grep-verified call map) is architecturally SEPARATE from
+  // checkRevisionAnswer (the due-revision quiz flow): the page never calls
+  // recordRevisionCorrect/Incorrect from handleSubmit. This proves that separation directly.
+  it('an ordinary practice submission (addUpscCsePrelimsPyqAttempt) never touches the revision queue', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+    useAppStore.getState().addUpscCsePrelimsPyqAttempt(fixtureAttempt());
+    expect(useAppStore.getState().revisionQueue).toEqual({});
+  });
+
+  // P2.9 — checkRevisionAnswer processes one question at a time and records against that
+  // question's OWN id only. Proves a sibling item in the same due list is completely untouched.
+  it('answering one due-revision question changes only that question\'s own revision entry — a sibling item in the same due list is untouched', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const [q1, q2] = UPSC_CSE_PRELIMS_PYQ_BANK;
+    useAppStore.getState().recordRevisionIncorrect(q1.id, '2026-01-01', 'quiz');
+    useAppStore.getState().recordRevisionIncorrect(q2.id, '2026-01-01', 'quiz');
+    const q2Before = useAppStore.getState().revisionQueue[q2.id];
+
+    useAppStore.getState().recordRevisionCorrect(q1.id, '2026-01-02', 'quiz');
+
+    expect(useAppStore.getState().revisionQueue[q1.id].box).toBe(2);
+    expect(useAppStore.getState().revisionQueue[q2.id]).toBe(q2Before); // same reference — not even recreated
+  });
 });
 
 describe('UPSC CSE PYQ Test page — "Revise My Repeated Mistakes" resolves to real questions (Phase 6 Step 3)', () => {

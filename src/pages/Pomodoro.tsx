@@ -204,7 +204,7 @@ export default function Pomodoro() {
                 onClick={() => switchMode(m)}
                 className={cx(
                   'min-h-[36px] rounded-full px-4 py-1.5 text-xs font-semibold transition-colors',
-                  mode === m ? 'bg-brand-600 text-white' : 'text-slate-500 dark:text-slate-400',
+                  mode === m ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400',
                 )}
               >
                 {MODE_LABEL[m]}
@@ -243,7 +243,7 @@ export default function Pomodoro() {
               value={subject}
               onChange={(e) => setSubject(e.target.value as SubjectColorKey | 'general')}
               aria-label="Focus subject"
-              className="mt-6 min-h-[36px] rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="mt-6 min-h-[36px] rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
             >
               <option value="general">General study</option>
               {/* Multi-Workspace OS, Stage 3A — SYLLABUS is APFC's own subject list; offering it

@@ -20,6 +20,7 @@ import {
   recordIncorrect as recordRevisionIncorrectItem,
   addItem as addRevisionQueueItem,
   type RevisionQueue,
+  type RevisionReviewSource,
 } from './revisionQueue';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceKind } from './workspace';
 import type { ImportedContent } from './contentImport';
@@ -34,6 +35,18 @@ import {
   type RelationshipType,
 } from './contentRelationships';
 import type { RepositoryImportPlan } from './repositoryImport';
+import type { KnowledgeIngestionBatch } from './knowledgeIngestion';
+import {
+  createManualClassification,
+  confirmClassification,
+  rejectClassification,
+  deleteClassification,
+  deleteClassificationsForItem,
+  mergeProposedClassifications,
+  type KnowledgeClassification,
+  type KnowledgeItemType,
+} from './knowledgeClassification';
+import type { JarvisDocumentEmbeddingRecord } from './jarvis/documents/embeddingIndex';
 import type { Annotation, NormalizedPoint } from './annotations';
 import { isGeometryAnnotation } from './annotations';
 import { sanitizeAnnotations } from './annotationSanitize';
@@ -240,8 +253,11 @@ interface AppState {
   // bookmarkedPyqIds, never stored here, so an id never needs to be added/removed as its
   // eligibility changes. `today` is always supplied by the caller (yyyy-mm-dd, local date).
   revisionQueue: RevisionQueue;
-  recordRevisionCorrect: (itemId: string, today: string) => void;
-  recordRevisionIncorrect: (itemId: string, today: string) => void;
+  // P2.8 — `source` is optional and backward-compatible: a caller that omits it behaves exactly as
+  // before (lastReviewSource left undefined, never fabricated as 'quiz'). See
+  // lib/revisionQueue.ts's RevisionReviewSource/recordCorrect/recordIncorrect for the full contract.
+  recordRevisionCorrect: (itemId: string, today: string, source?: RevisionReviewSource) => void;
+  recordRevisionIncorrect: (itemId: string, today: string, source?: RevisionReviewSource) => void;
   // Current Affairs Repository revision: unlike a PYQ attempt, a Current Affairs item has no
   // "incorrect attempt" to derive eligibility from, so it needs an explicit, idempotent "add to
   // revision" action — see lib/revisionQueue.ts's addItem (reused as-is; no second engine).
@@ -295,6 +311,46 @@ interface AppState {
   contentRelationships: ContentRelationship[];
   addContentRelationship: (input: { source: RelationshipEndpoint; target: RelationshipEndpoint; type: RelationshipType }) => CreateRelationshipResult;
   deleteContentRelationship: (id: string) => void;
+
+  // Knowledge Librarian (P0), Phase 2 — Syllabus <-> Knowledge classification: a many-to-many link
+  // between a knowledge item (today: ImportedContent) and an APFC syllabus topic, carrying
+  // confidence/status/source so MULTIPLE legitimate topic mappings and a review queue are possible
+  // — something ImportedContentMetadata.apfcTopicId (a single optional FK) cannot express on its
+  // own. See lib/knowledgeClassification.ts's own header for exactly why this is a SEPARATE
+  // collection from contentRelationships above, not an overload of it. Workspace-owned exactly like
+  // importedContent/contentRelationships (archived/restored by setActiveWorkspaceId's swap).
+  knowledgeClassifications: KnowledgeClassification[];
+  /** Persists an already-built Markdown multi-article ingestion batch
+   * (lib/knowledgeIngestion.ts's ingestMarkdownAsArticles) in one atomic set() — mirrors
+   * applyRepositoryImportPlan's own "the batch is already fully built by the caller" pattern for
+   * ids/content, BUT (P0.1 hardening) never trusts the batch's own `workspaceId` on any of its
+   * records: the original document, every extracted article, every relationship, and every
+   * classification are all re-stamped with the CURRENT activeWorkspaceId here, exactly like
+   * addImportedContent already does for a single item. A caller cannot insert records into a
+   * workspace other than whichever one is active at the moment this action actually runs, even if
+   * the batch was built against a stale or incorrect workspaceId. */
+  addKnowledgeIngestionBatch: (batch: KnowledgeIngestionBatch) => void;
+  /** Confirming a classification also backfills ImportedContentMetadata.apfcTopicId onto the
+   * classified item when it doesn't already have one (the first confirmed topic becomes that
+   * item's existing single "primary" topic — see this action's own implementation below) — every
+   * existing apfcTopicId-driven view (Syllabus.tsx, RepositoryDetail.tsx, lib/repository.ts) then
+   * picks it up with no changes of its own. */
+  confirmKnowledgeClassification: (id: string) => void;
+  rejectKnowledgeClassification: (id: string) => void;
+  /** A human explicitly assigning a topic — always `status: 'confirmed'`, `source: 'manual'` (see
+   * lib/knowledgeClassification.ts's createManualClassification). */
+  addManualKnowledgeClassification: (input: { itemId: string; itemType: KnowledgeItemType; topicId: string }) => void;
+  deleteKnowledgeClassification: (id: string) => void;
+
+  // AI Library — semantic search embedding index (lib/jarvis/documents/embeddingIndex.ts). NOT
+  // workspace-owned (see APP_STORE_PERSIST_VERSION's own Version 16 comment for why) and
+  // deliberately excluded from exportAllData/importAllData/cloudSync — a derived, rebuildable
+  // local index, never source-of-truth user data. setDocumentEmbeddings replaces the whole array
+  // atomically (the caller already computed the full reconciled set via planEmbeddingIndexing),
+  // matching this store's existing "caller builds it, store just persists it" convention for
+  // addKnowledgeIngestionBatch above.
+  documentEmbeddings: JarvisDocumentEmbeddingRecord[];
+  setDocumentEmbeddings: (records: JarvisDocumentEmbeddingRecord[]) => void;
 
   // Repository Import/Restore — applies an already-built, already-validated RepositoryImportPlan
   // (lib/repositoryImport.ts's buildRepositoryImportPlan: validation, collision detection, id
@@ -391,6 +447,18 @@ interface WorkspaceOwnedData {
   contentRelationships: ContentRelationship[];
   annotations: Annotation[];
   folders: Folder[];
+  knowledgeClassifications: KnowledgeClassification[];
+}
+
+// P2.4 — removes exactly one entry from a RevisionQueue by id, used only by deleteImportedContent's
+// cascade above. Deliberately kept here rather than added to lib/revisionQueue.ts: it is a plain
+// Record key omission with no scheduling logic of its own, and that module is intentionally left
+// untouched by this change. Returns the SAME object reference when the id isn't present, matching
+// this store's existing "no-op update returns the same reference" convention elsewhere.
+function withoutRevisionQueueItem(queue: RevisionQueue, itemId: string): RevisionQueue {
+  if (!(itemId in queue)) return queue;
+  const { [itemId]: _removed, ...rest } = queue;
+  return rest;
 }
 
 function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
@@ -419,6 +487,7 @@ function emptyWorkspaceOwnedData(): WorkspaceOwnedData {
     contentRelationships: [],
     annotations: [],
     folders: [],
+    knowledgeClassifications: [],
   };
 }
 
@@ -432,6 +501,58 @@ function todayKey() {
 
 function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): StudyLogEntry {
   return log[date] ?? { date, focusMinutes: 0, topicsCompleted: 0, testsCompleted: 0 };
+}
+
+// Shared by bumpFocusMinutes/bumpTopicsCompleted/bumpTestsCompleted — each only differs in which
+// numeric StudyLogEntry field it increments and by how much.
+function bumpStudyLogField(
+  log: Record<string, StudyLogEntry>,
+  date: string,
+  field: 'focusMinutes' | 'topicsCompleted' | 'testsCompleted',
+  delta: number,
+): Record<string, StudyLogEntry> {
+  const entry = ensureLogEntry(log, date);
+  return { ...log, [date]: { ...entry, [field]: entry[field] + delta } };
+}
+
+// Shared by toggleStarredQuestion/toggleBookmarkedPyq — both just toggle an id's membership in a
+// string[] of ids.
+function toggleInArray(ids: readonly string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+}
+
+// R5 (Phase 2F) — addAttempt/addPyqAttempt share this exact pattern: stamp the active workspace
+// (if the attempt doesn't already carry one) and bump today's testsCompleted by one. The third
+// parallel action, addUpscCsePrelimsPyqAttempt, deliberately does NEITHER of these and is left
+// untouched: UpscCsePrelimsPyqAttempt has no workspaceId field at all (workspace isolation for
+// that collection comes entirely from WorkspaceOwnedData's wholesale archive/restore, not
+// per-item stamping — see WorkspaceOwnedData above), and UPSC CSE PYQ completions not bumping
+// testsCompleted is a pre-existing behavior this consolidation does not change.
+function stampWorkspaceAndBumpTestsCompleted<T extends { workspaceId?: WorkspaceKind }>(
+  activeWorkspaceId: WorkspaceKind,
+  studyLog: Record<string, StudyLogEntry>,
+  attempt: T,
+): { stamped: T; studyLog: Record<string, StudyLogEntry> } {
+  return {
+    stamped: { ...attempt, workspaceId: attempt.workspaceId ?? activeWorkspaceId },
+    studyLog: bumpStudyLogField(studyLog, todayKey(), 'testsCompleted', 1),
+  };
+}
+
+/** Knowledge Librarian P0.1 hardening — backfills ImportedContentMetadata.apfcTopicId (the legacy
+ * single-primary-topic field) onto `itemId` when it doesn't already have one. Shared by BOTH
+ * confirmKnowledgeClassification and addManualKnowledgeClassification so every path that produces
+ * a confirmed classification keeps the legacy field in sync identically — previously only
+ * confirmKnowledgeClassification did this, so a classification added directly via
+ * addManualKnowledgeClassification (which is born already 'confirmed' — see
+ * lib/knowledgeClassification.ts's createManualClassification — and so never passes through
+ * confirmKnowledgeClassification at all) silently never backfilled the legacy field. Returns
+ * `undefined` (no update needed) when the item doesn't exist or already has a primary topic — the
+ * FIRST confirmed topic always wins; this never overwrites an existing value. */
+function backfillPrimaryApfcTopicId(importedContent: readonly ImportedContent[], itemId: string, topicId: string): ImportedContent[] | undefined {
+  const item = importedContent.find((c) => c.id === itemId);
+  if (!item || item.metadata?.apfcTopicId) return undefined;
+  return importedContent.map((c) => (c.id === itemId ? { ...c, metadata: { ...c.metadata, apfcTopicId: topicId }, updatedAt: new Date().toISOString() } : c));
 }
 
 // --- Multi-Workspace OS persist migration (Stage 1 + Stage 2, folded into one forward step) ---
@@ -554,7 +675,27 @@ function ensureLogEntry(log: Record<string, StudyLogEntry>, date: string): Study
 // ImportedContent.updatedAt before this version bump existed for it — they need no migration step
 // of their own: every reader already treats a missing optional field as its own documented default
 // (see each field's own doc comment in lib/types.ts / lib/contentImport.ts).
-export const APP_STORE_PERSIST_VERSION = 14;
+//
+// Version 15 (Knowledge Librarian P0, Phase 2) adds `knowledgeClassifications`
+// (KnowledgeClassification[] — see lib/knowledgeClassification.ts) the exact same way as
+// importedContent/contentRelationships/folders before it: a brand-new, workspace-owned field with
+// nothing pre-existing to migrate (no prior version could have ever produced one — this is a new
+// collection, not a restructuring of an existing one), defaulted to `[]` at both the top-level
+// active field and inside every inactiveWorkspaceOwnedData snapshot.
+//
+// Version 16 (AI Library, semantic search) adds `documentEmbeddings`
+// (JarvisDocumentEmbeddingRecord[] — see lib/jarvis/documents/embeddingIndex.ts). Deliberately
+// NOT workspace-owned (not swapped by setActiveWorkspaceId, not part of inactiveWorkspaceOwnedData):
+// every record is keyed by its own globally-unique documentId+chunkId, so there is no cross-
+// workspace collision risk to guard against, and treating it as workspace-owned would force a full
+// re-index on every workspace switch for no correctness benefit. Also deliberately EXCLUDED from
+// exportAllData()/importAllData() and therefore from cloudSync.ts (which reuses exportAllData as
+// its sync payload) and from backup-file export: this is a derived, rebuildable local SEARCH INDEX,
+// never source-of-truth user data — a second device, or a restored backup, simply has an empty
+// index until the user re-runs "Index for semantic search" there, which is itself idempotent and
+// cheap (planEmbeddingIndexing recomputes only what's missing/stale). This keeps the single Supabase
+// JSONB blob and every backup file free of potentially megabytes of floating-point vector noise.
+export const APP_STORE_PERSIST_VERSION = 16;
 
 function stampWorkspaceIdOnArray(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -629,6 +770,7 @@ function withWorkspaceOwnedDefaults(value: unknown): unknown {
     phdMicroTargets: Array.isArray(snapshot.phdMicroTargets) ? snapshot.phdMicroTargets : [],
     annotations: sanitizeAnnotations(snapshot.annotations),
     folders: Array.isArray(snapshot.folders) ? snapshot.folders : [],
+    knowledgeClassifications: Array.isArray(snapshot.knowledgeClassifications) ? (snapshot.knowledgeClassifications as KnowledgeClassification[]) : [],
   };
 }
 
@@ -676,6 +818,8 @@ export function migrateAppStorage(persistedState: unknown, version: number): unk
     phdTopicAreas: Array.isArray(state.phdTopicAreas) ? state.phdTopicAreas : [],
     phdMicroTargets: Array.isArray(state.phdMicroTargets) ? state.phdMicroTargets : [],
     folders: Array.isArray(state.folders) ? state.folders : [],
+    knowledgeClassifications: Array.isArray(state.knowledgeClassifications) ? state.knowledgeClassifications : [],
+    documentEmbeddings: Array.isArray(state.documentEmbeddings) ? state.documentEmbeddings : [],
     activeWorkspaceId: (state.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: withWorkspaceOwnedDefaultsInArchive(state.inactiveWorkspaceOwnedData),
   };
@@ -765,6 +909,8 @@ export const useAppStore = create<AppState>()(
           contentRelationships: state.contentRelationships.filter(
             (r) => !((r.sourceId === id && r.sourceType === 'note') || (r.targetId === id && r.targetType === 'note')),
           ),
+          // AI Library — same cascade as deleteImportedContent's own documentEmbeddings line above.
+          documentEmbeddings: state.documentEmbeddings.filter((r) => r.documentId !== `note:${id}`),
         })),
       togglePinNote: (id) =>
         set((state) => ({
@@ -780,23 +926,15 @@ export const useAppStore = create<AppState>()(
       attempts: [],
       addAttempt: (attempt) =>
         set((state) => {
-          const date = todayKey();
-          const entry = ensureLogEntry(state.studyLog, date);
-          return {
-            attempts: [{ ...attempt, workspaceId: attempt.workspaceId ?? state.activeWorkspaceId }, ...state.attempts],
-            studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } },
-          };
+          const { stamped, studyLog } = stampWorkspaceAndBumpTestsCompleted(state.activeWorkspaceId, state.studyLog, attempt);
+          return { attempts: [stamped, ...state.attempts], studyLog };
         }),
 
       pyqAttempts: [],
       addPyqAttempt: (attempt) =>
         set((state) => {
-          const date = todayKey();
-          const entry = ensureLogEntry(state.studyLog, date);
-          return {
-            pyqAttempts: [{ ...attempt, workspaceId: attempt.workspaceId ?? state.activeWorkspaceId }, ...state.pyqAttempts],
-            studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } },
-          };
+          const { stamped, studyLog } = stampWorkspaceAndBumpTestsCompleted(state.activeWorkspaceId, state.studyLog, attempt);
+          return { pyqAttempts: [stamped, ...state.pyqAttempts], studyLog };
         }),
 
       sessions: [],
@@ -805,36 +943,19 @@ export const useAppStore = create<AppState>()(
 
       studyLog: {},
       bumpFocusMinutes: (date, minutes) =>
-        set((state) => {
-          const entry = ensureLogEntry(state.studyLog, date);
-          return { studyLog: { ...state.studyLog, [date]: { ...entry, focusMinutes: entry.focusMinutes + minutes } } };
-        }),
+        set((state) => ({ studyLog: bumpStudyLogField(state.studyLog, date, 'focusMinutes', minutes) })),
       bumpTopicsCompleted: (date, count) =>
-        set((state) => {
-          const entry = ensureLogEntry(state.studyLog, date);
-          return { studyLog: { ...state.studyLog, [date]: { ...entry, topicsCompleted: entry.topicsCompleted + count } } };
-        }),
+        set((state) => ({ studyLog: bumpStudyLogField(state.studyLog, date, 'topicsCompleted', count) })),
       bumpTestsCompleted: (date) =>
-        set((state) => {
-          const entry = ensureLogEntry(state.studyLog, date);
-          return { studyLog: { ...state.studyLog, [date]: { ...entry, testsCompleted: entry.testsCompleted + 1 } } };
-        }),
+        set((state) => ({ studyLog: bumpStudyLogField(state.studyLog, date, 'testsCompleted', 1) })),
 
       starredQuestionIds: [],
       toggleStarredQuestion: (id) =>
-        set((state) => ({
-          starredQuestionIds: state.starredQuestionIds.includes(id)
-            ? state.starredQuestionIds.filter((x) => x !== id)
-            : [...state.starredQuestionIds, id],
-        })),
+        set((state) => ({ starredQuestionIds: toggleInArray(state.starredQuestionIds, id) })),
 
       bookmarkedPyqIds: [],
       toggleBookmarkedPyq: (id) =>
-        set((state) => ({
-          bookmarkedPyqIds: state.bookmarkedPyqIds.includes(id)
-            ? state.bookmarkedPyqIds.filter((x) => x !== id)
-            : [...state.bookmarkedPyqIds, id],
-        })),
+        set((state) => ({ bookmarkedPyqIds: toggleInArray(state.bookmarkedPyqIds, id) })),
 
       theme: 'system',
       setTheme: (t) => set({ theme: t }),
@@ -899,10 +1020,10 @@ export const useAppStore = create<AppState>()(
       },
 
       revisionQueue: createRevisionQueue(),
-      recordRevisionCorrect: (itemId, today) =>
-        set((state) => ({ revisionQueue: recordRevisionCorrectItem(state.revisionQueue, itemId, today) })),
-      recordRevisionIncorrect: (itemId, today) =>
-        set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, itemId, today) })),
+      recordRevisionCorrect: (itemId, today, source) =>
+        set((state) => ({ revisionQueue: recordRevisionCorrectItem(state.revisionQueue, itemId, today, source) })),
+      recordRevisionIncorrect: (itemId, today, source) =>
+        set((state) => ({ revisionQueue: recordRevisionIncorrectItem(state.revisionQueue, itemId, today, source) })),
       addToRevisionQueue: (itemId, today) =>
         set((state) => ({ revisionQueue: addRevisionQueueItem(state.revisionQueue, itemId, today) })),
 
@@ -939,6 +1060,24 @@ export const useAppStore = create<AppState>()(
           contentRelationships: state.contentRelationships.filter(
             (r) => !((r.sourceId === id && r.sourceType === 'imported_content') || (r.targetId === id && r.targetType === 'imported_content')),
           ),
+          // Same cascade for knowledgeClassifications — a classification referencing deleted
+          // content is never left dangling either (see lib/knowledgeClassification.ts's
+          // deleteClassificationsForItem).
+          knowledgeClassifications: deleteClassificationsForItem(state.knowledgeClassifications, id, 'imported_content'),
+          // AI Library — same cascade for the semantic search index: an embedding record pointing
+          // at deleted content is never left dangling. `'imported_content:' + id` mirrors
+          // lib/jarvis/workspaceContentBridge.ts's own toWorkspaceDocumentId format exactly (not
+          // imported directly, to avoid a new store.ts -> jarvis/* dependency for one string
+          // template) — that file remains the one source of truth for the format itself.
+          documentEmbeddings: state.documentEmbeddings.filter((r) => r.documentId !== `imported_content:${id}`),
+          // P2.4 — same cascade discipline for revisionQueue (lib/revisionQueue.ts): an id added to
+          // revision via RepositoryDetail.tsx's "Add to Revision" button (Current Affairs only — see
+          // that module's own header) is never left scheduling a review for content that no longer
+          // exists. Only ever removes THIS exact id's own entry via withoutRevisionQueueItem below —
+          // every other id's scheduling state (box/dueDate/reviewCount) is untouched. APFC's PYQ ids
+          // are never ImportedContent ids (a PYQ is never stored as ImportedContent at all), so this
+          // can only ever strip a CSE Current Affairs article's own entry, never an APFC one.
+          revisionQueue: withoutRevisionQueueItem(state.revisionQueue, id),
         })),
       bulkUpdateImportedContent: (ids, patch) =>
         set((state) => {
@@ -984,6 +1123,93 @@ export const useAppStore = create<AppState>()(
         return result;
       },
       deleteContentRelationship: (id) => set((state) => ({ contentRelationships: state.contentRelationships.filter((r) => r.id !== id) })),
+
+      knowledgeClassifications: [],
+      // Knowledge Librarian P0.1 hardening — every record in the batch is re-stamped with the
+      // CURRENT activeWorkspaceId here, exactly like addImportedContent already does for a single
+      // item (never trusting whatever workspaceId the batch itself carries — see this action's own
+      // doc comment above). Still one atomic set() call: the whole batch commits together in a
+      // single state transition, or (if the caller never calls this) not at all — re-stamping each
+      // record's workspaceId first doesn't change that.
+      addKnowledgeIngestionBatch: (batch) =>
+        set((state) => {
+          const workspaceId = state.activeWorkspaceId;
+          const originalDocument = { ...batch.originalDocument, workspaceId };
+          const articles = batch.articles.map((a) => ({ ...a, workspaceId }));
+          const relationships = batch.relationships.map((r) => ({ ...r, workspaceId }));
+          const classifications = batch.classifications.map((c) => ({ ...c, workspaceId }));
+          return {
+            importedContent: [originalDocument, ...articles, ...state.importedContent],
+            contentRelationships: [...relationships, ...state.contentRelationships],
+            knowledgeClassifications: [...classifications, ...state.knowledgeClassifications],
+          };
+        }),
+      confirmKnowledgeClassification: (id) =>
+        set((state) => {
+          const target = state.knowledgeClassifications.find((c) => c.id === id);
+          const updated = confirmClassification(state.knowledgeClassifications, id);
+          // P1.1 — backfillPrimaryApfcTopicId writes to the APFC-ONLY legacy metadata.apfcTopicId
+          // field; a confirmed UPSC CSE classification's topicId is a granular CSE node id, which
+          // must never be written there (that field would then hold a value no APFC-topic-shaped
+          // consumer, e.g. lib/apfcSyllabus.ts's resolveApfcTopicPath, could ever resolve). Only the
+          // 'apfc' taxonomy has this legacy single-primary-topic field at all today — see this
+          // feature's own P1.1 report for what a UPSC CSE/PhD equivalent would need.
+          if (!target || target.taxonomy !== 'apfc') return { knowledgeClassifications: updated };
+          // Backfill the EXISTING single-primary-topic field (see backfillPrimaryApfcTopicId's own
+          // header above) so every existing apfcTopicId-driven view (Syllabus.tsx's "linked" count,
+          // RepositoryDetail.tsx's "APFC Syllabus Topic" line) picks this up with no changes of its
+          // own. The FIRST confirmed topic becomes the item's primary one; a later confirm for a
+          // DIFFERENT topic on the same item never overwrites it — that second topic simply stays
+          // fully discoverable via lib/repository.ts's listImportedContentByApfcTopicIncluding
+          // Classifications instead (see this feature's own "multiple legitimate topic mappings"
+          // requirement).
+          const backfilled = backfillPrimaryApfcTopicId(state.importedContent, target.itemId, target.topicId);
+          return backfilled ? { knowledgeClassifications: updated, importedContent: backfilled } : { knowledgeClassifications: updated };
+        }),
+      rejectKnowledgeClassification: (id) => set((state) => ({ knowledgeClassifications: rejectClassification(state.knowledgeClassifications, id) })),
+      // Knowledge Librarian P0.1 hardening — duplicate-classification prevention at the store
+      // level, independent of whatever the UI's own topic picker already filters out (defense in
+      // depth: this guarantees at most one record per (itemId, itemType, taxonomy, topicId) no
+      // matter what calls this action). Reuses mergeProposedClassifications (previously unused —
+      // see lib/knowledgeClassification.ts's own header) exactly as it already behaves for a
+      // single-candidate "batch":
+      //   - no existing record for this pair -> added as a fresh confirmed/manual record.
+      //   - an existing 'confirmed' record -> left completely untouched (nothing sensible to do;
+      //     it's already decided — no duplicate, no change).
+      //   - an existing 'rejected' record -> left completely untouched; a manual add is NEVER
+      //     allowed to silently resurrect a rejection. Deliberately reclassifying a rejected entry
+      //     is its own separate, explicit action — see confirmKnowledgeClassification, which
+      //     RepositoryDetail.tsx's "Reclassify" button (shown only on rejected rows) calls
+      //     directly, exactly the "documented reclassification workflow" this needs.
+      //   - an existing 'proposed' record -> refreshed in place to the manual candidate's own
+      //     confidence(1)/rationale/source('manual'), but its STATUS stays 'proposed' (merge never
+      //     promotes status on its own) — reachable only if a caller bypasses the UI's own
+      //     already-classified filter, since the picker never offers a topic with any existing
+      //     record; still never a duplicate row.
+      addManualKnowledgeClassification: (input) =>
+        set((state) => {
+          // P1.1 — createManualClassification now derives its taxonomy from the (trusted,
+          // store-owned) activeWorkspaceId rather than hardcoding APFC, and returns `undefined`
+          // for a workspace with no taxonomy yet (today: PhD research) — never throws, never
+          // fabricates a classification for a workspace that can't support one. A UI should never
+          // let this be reached for such a workspace (no topic picker to click), but if it somehow
+          // were, this is a no-op rather than a silently-mis-tagged record.
+          const manual = createManualClassification({ workspaceId: state.activeWorkspaceId, itemId: input.itemId, itemType: input.itemType, topicId: input.topicId });
+          if (!manual) return {};
+          const knowledgeClassifications = mergeProposedClassifications(state.knowledgeClassifications, [manual]);
+          // A manual classification is born already 'confirmed' (createManualClassification), so
+          // it never passes through confirmKnowledgeClassification's own backfill — this action
+          // needs the exact same backfill itself (see backfillPrimaryApfcTopicId's header above),
+          // but ONLY for the 'apfc' taxonomy — see confirmKnowledgeClassification's own P1.1 note
+          // on why a CSE classification must never write to the APFC-only legacy field.
+          if (manual.taxonomy !== 'apfc') return { knowledgeClassifications };
+          const backfilled = backfillPrimaryApfcTopicId(state.importedContent, input.itemId, input.topicId);
+          return backfilled ? { knowledgeClassifications, importedContent: backfilled } : { knowledgeClassifications };
+        }),
+      deleteKnowledgeClassification: (id) => set((state) => ({ knowledgeClassifications: deleteClassification(state.knowledgeClassifications, id) })),
+
+      documentEmbeddings: [],
+      setDocumentEmbeddings: (records) => set({ documentEmbeddings: records }),
 
       applyRepositoryImportPlan: (plan) =>
         set((state) => ({
@@ -1051,6 +1277,7 @@ export const useAppStore = create<AppState>()(
             contentRelationships: state.contentRelationships,
             annotations: state.annotations,
             folders: state.folders,
+            knowledgeClassifications: state.knowledgeClassifications,
           };
           const incoming = state.inactiveWorkspaceOwnedData[id] ?? emptyWorkspaceOwnedData();
           return {
@@ -1086,6 +1313,8 @@ export const useAppStore = create<AppState>()(
           contentRelationships: [],
           annotations: [],
           folders: [],
+          knowledgeClassifications: [],
+          documentEmbeddings: [],
           // Multi-Workspace OS, Stage 2 — "reset ALL data" means every workspace's data, not just
           // the active one's; a no-op today since nothing has ever populated this archive.
           inactiveWorkspaceOwnedData: {},
@@ -1128,6 +1357,11 @@ export function exportAllData() {
     contentRelationships: state.contentRelationships,
     annotations: state.annotations,
     folders: state.folders,
+    knowledgeClassifications: state.knowledgeClassifications,
+    // documentEmbeddings is DELIBERATELY excluded from this export (and therefore from
+    // cloudSync.ts, which reuses this function as its sync payload) — see APP_STORE_PERSIST_VERSION's
+    // own Version 16 comment for why: it is a derived, rebuildable local search index, never
+    // source-of-truth user data.
     // Multi-Workspace OS, Stage 2 — activeWorkspaceId travels WITH the flat fields above (notes,
     // completedTopics, etc.) because they only mean "this workspace's data" together with it; and
     // every OTHER workspace's archived data is equally real user data (see AppState's doc-comment)
@@ -1168,6 +1402,7 @@ export function importAllData(json: string) {
     contentRelationships: data.contentRelationships ?? [],
     annotations: sanitizeAnnotations(data.annotations),
     folders: data.folders ?? [],
+    knowledgeClassifications: data.knowledgeClassifications ?? [],
     activeWorkspaceId: (data.activeWorkspaceId as WorkspaceKind | undefined) ?? DEFAULT_WORKSPACE_ID,
     inactiveWorkspaceOwnedData: data.inactiveWorkspaceOwnedData ?? {},
   });

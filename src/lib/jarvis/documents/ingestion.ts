@@ -393,20 +393,25 @@ export function buildDocumentChunks(input: BuildDocumentChunksInput): BuildDocum
   const chunks: JarvisDocumentChunk[] = [];
   let chunkOrder = 0;
 
-  const pushChunksForSection = (sectionId: string, text: string, page?: number) => {
-    for (const chunkBody of chunkText(text, maxChars)) {
+  // `titlePrefix` (headings path only — see its call site below) is prepended to the FIRST chunk
+  // of its section only, never to every chunk a long section gets split into: a heading's own
+  // words need to be searchable at least once per section, not repeated on every fragment of it
+  // (the "never duplicating titles unnecessarily" requirement this fix was scoped to).
+  const pushChunksForSection = (sectionId: string, text: string, page?: number, titlePrefix?: string) => {
+    chunkText(text, maxChars).forEach((chunkBody, index) => {
+      const finalText = titlePrefix && index === 0 ? `${titlePrefix}\n\n${chunkBody}` : chunkBody;
       chunks.push({
         id: `${input.documentId}::chunk-${chunkOrder}`,
         documentId: input.documentId,
         sectionId,
         order: chunkOrder,
-        text: chunkBody,
+        text: finalText,
         startPage: page,
         endPage: page,
-        tokenCountEstimate: Math.ceil(chunkBody.length / 4),
+        tokenCountEstimate: Math.ceil(finalText.length / 4),
       });
       chunkOrder += 1;
-    }
+    });
   };
 
   if (input.extracted.pages && input.extracted.pages.length > 0) {
@@ -425,7 +430,14 @@ export function buildDocumentChunks(input: BuildDocumentChunksInput): BuildDocum
   const headingSections = splitByHeadings(input.documentId, normalizeExtractedText(input.extracted.text));
   headingSections.forEach((section, index) => {
     sections.push({ id: section.id, documentId: input.documentId, title: section.title, order: index });
-    pushChunksForSection(section.id, section.text);
+    // Fix: a section's own heading text is otherwise invisible to keyword/semantic search — only
+    // `section.title` carried it, never `chunk.text` (splitByHeadings strips the heading line out
+    // of the body it collects). Searching a document for the exact words of its own heading
+    // (e.g. "Provident Fund Appellate" for a note titled "# Provident Fund Appellate Jurisdiction")
+    // returned nothing. Prepending it into the first chunk's text closes that gap without touching
+    // `section.title` itself (still the only place a UI reads the heading from) or this section's
+    // `id`/order, so citations/attribution are unaffected.
+    pushChunksForSection(section.id, section.text, undefined, section.title);
   });
 
   return { sections, chunks };

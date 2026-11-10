@@ -1,13 +1,26 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MarkdownPreview } from '../components/markdown/MarkdownPreview';
-import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Pencil, Trash2, Eye, FileText, Link2, Library, ListChecks, Plus, X, Repeat, Check, Sparkles, GraduationCap, RotateCcw, FileQuestion } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta, type WorkspaceKind } from '../lib/workspace';
 import { Card, Badge, Button, PageHeader } from '../components/ui/Primitives';
 import { cx, formatDate, getLocalDateString } from '../lib/utils';
 import { resolveSyllabusNodeLabel } from '../lib/syllabusNodeLabel';
 import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
+import { listApfcTopicsFlat } from '../lib/apfcSyllabusTaxonomy';
+import { listUpscCseTopicsFlat } from '../lib/upscCseKnowledgeTaxonomy';
+import { listClassificationsForItem, type KnowledgeClassification, type KnowledgeClassificationStatus, type KnowledgeTopicTaxonomyEntry } from '../lib/knowledgeClassification';
+// P1.6 — lib/relatedPyqs.ts statically imports BOTH data/pyq.ts (APFC, ~271kB/87kB gzip) and
+// data/pyqUpscCsePrelims.ts (CSE, ~210kB/48kB gzip). A static import here (this file's own
+// previous P1.5 implementation) pulled both into EVERY RepositoryDetail page load's own JS module
+// graph — confirmed via a production build that RepositoryDetail-*.js imports both pyq-*.js and
+// pyqUpscCsePrelims-*.js chunks unconditionally, for every workspace (including PhD, which never
+// has a classification at all) and every item (including ones with zero confirmed classifications).
+// Only the TYPE is imported eagerly (erased at build time, zero runtime cost); the function itself
+// is loaded via a real dynamic import(), only once this page actually has a confirmed
+// classification to show PYQs for — see the `relatedPyqsFn` state/effect below.
+import type { RelatedPyqSummary } from '../lib/relatedPyqs';
 import {
   getImportedContentById,
   getRepositoryContentTypeMeta,
@@ -64,6 +77,48 @@ function isRelationshipEntityType(value: string | undefined): value is Relations
 // as a re-export so existing imports of it from this module (e.g. this page's own test file)
 // continue to work unchanged.
 export { resolveSyllabusNodeLabel };
+
+/** Knowledge Librarian P0.1 hardening — the exact predicate the "Add classification" picker's
+ * options use, exported (this page's own test file has no DOM — see its header) so it's directly
+ * testable without rendering. Excludes a topic the item already has ANY record for, regardless of
+ * status (proposed/confirmed/rejected) — a rejected topic is never re-offered here; reclassifying
+ * one is a separate, explicit action (the "Reclassify" button shown on a rejected row below, which
+ * reuses confirmKnowledgeClassification directly rather than creating a second record for it). */
+export function availableApfcTopicOptions(
+  allTopics: readonly KnowledgeTopicTaxonomyEntry[],
+  itemClassifications: readonly KnowledgeClassification[],
+): KnowledgeTopicTaxonomyEntry[] {
+  const classifiedTopicIds = new Set(itemClassifications.map((c) => c.topicId));
+  return allTopics.filter((t) => !classifiedTopicIds.has(t.topicId));
+}
+
+/** P1.1 — which real taxonomy's topic list the "Add classification" picker should offer, for the
+ * ACTIVE workspace only (never a caller-supplied one) — the exact same `apfc`/`upsc_cse` mapping
+ * lib/knowledgeClassification.ts's `taxonomyForWorkspace` uses, kept here as a thin page-level
+ * dispatch so this page never needs to import the store's own workspace-to-taxonomy internals.
+ * A workspace with no taxonomy yet (today: `phd_research`) gets an empty list — the "Add
+ * classification" button itself is already gated on `topicOptions.length > 0` below, so this
+ * naturally hides the whole picker for a workspace that can't support one, rather than showing an
+ * empty, confusing dropdown. */
+export function topicsForWorkspace(workspaceId: string): readonly KnowledgeTopicTaxonomyEntry[] {
+  if (workspaceId === 'apfc') return listApfcTopicsFlat();
+  if (workspaceId === 'upsc_cse') return listUpscCseTopicsFlat();
+  return [];
+}
+
+/** P1.1 — the display label for one existing classification row, dispatched by that record's OWN
+ * `taxonomy` field (never the current active workspace, which could differ from whichever
+ * workspace this classification was actually created under — though in practice they always match
+ * today, since every write path stamps the record's taxonomy from the trusted active workspace at
+ * creation time). Never fabricates a label for an id that doesn't resolve — falls back to the raw
+ * topicId, exactly as the pre-P1.1 APFC-only code already did. */
+export function describeClassificationTopicLabel(classification: Pick<KnowledgeClassification, 'taxonomy' | 'topicId'>): string {
+  if (classification.taxonomy === 'apfc') {
+    const path = resolveApfcTopicPath(classification.topicId);
+    return path ? `${path.subject.title} › ${path.topic.title}` : classification.topicId;
+  }
+  return resolveSyllabusNodeLabel(classification.topicId) ?? classification.topicId;
+}
 
 /** Read-only content display: a byte-exact "Raw" view (the default — see this stage's own
  * requirement to preserve stored content exactly) and an opt-in "Preview" view that renders
@@ -153,7 +208,7 @@ export function ContentView({ content, documentId, activeWorkspaceId, route }: {
               aria-pressed={mode === 'raw'}
               className={cx(
                 'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
-                mode === 'raw' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                mode === 'raw' ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
               )}
             >
               <FileText className="h-3.5 w-3.5" /> Raw
@@ -164,7 +219,7 @@ export function ContentView({ content, documentId, activeWorkspaceId, route }: {
               aria-pressed={mode === 'preview'}
               className={cx(
                 'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
-                mode === 'preview' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                mode === 'preview' ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
               )}
             >
               <Eye className="h-3.5 w-3.5" /> Preview
@@ -245,6 +300,11 @@ export default function RepositoryDetail() {
   const addToRevisionQueue = useAppStore((s) => s.addToRevisionQueue);
   const recordRevisionCorrect = useAppStore((s) => s.recordRevisionCorrect);
   const recordRevisionIncorrect = useAppStore((s) => s.recordRevisionIncorrect);
+  const knowledgeClassifications = useAppStore((s) => s.knowledgeClassifications);
+  const confirmKnowledgeClassification = useAppStore((s) => s.confirmKnowledgeClassification);
+  const rejectKnowledgeClassification = useAppStore((s) => s.rejectKnowledgeClassification);
+  const addManualKnowledgeClassification = useAppStore((s) => s.addManualKnowledgeClassification);
+  const deleteKnowledgeClassification = useAppStore((s) => s.deleteKnowledgeClassification);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -252,6 +312,8 @@ export default function RepositoryDetail() {
   const [linkTarget, setLinkTarget] = useState('');
   const [linkType, setLinkType] = useState<RelationshipType>('related_to');
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [showAddClassification, setShowAddClassification] = useState(false);
+  const [newClassificationTopicId, setNewClassificationTopicId] = useState('');
 
   const entityType = isRelationshipEntityType(params.entityType) ? params.entityType : undefined;
   const id = params.id;
@@ -263,6 +325,50 @@ export default function RepositoryDetail() {
     : noteItem
       ? repositoryEntryFromNote(noteItem)
       : undefined;
+
+  // Knowledge Librarian (P0), Phase 2 — every proposed/confirmed/rejected classification for THIS
+  // item. Computed here (before the `if (!entry) return` early return below) so the P1.6 hooks
+  // right after it — which depend on `itemClassifications` — are never called conditionally
+  // (React's Rules of Hooks: a hook must run in the same order on every render, so nothing that
+  // calls useState/useEffect may sit after an early return).
+  const itemClassifications = importedItem ? listClassificationsForItem(knowledgeClassifications, importedItem.id) : [];
+
+  // P1.6 — "Related PYQs" (lib/relatedPyqs.ts) is only ever relevant for a CONFIRMED
+  // classification; most page views have none (every proposed/rejected-only item, every PhD item —
+  // PhD has no taxonomy at all). Loading its module (which pulls in both the ~271kB APFC and
+  // ~210kB CSE PYQ data chunks) is deferred to a real dynamic import(), fired only once this page
+  // actually has a confirmed classification, so every other page view never fetches either chunk.
+  // Three states, exactly as a real async load needs: not-yet-requested ('idle', nothing rendered
+  // yet since nothing needs it), 'loading' (shown per confirmed row), and 'error' (network/chunk
+  // load failure — reported honestly, never silently swallowed into a fake empty result).
+  const hasConfirmedClassification = itemClassifications.some((c) => c.status === 'confirmed');
+  const [relatedPyqsState, setRelatedPyqsState] = useState<
+    | { status: 'idle' | 'loading' | 'error' }
+    | { status: 'ready'; fn: (c: Pick<KnowledgeClassification, 'taxonomy' | 'topicId' | 'status'>) => RelatedPyqSummary[] }
+  >({ status: 'idle' });
+
+  useEffect(() => {
+    if (!hasConfirmedClassification || relatedPyqsState.status !== 'idle') return;
+    let cancelled = false;
+    setRelatedPyqsState({ status: 'loading' });
+    import('../lib/relatedPyqs')
+      .then((mod) => {
+        if (!cancelled) setRelatedPyqsState({ status: 'ready', fn: mod.relatedPyqsForClassification });
+      })
+      .catch(() => {
+        if (!cancelled) setRelatedPyqsState({ status: 'error' });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `relatedPyqsState` is deliberately read but not listed as a dependency: adding it would
+    // make this effect re-run on its OWN idle -> loading transition, whose cleanup would then set
+    // `cancelled = true` on the in-flight import() before it ever resolves — the exact import that
+    // transition itself just started — permanently stranding the UI on "Loading…". Guarding on
+    // `relatedPyqsState.status !== 'idle'` inside the effect body already makes this safe without
+    // listing it as a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasConfirmedClassification]);
 
   const relatedEntries =
     entry && entityType && id
@@ -368,6 +474,26 @@ export default function RepositoryDetail() {
   const syllabusNodeLabel = importedItem?.metadata?.syllabusNodeId ? resolveSyllabusNodeLabel(importedItem.metadata.syllabusNodeId) : undefined;
   const apfcTopicPath = importedItem?.metadata?.apfcTopicId ? resolveApfcTopicPath(importedItem.metadata.apfcTopicId) : undefined;
 
+  // Knowledge Librarian (P0), Phase 2 — "Knowledge Detail -> Syllabus": every proposed/confirmed/
+  // rejected classification for THIS item (lib/knowledgeClassification.ts), independent of the
+  // single apfcTopicPath line above (that line only ever shows the one PRIMARY topic — see
+  // lib/store.ts's confirmKnowledgeClassification — while this card shows every classification,
+  // including additional confirmed topics beyond the primary one, plus anything still awaiting
+  // review). Only ever populated for an ImportedContent entity — a Note has no classifications.
+  const topicOptions = availableApfcTopicOptions(topicsForWorkspace(activeWorkspaceId), itemClassifications);
+  const classificationStatusTone: Record<KnowledgeClassificationStatus, 'warning' | 'success' | 'danger'> = {
+    proposed: 'warning',
+    confirmed: 'success',
+    rejected: 'danger',
+  };
+
+  function handleAddClassification() {
+    if (!importedItem || !newClassificationTopicId) return;
+    addManualKnowledgeClassification({ itemId: importedItem.id, itemType: 'imported_content', topicId: newClassificationTopicId });
+    setShowAddClassification(false);
+    setNewClassificationTopicId('');
+  }
+
   // Current Affairs revision — reuses lib/revisionQueue.ts exactly as PYQ practice already does
   // (same RevisionItem shape, same recordRevisionCorrect/recordRevisionIncorrect store actions);
   // the only addition is addToRevisionQueue, since a Current Affairs item has no "attempt" of its
@@ -379,13 +505,14 @@ export default function RepositoryDetail() {
     if (!entry) return;
     addToRevisionQueue(entry.entityId, getLocalDateString());
   }
+  // P2.8 — a manual card action with no checked answer behind it, never 'quiz': 'self_report'.
   function handleRevisionCorrect() {
     if (!entry) return;
-    recordRevisionCorrect(entry.entityId, getLocalDateString());
+    recordRevisionCorrect(entry.entityId, getLocalDateString(), 'self_report');
   }
   function handleRevisionIncorrect() {
     if (!entry) return;
-    recordRevisionIncorrect(entry.entityId, getLocalDateString());
+    recordRevisionIncorrect(entry.entityId, getLocalDateString(), 'self_report');
   }
 
   return (
@@ -403,7 +530,7 @@ export default function RepositoryDetail() {
             {target && (
               <Link
                 to={target.to}
-                className="inline-flex items-center gap-1 rounded-xl px-4 py-2 text-sm font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 hover:bg-brand-100 dark:hover:bg-brand-500/20"
+                className="inline-flex items-center gap-1 rounded-xl px-4 py-2 text-sm font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-500/10 hover:bg-primary-100 dark:hover:bg-primary-500/20"
               >
                 {target.label} <ArrowRight className="h-3.5 w-3.5" />
               </Link>
@@ -427,6 +554,11 @@ export default function RepositoryDetail() {
           <Badge tone="brand">{meta.label}</Badge>
           <Badge tone="neutral">{workspaceLabel}</Badge>
           {entry.category && <Badge tone="gold">{entry.category}</Badge>}
+          {importedItem?.provenance.ocrApplied && (
+            <span title="This document's text was recognised from a scanned page or image via on-device OCR, not read from a real text layer — it may contain recognition errors.">
+              <Badge tone="jarvis">OCR text</Badge>
+            </span>
+          )}
         </div>
         <div className="mt-3 grid gap-x-6 gap-y-1 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-2">
           <p>
@@ -485,6 +617,161 @@ export default function RepositoryDetail() {
           </div>
         )}
       </Card>
+
+      {importedItem && (
+        <Card className="mb-5 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <GraduationCap className="h-3.5 w-3.5" /> Syllabus Classifications
+            </p>
+            {!showAddClassification && topicOptions.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={() => setShowAddClassification(true)}>
+                <Plus className="h-3.5 w-3.5" /> Add classification
+              </Button>
+            )}
+          </div>
+
+          {showAddClassification && (
+            <div className="mb-3 space-y-2 rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+              <label htmlFor="add-classification-topic" className="sr-only">
+                Syllabus topic
+              </label>
+              <select
+                id="add-classification-topic"
+                value={newClassificationTopicId}
+                onChange={(e) => setNewClassificationTopicId(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+              >
+                <option value="">Choose a topic…</option>
+                {topicOptions.map((t) => (
+                  <option key={t.topicId} value={t.topicId}>
+                    {t.subjectTitle} › {t.topicTitle}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setShowAddClassification(false);
+                    setNewClassificationTopicId('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleAddClassification} disabled={!newClassificationTopicId}>
+                  Add
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {itemClassifications.length === 0 ? (
+            <p className="text-sm text-slate-400">No syllabus classifications yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {itemClassifications.map((c) => {
+                const relatedPyqs = c.status === 'confirmed' && relatedPyqsState.status === 'ready' ? relatedPyqsState.fn(c) : [];
+                return (
+                  <div
+                    key={c.id}
+                    className="flex flex-col gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2.5"
+                  >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                        {describeClassificationTopicLabel(c)}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Badge tone={classificationStatusTone[c.status]}>{c.status}</Badge>
+                        <Badge tone="neutral">
+                          {Math.round(c.confidence * 100)}% · {c.source}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">{c.rationale}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {c.status === 'proposed' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => confirmKnowledgeClassification(c.id)}
+                            aria-label="Confirm classification"
+                            title="Confirm"
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-success-50 hover:text-success-600 dark:hover:bg-success-500/10 dark:hover:text-success-400"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => rejectKnowledgeClassification(c.id)}
+                            aria-label="Reject classification"
+                            title="Reject"
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      )}
+                      {c.status === 'rejected' && (
+                        // The "documented reclassification workflow" — the ONLY way a rejected
+                        // classification can become confirmed again. Deliberately a separate,
+                        // explicit, visible action (never reachable by re-picking the same topic
+                        // in "Add classification" — see availableApfcTopicOptions above) and
+                        // deliberately reuses confirmKnowledgeClassification on the SAME record
+                        // (same id) rather than creating a second one.
+                        <button
+                          type="button"
+                          onClick={() => confirmKnowledgeClassification(c.id)}
+                          aria-label="Reclassify as confirmed"
+                          title="Reclassify — this topic is relevant after all"
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-success-50 hover:text-success-600 dark:hover:bg-success-500/10 dark:hover:text-success-400"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => deleteKnowledgeClassification(c.id)}
+                        aria-label="Delete classification"
+                        title="Delete"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  {c.status === 'confirmed' && (
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-2.5 py-2">
+                      <p className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <FileQuestion className="h-3 w-3" /> Related PYQs
+                      </p>
+                      {relatedPyqsState.status === 'loading' || relatedPyqsState.status === 'idle' ? (
+                        <p className="text-xs text-slate-400">Loading…</p>
+                      ) : relatedPyqsState.status === 'error' ? (
+                        <p className="text-xs text-rose-500 dark:text-rose-400">Couldn&apos;t load PYQ data. Check your connection and reopen this page.</p>
+                      ) : relatedPyqs.length === 0 ? (
+                        <p className="text-xs text-slate-400">No PYQs mapped to this exact topic yet.</p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {relatedPyqs.map((pyq) => (
+                            <li key={pyq.id} className="truncate text-xs text-slate-600 dark:text-slate-300">
+                              {pyq.year ? <span className="text-slate-400">{pyq.year} · </span> : null}
+                              {pyq.question}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
 
       {isCurrentAffairs && (
         <Card className="mb-5 p-4">
@@ -550,7 +837,7 @@ export default function RepositoryDetail() {
                     id="link-target"
                     value={linkTarget}
                     onChange={(e) => setLinkTarget(e.target.value)}
-                    className="flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    className="flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                   >
                     <option value="">Choose an item…</option>
                     {linkCandidates.map((c) => (
@@ -566,7 +853,7 @@ export default function RepositoryDetail() {
                     id="link-type"
                     value={linkType}
                     onChange={(e) => setLinkType(e.target.value as RelationshipType)}
-                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                   >
                     {MANUALLY_ASSIGNABLE_RELATIONSHIP_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -611,7 +898,7 @@ export default function RepositoryDetail() {
                   <Link
                     to={repositoryDetailPathFor(relatedEntry.entityType, relatedEntry.entityId)}
                     aria-label={`Open ${relatedEntry.title || 'Untitled'} (${relatedMeta.label})`}
-                    className="min-w-0 flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 rounded"
+                    className="min-w-0 flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 rounded"
                   >
                     <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{relatedEntry.title || 'Untitled'}</p>
                     <div className="mt-1 flex items-center gap-1.5">

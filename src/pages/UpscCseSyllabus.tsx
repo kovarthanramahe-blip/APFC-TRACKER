@@ -6,7 +6,7 @@ import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { Card, ProgressBar, PageHeader, Badge } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
-import { listImportedContentBySyllabusNode } from '../lib/repository';
+import { listImportedContentBySyllabusNodeIncludingClassifications } from '../lib/repository';
 import { UPSC_CSE_PRELIMS_PYQ_BANK } from '../data/pyqUpscCsePrelims';
 import { getMicrosyllabusCounts } from '../lib/upscCsePrelimsPyqFilters';
 import { computeUpscCsePrelimsPerformance, type UpscCsePrelimsMicrosyllabusPerformance } from '../lib/upscCsePrelimsPyqPerformance';
@@ -46,6 +46,7 @@ import {
 } from '../lib/upscCseGranularSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { getUpscSubjectColor } from '../lib/upscCseSubjectColors';
+import { countCuratedPyqsByGranularNode } from '../lib/upscCseGranularPyqMapping';
 
 // UPSC CSE Syllabus UI — the 4-level stage -> paper -> subject -> microsyllabus hierarchy
 // (lib/upscCseSyllabus.ts, data/upscCsePrelimsSyllabus.ts, data/upscCseMainsSyllabus.ts),
@@ -64,6 +65,14 @@ const STAGE_TABS: { stage: UpscCseExamStage; label: string; tree: UpscCseSyllabu
   { stage: 'prelims', label: 'Prelims', tree: UPSC_CSE_PRELIMS_SYLLABUS },
   { stage: 'mains', label: 'Mains', tree: UPSC_CSE_MAINS_SYLLABUS },
 ];
+
+// P2.0 — granular node id -> curated PYQ count, computed once from the real (static,
+// build-time-constant) UPSC_CSE_GRANULAR_PYQ_MAPPING. Deliberately NOT the same thing as the
+// `pyqCountByMicrosyllabus` map used by MicrosyllabusRow below (that one counts every PYQ under a
+// whole microsyllabus item, mapped or not); this one counts only PYQs with a curated, hand-verified
+// link to THIS EXACT granular node. A node with no curated PYQ simply has no entry here (`?? 0`
+// at each read site), never a visible "0 curated PYQs" badge.
+const CURATED_PYQ_COUNT_BY_GRANULAR_NODE = countCuratedPyqsByGranularNode();
 
 const COVERAGE_DOT_CLASS: Record<UpscCseCoverageState, string> = {
   not_started: 'bg-slate-300 dark:bg-slate-600',
@@ -154,6 +163,23 @@ function DerivedBadge() {
   );
 }
 
+// P2.0 — "N curated PYQs mapped to THIS granular node" (lib/upscCseGranularPyqMapping.ts), visually
+// distinct (gold tone) from the existing brand-coloured "N PYQs" link shown at the microsyllabus-row
+// level, which counts a different, broader thing (every PYQ under the whole microsyllabus item, see
+// CURATED_PYQ_COUNT_BY_GRANULAR_NODE's own comment above). Renders nothing for a count of 0 — never
+// a misleading "0 curated PYQs" badge.
+function CuratedPyqBadge({ nodeId }: { nodeId: string }) {
+  const count = CURATED_PYQ_COUNT_BY_GRANULAR_NODE[nodeId] ?? 0;
+  if (count <= 0) return null;
+  return (
+    <span title={`${count} PYQ${count === 1 ? '' : 's'} explicitly mapped to this topic (curated, not the broader microsyllabus count)`}>
+      <Badge tone="gold" className="shrink-0 gap-1">
+        <Target className="h-2.5 w-2.5" /> {count} curated PYQ{count === 1 ? '' : 's'}
+      </Badge>
+    </span>
+  );
+}
+
 function GranularMicroTopicRow({
   node,
   coverage,
@@ -177,7 +203,10 @@ function GranularMicroTopicRow({
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-sm text-slate-700 dark:text-slate-200">{node.title}</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="text-sm text-slate-700 dark:text-slate-200">{node.title}</p>
+          <CuratedPyqBadge nodeId={node.id} />
+        </div>
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{node.description}</p>
       </div>
       <CoverageStatePicker value={state} onChange={(next) => onSetCoverage(node.id, next)} />
@@ -224,6 +253,7 @@ function GranularSubtopicRow({
           {summary.weightedPct}%
         </span>
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600 dark:text-slate-300">{node.title}</span>
+        <CuratedPyqBadge nodeId={node.id} />
         <ChevronDown className={cx('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', expanded && 'rotate-180')} />
       </button>
       {expanded && (
@@ -286,6 +316,7 @@ function GranularTopicRow({
           {summary.weightedPct}%
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{node.title}</span>
+        <CuratedPyqBadge nodeId={node.id} />
         <ChevronDown className={cx('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', expanded && 'rotate-180')} />
       </button>
       {expanded && (
@@ -354,7 +385,26 @@ function MicrosyllabusRow({
   // this never needs its own workspace scoping. Shown only when > 0 (progressive disclosure — an
   // empty topic gets no badge at all, never a visible "0 linked").
   const importedContent = useAppStore((s) => s.importedContent);
-  const linkedCount = useMemo(() => listImportedContentBySyllabusNode(importedContent, item.id).length, [importedContent, item.id]);
+  // P1.2 — a Knowledge Librarian classification is always confirmed against a granular TOPIC-level
+  // id (e.g. "...__t-climatology"), never against this row's own microsyllabus id directly (see
+  // lib/upscCseKnowledgeTaxonomy.ts's listUpscCseTopicsFlat — a topic's `subjectId` is this
+  // microsyllabus item's id, but its own `topicId` is the granular node's own id, one level below).
+  // So a confirmed classification on any topic BENEATH this microsyllabus item must roll up into
+  // this row's own "N linked" count, or it would stay invisible here even after P1.1 made
+  // classifying a CSE article actually work (exactly the gap P1.2's audit found). Unioned, never
+  // double-counted: an item matching both the legacy metadata.syllabusNodeId field AND a confirmed
+  // classification still counts once.
+  const knowledgeClassifications = useAppStore((s) => s.knowledgeClassifications);
+  const allTopicIds = useMemo(() => getTopicsForMicrosyllabus(UPSC_CSE_GRANULAR_NODES, item.id).map((t) => t.id), [item.id]);
+  const linkedCount = useMemo(() => {
+    const linkedIds = new Set<string>();
+    for (const syllabusNodeId of [item.id, ...allTopicIds]) {
+      for (const entry of listImportedContentBySyllabusNodeIncludingClassifications(importedContent, syllabusNodeId, knowledgeClassifications)) {
+        linkedIds.add(entry.id);
+      }
+    }
+    return linkedIds.size;
+  }, [importedContent, knowledgeClassifications, item.id, allTopicIds]);
   const hasPerformanceSignal = !!pyqPerformance && pyqPerformance.attempted >= MIN_PYQ_ATTEMPTS_FOR_BADGE;
   const [isOpen, setIsOpen] = useState(isDeepLinked || !!deepLinkGranularId);
   // Every hook this component might need is called unconditionally, before the branch below, so

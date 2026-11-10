@@ -7,7 +7,6 @@ import {
   ListChecks,
   CheckCircle2,
   XCircle,
-  MinusCircle,
   Trophy,
   RotateCcw,
   ArrowLeft,
@@ -27,6 +26,7 @@ import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { SUBJECT_COLORS, getLocalDateString, cx, uuid } from '../lib/utils';
 import { Card, Button, Badge, PageHeader, ProgressBar, WorkspaceComingSoon } from '../components/ui/Primitives';
+import { shuffle, BookmarkButton, StatTile, StatusBadge, SelectChip } from '../components/ui/QuestionTestPrimitives';
 import { FormattedText } from '../components/ui/FormattedText';
 import type { PYQ, PYQAttempt, SubjectColorKey } from '../lib/types';
 import {
@@ -49,7 +49,6 @@ import {
   TOPIC_TITLES,
   MARKS_CORRECT,
   MARKS_WRONG,
-  type PyqQuestionStatus as QuestionStatus,
 } from '../lib/pyqPerformance';
 import { getDueItems } from '../lib/revisionQueue';
 import { computeUnifiedTopicStatus } from '../lib/topicStatus';
@@ -71,33 +70,7 @@ const YEAR_COUNTS = getYearCounts(PYQ_BANK);
 // rather than the engine hardcoding them. Module scope keeps its identity stable across renders.
 const PYQ_SCORING: QuestionSessionScoring<PYQ> = { marksCorrect: MARKS_CORRECT, marksWrong: MARKS_WRONG, statusOf };
 
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
 type Phase = 'select' | 'testing' | 'results' | 'review' | 'bookmarks' | 'analytics' | 'revise';
-
-function BookmarkButton({ pyqId }: { pyqId: string }) {
-  const isBookmarked = useAppStore((s) => s.bookmarkedPyqIds.includes(pyqId));
-  const toggleBookmarkedPyq = useAppStore((s) => s.toggleBookmarkedPyq);
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        toggleBookmarkedPyq(pyqId);
-      }}
-      title={isBookmarked ? 'Remove bookmark' : 'Bookmark this question'}
-      className={cx('shrink-0 rounded-lg p-1.5 transition-colors', isBookmarked ? 'text-gold-500' : 'text-slate-300 hover:text-gold-500 dark:text-slate-600')}
-    >
-      <Star className={cx('h-4.5 w-4.5', isBookmarked && 'fill-gold-400')} />
-    </button>
-  );
-}
 
 export default function PYQTest() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -448,11 +421,12 @@ export default function PYQTest() {
     if (!q || reviseChecked || reviseRecordedRef.current.has(q.id)) return;
     reviseRecordedRef.current.add(q.id);
     const today = getLocalDateString();
+    // P2.8 — a real checked answer, never a self-report: 'quiz'.
     if (reviseAnswer === q.correctOptionId) {
-      recordRevisionCorrect(q.id, today);
+      recordRevisionCorrect(q.id, today, 'quiz');
       setReviseCorrectCount((c) => c + 1);
     } else {
-      recordRevisionIncorrect(q.id, today);
+      recordRevisionIncorrect(q.id, today, 'quiz');
     }
     setReviseChecked(true);
   }
@@ -677,7 +651,7 @@ export default function PYQTest() {
                       </div>
                       <p className="text-sm font-medium text-slate-800 dark:text-slate-100 line-clamp-2">{q.question}</p>
                     </div>
-                    <BookmarkButton pyqId={q.id} />
+                    <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove bookmark" notBookmarkedTitle="Bookmark this question" />
                   </div>
                 </Card>
               );
@@ -745,7 +719,7 @@ export default function PYQTest() {
         <Card className="p-5 sm:p-6">
           <div className="mb-3 flex items-center justify-between gap-2">
             <Badge className={cx(colors.bg, colors.text)}>{TOPIC_TITLES[q.topicId] ?? q.subject}</Badge>
-            <BookmarkButton pyqId={q.id} />
+            <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove bookmark" notBookmarkedTitle="Bookmark this question" />
           </div>
           <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
 
@@ -1021,7 +995,7 @@ export default function PYQTest() {
               <Badge className={cx(colors.bg, colors.text)}>{topicTitle}</Badge>
               <StatusBadge status={status} />
             </div>
-            <BookmarkButton pyqId={q.id} />
+            <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove bookmark" notBookmarkedTitle="Bookmark this question" />
           </div>
           <FormattedText text={q.question} className="text-base font-medium text-slate-800 dark:text-slate-100" />
 
@@ -1143,7 +1117,7 @@ export default function PYQTest() {
       <Card className="p-5 sm:p-6">
         <div className="mb-3 flex items-center justify-between gap-2">
           <Badge className={cx(colors.bg, colors.text)}>{TOPIC_TITLES[q.topicId] ?? q.subject}</Badge>
-          <BookmarkButton pyqId={q.id} />
+          <BookmarkButton pyqId={q.id} bookmarkedTitle="Remove bookmark" notBookmarkedTitle="Bookmark this question" />
         </div>
         <motion.div
           key={q.id}
@@ -1245,21 +1219,6 @@ function TopicRow({ topic }: { topic: TopicPerf }) {
   );
 }
 
-function StatTile({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'success' | 'danger' | 'brand' }) {
-  const tones: Record<string, string> = {
-    neutral: 'text-slate-800 dark:text-slate-100',
-    success: 'text-emerald-600 dark:text-emerald-400',
-    danger: 'text-rose-600 dark:text-rose-400',
-    brand: 'text-brand-600 dark:text-brand-400',
-  };
-  return (
-    <Card className="p-4 text-center">
-      <p className={cx('font-display text-xl font-bold', tones[tone])}>{value}</p>
-      <p className="mt-0.5 text-[11px] text-slate-400">{label}</p>
-    </Card>
-  );
-}
-
 // Small, compact warning shown near the answer/explanation for disputed/provisional questions
 // only — cross_verified and official questions render nothing here. The note is the question's
 // own existing verificationNote, shown as-is (never invented or rewritten).
@@ -1285,40 +1244,3 @@ function VerificationBanner({ question }: { question: PYQ }) {
   );
 }
 
-function StatusBadge({ status }: { status: QuestionStatus }) {
-  if (status === 'correct') {
-    return (
-      <Badge tone="success">
-        <CheckCircle2 className="h-3 w-3" /> Correct
-      </Badge>
-    );
-  }
-  if (status === 'wrong') {
-    return (
-      <Badge tone="danger">
-        <XCircle className="h-3 w-3" /> Wrong
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="neutral">
-      <MinusCircle className="h-3 w-3" /> Unanswered
-    </Badge>
-  );
-}
-
-function SelectChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cx(
-        'inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors',
-        active
-          ? 'bg-brand-600 text-white border-brand-600'
-          : 'bg-transparent text-slate-500 border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:text-slate-400',
-      )}
-    >
-      {children}
-    </button>
-  );
-}

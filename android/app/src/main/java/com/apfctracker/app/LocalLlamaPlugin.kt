@@ -1,5 +1,6 @@
 package com.apfctracker.app
 
+import android.util.Log
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -170,6 +171,17 @@ class LocalLlamaPlugin : Plugin() {
         val maxOutputTokens = call.getInt("maxOutputTokens") ?: DEFAULT_MAX_OUTPUT_TOKENS
         activeStreams[requestId] = true
 
+        // Phase 13H — logs the already-existing, JS-generated `requestId` (never a new id, never
+        // a new JNI/plugin parameter) so this Kotlin-layer line can be matched, by chronological
+        // proximity in logcat, against the native `JarvisLlamaCpp` tag's own per-request timing
+        // lines (llama_cpp_backend.cpp). Only one request is ever in flight per runtime instance
+        // (NativeLlamaRuntime's own single-thread executor + activeStreams bookkeeping), so this
+        // best-effort, ordering-based correlation is reliable in practice without threading a new
+        // id across the JNI boundary. Never logs `prompt` itself — only its presence/length is
+        // implicit in the native-side line, which already logs length, not content.
+        val streamStartedAtMs = System.nanoTime() / 1_000_000
+        Log.i(TAG, "completeStreaming started requestId=$requestId maxOutputTokens=$maxOutputTokens")
+
         runtime.complete(prompt, maxOutputTokens, object : NativeLlamaStreamListener {
             override fun onToken(token: String) {
                 emitStreamEvent(requestId, "text_delta") { it.put("delta", token) }
@@ -177,6 +189,8 @@ class LocalLlamaPlugin : Plugin() {
 
             override fun onCompleted(promptTokens: Int, generatedTokens: Int) {
                 activeStreams.remove(requestId)
+                val elapsedMs = System.nanoTime() / 1_000_000 - streamStartedAtMs
+                Log.i(TAG, "completeStreaming completed requestId=$requestId promptTokens=$promptTokens generatedTokens=$generatedTokens elapsedMs=$elapsedMs")
                 emitStreamEvent(requestId, "completed") {
                     it.put("promptTokens", promptTokens)
                     it.put("generatedTokens", generatedTokens)
@@ -186,6 +200,7 @@ class LocalLlamaPlugin : Plugin() {
 
             override fun onCancelled() {
                 activeStreams.remove(requestId)
+                Log.i(TAG, "completeStreaming cancelled requestId=$requestId")
                 emitStreamEvent(requestId, "error") {
                     it.put("code", "cancelled")
                     it.put("message", "The request was cancelled.")
@@ -194,6 +209,7 @@ class LocalLlamaPlugin : Plugin() {
 
             override fun onError(message: String) {
                 activeStreams.remove(requestId)
+                Log.w(TAG, "completeStreaming error requestId=$requestId")
                 emitStreamEvent(requestId, "error") {
                     it.put("code", "unknown_error")
                     it.put("message", message)
@@ -233,5 +249,6 @@ class LocalLlamaPlugin : Plugin() {
 
     companion object {
         private const val DEFAULT_MAX_OUTPUT_TOKENS = 256
+        private const val TAG = "LocalLlamaPlugin"
     }
 }

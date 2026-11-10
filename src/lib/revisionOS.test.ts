@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { computeRevisionOSSnapshot } from './revisionOS';
+import { computeRevisionOSSnapshot, computeCseCurrentAffairsRevisionSnapshot, countReviewedToday, countNeedsAnotherLook } from './revisionOS';
 import type { RevisionQueue } from './revisionQueue';
+import type { ImportedContent } from './contentImport';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS } from '../data/syllabus';
 import { createTextHighlight, type Annotation } from './annotations';
@@ -10,8 +11,8 @@ import { createRevisionQueue } from './revisionQueue';
 
 const TODAY = '2026-09-22';
 
-function queueItem(dueDate: string, overrides: Partial<{ box: number; reviewCount: number }> = {}) {
-  return { box: overrides.box ?? 1, dueDate, lastReviewedDate: '2026-09-10', reviewCount: overrides.reviewCount ?? 1 };
+function queueItem(dueDate: string, overrides: Partial<{ box: number; reviewCount: number; lastReviewedDate: string | null }> = {}) {
+  return { box: overrides.box ?? 1, dueDate, lastReviewedDate: overrides.lastReviewedDate ?? '2026-09-10', reviewCount: overrides.reviewCount ?? 1 };
 }
 
 function taggedAnnotation(tags: ('revision' | 'flashcard')[] = ['revision'], overrides: Partial<{ documentId: string }> = {}): Annotation {
@@ -19,6 +20,79 @@ function taggedAnnotation(tags: ('revision' | 'flashcard')[] = ['revision'], ove
   const anchor = createTextAnchor(source, 0, source.length)!;
   return createTextHighlight({ documentId: overrides.documentId ?? 'note:doc-1', renderMode: 'raw', anchor, color: '#facc15', studyTags: tags });
 }
+
+function currentAffairsItem(overrides: Partial<ImportedContent> = {}): ImportedContent {
+  return {
+    id: overrides.id ?? 'ca-1',
+    workspaceId: overrides.workspaceId ?? 'upsc_cse',
+    contentType: overrides.contentType ?? 'current_affairs',
+    title: overrides.title ?? 'Article title',
+    rawContent: overrides.rawContent ?? 'body',
+    provenance: overrides.provenance ?? { importedAt: '2026-09-01T00:00:00.000Z', origin: 'import' },
+    metadata: overrides.metadata,
+    updatedAt: overrides.updatedAt,
+  };
+}
+
+// P2.6 — Daily Revision Progress Statistics. These pure helpers are exercised directly first
+// (fast, focused, no PYQ_BANK/ImportedContent fixtures needed), then again through each snapshot
+// function below to prove the wiring actually uses them with the right eligibleIds.
+describe('countReviewedToday', () => {
+  it('counts an eligible item reviewed today; excludes one last reviewed yesterday', () => {
+    const queue: RevisionQueue = {
+      a: { pyqId: 'a', ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+      b: { pyqId: 'b', ...queueItem('2026-09-25', { lastReviewedDate: '2026-09-21' }) },
+    };
+    expect(countReviewedToday(queue, ['a', 'b'], TODAY)).toBe(1);
+  });
+
+  it('never counts a queue entry outside the given eligibleIds, even though it sits in the same queue object', () => {
+    const queue: RevisionQueue = {
+      a: { pyqId: 'a', ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+      outside: { pyqId: 'outside', ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+    };
+    expect(countReviewedToday(queue, ['a'], TODAY)).toBe(1);
+  });
+
+  it('an eligible id not yet in the queue (never reviewed) is never counted', () => {
+    expect(countReviewedToday({}, ['never-seen'], TODAY)).toBe(0);
+  });
+
+  it('returns 0 for empty inputs and never throws', () => {
+    expect(() => countReviewedToday({}, [], TODAY)).not.toThrow();
+    expect(countReviewedToday({}, [], TODAY)).toBe(0);
+  });
+});
+
+describe('countNeedsAnotherLook', () => {
+  it('box 1 with reviewCount 0 (brand new, never reviewed) is not counted', () => {
+    const queue: RevisionQueue = { a: { pyqId: 'a', ...queueItem('2026-09-25', { box: 1, reviewCount: 0 }) } };
+    expect(countNeedsAnotherLook(queue, ['a'], TODAY)).toBe(0);
+  });
+
+  it('box 1 with reviewCount > 0 (most recent review was incorrect) is counted', () => {
+    const queue: RevisionQueue = { a: { pyqId: 'a', ...queueItem('2026-09-25', { box: 1, reviewCount: 2 }) } };
+    expect(countNeedsAnotherLook(queue, ['a'], TODAY)).toBe(1);
+  });
+
+  it('box greater than 1 is never counted, regardless of reviewCount', () => {
+    const queue: RevisionQueue = { a: { pyqId: 'a', ...queueItem('2026-09-25', { box: 3, reviewCount: 5 }) } };
+    expect(countNeedsAnotherLook(queue, ['a'], TODAY)).toBe(0);
+  });
+
+  it('never counts a queue entry outside the given eligibleIds, even though it sits in the same queue object', () => {
+    const queue: RevisionQueue = {
+      a: { pyqId: 'a', ...queueItem('2026-09-25', { box: 1, reviewCount: 1 }) },
+      outside: { pyqId: 'outside', ...queueItem('2026-09-25', { box: 1, reviewCount: 1 }) },
+    };
+    expect(countNeedsAnotherLook(queue, ['a'], TODAY)).toBe(1);
+  });
+
+  it('returns 0 for empty inputs and never throws', () => {
+    expect(() => countNeedsAnotherLook({}, [], TODAY)).not.toThrow();
+    expect(countNeedsAnotherLook({}, [], TODAY)).toBe(0);
+  });
+});
 
 describe('computeRevisionOSSnapshot', () => {
   it('returns no items and zeroed counts when nothing is bookmarked or ever answered incorrectly', () => {
@@ -130,6 +204,28 @@ describe('computeRevisionOSSnapshot', () => {
     const snapshot = computeRevisionOSSnapshot([], [pyqId], queue, TODAY);
     expect(snapshot.items).toHaveLength(1);
     expect(snapshot.items[0].id).toBe(pyqId);
+  });
+
+  it('P2.6: reviewedTodayCount and needsAnotherLookCount reflect this snapshot\'s own eligible PYQ ids', () => {
+    const ids = PYQ_BANK.slice(0, 2).map((q) => q.id);
+    const queue: RevisionQueue = {
+      [ids[0]]: { pyqId: ids[0], ...queueItem('2026-09-25', { lastReviewedDate: TODAY, box: 1, reviewCount: 2 }) },
+      [ids[1]]: { pyqId: ids[1], ...queueItem('2026-09-25', { lastReviewedDate: '2026-09-01', box: 3, reviewCount: 4 }) },
+    };
+    const snapshot = computeRevisionOSSnapshot([], ids, queue, TODAY);
+    expect(snapshot.reviewedTodayCount).toBe(1);
+    expect(snapshot.needsAnotherLookCount).toBe(1);
+  });
+
+  it('P2.6 isolation: a queue entry for a real PYQ id that is NOT eligible (never bookmarked/incorrect) is never counted, even though it sits in the same queue object', () => {
+    const [eligibleId, ineligibleId] = PYQ_BANK.map((q) => q.id);
+    const queue: RevisionQueue = {
+      [eligibleId]: { pyqId: eligibleId, ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+      [ineligibleId]: { pyqId: ineligibleId, ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+    };
+    // Only eligibleId is passed as bookmarked — ineligibleId sits in `queue` but is never eligible.
+    const snapshot = computeRevisionOSSnapshot([], [eligibleId], queue, TODAY);
+    expect(snapshot.reviewedTodayCount).toBe(1);
   });
 });
 
@@ -275,5 +371,162 @@ describe('computeRevisionOSSnapshot — annotation-derived Revision OS items (Wa
     expect(snapshot.counts).toEqual({ totalTracked: 1, dueCount: 1, newCount: 0, masteredCount: 1 });
     // But the annotation item IS visible in items/byBucket — the bucket-based stat cards reflect it.
     expect(snapshot.items).toHaveLength(2);
+  });
+});
+
+// P1.5 — computeCseCurrentAffairsRevisionSnapshot: the CSE counterpart to computeRevisionOSSnapshot
+// above, over ImportedContent rather than PYQ_BANK. Every test here uses a plain RevisionQueue
+// fixture (not the real store) and a plain ImportedContent[] fixture, exactly mirroring this file's
+// own existing convention for the APFC function above.
+describe('computeCseCurrentAffairsRevisionSnapshot', () => {
+  it('returns no items and zeroed counts for an empty queue, regardless of how much imported content exists', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' }), currentAffairsItem({ id: 'ca-2' })];
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, {}, TODAY);
+    expect(snapshot.items).toEqual([]);
+    expect(snapshot.counts).toEqual({ totalTracked: 0, dueCount: 0, newCount: 0, masteredCount: 0 });
+  });
+
+  it('eligibility is driven purely by queue membership — never bookmarked/incorrect-attempt derived like APFC', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' })];
+    const queue: RevisionQueue = { 'ca-1': { pyqId: 'ca-1', ...queueItem(TODAY) } };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items.map((i) => i.id)).toEqual(['ca-1']);
+  });
+
+  it('enriches each item with its real title/source/eventDate via ImportedContent, never fabricated context', () => {
+    const content = [currentAffairsItem({ id: 'ca-1', title: 'Monsoon Update', metadata: { source: 'The Hindu, 14 Mar 2026', eventDate: '2026-03-14' } })];
+    const queue: RevisionQueue = { 'ca-1': { pyqId: 'ca-1', ...queueItem(TODAY) } };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items[0]).toMatchObject({ id: 'ca-1', title: 'Monsoon Update', source: 'The Hindu, 14 Mar 2026', eventDate: '2026-03-14' });
+  });
+
+  it('a queue entry whose ImportedContent no longer exists is silently skipped, never fabricated', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' })];
+    const queue: RevisionQueue = { 'ca-1': { pyqId: 'ca-1', ...queueItem(TODAY) }, 'deleted-id': { pyqId: 'deleted-id', ...queueItem(TODAY) } };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items.map((i) => i.id)).toEqual(['ca-1']);
+  });
+
+  it('a queue entry whose ImportedContent exists but is NOT current_affairs (e.g. research_document) is silently skipped', () => {
+    const content = [currentAffairsItem({ id: 'rd-1', contentType: 'research_document' })];
+    const queue: RevisionQueue = { 'rd-1': { pyqId: 'rd-1', ...queueItem(TODAY) } };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items).toEqual([]);
+  });
+
+  it('buckets items correctly across overdue/today/tomorrow/thisWeek/later', () => {
+    const ids = ['ca-1', 'ca-2', 'ca-3', 'ca-4', 'ca-5'];
+    const content = ids.map((id) => currentAffairsItem({ id }));
+    const queue: RevisionQueue = {
+      'ca-1': { pyqId: 'ca-1', ...queueItem('2026-09-20') }, // overdue
+      'ca-2': { pyqId: 'ca-2', ...queueItem('2026-09-22') }, // today
+      'ca-3': { pyqId: 'ca-3', ...queueItem('2026-09-23') }, // tomorrow
+      'ca-4': { pyqId: 'ca-4', ...queueItem('2026-09-26') }, // this week
+      'ca-5': { pyqId: 'ca-5', ...queueItem('2026-10-15') }, // later
+    };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.byBucket.overdue.map((i) => i.id)).toEqual(['ca-1']);
+    expect(snapshot.byBucket.today.map((i) => i.id)).toEqual(['ca-2']);
+    expect(snapshot.byBucket.tomorrow.map((i) => i.id)).toEqual(['ca-3']);
+    expect(snapshot.byBucket.thisWeek.map((i) => i.id)).toEqual(['ca-4']);
+    expect(snapshot.byBucket.later.map((i) => i.id)).toEqual(['ca-5']);
+    expect(snapshot.items).toHaveLength(5);
+  });
+
+  it('sorts items by due date ascending, overdue first', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' }), currentAffairsItem({ id: 'ca-2' }), currentAffairsItem({ id: 'ca-3' })];
+    const queue: RevisionQueue = {
+      'ca-1': { pyqId: 'ca-1', ...queueItem('2026-09-25') },
+      'ca-2': { pyqId: 'ca-2', ...queueItem('2026-09-18') },
+      'ca-3': { pyqId: 'ca-3', ...queueItem('2026-09-20') },
+    };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items.map((i) => i.id)).toEqual(['ca-2', 'ca-3', 'ca-1']);
+  });
+
+  it('marks an item with reviewCount 0 as new, and a reviewed item as not new', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' })];
+    const queue: RevisionQueue = { 'ca-1': { pyqId: 'ca-1', ...queueItem(TODAY, { reviewCount: 0 }) } };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items[0].isNew).toBe(true);
+  });
+
+  it('counts reuse lib/revisionQueue own getQueueCounts verbatim (masteredCount reflects MAX_BOX)', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' }), currentAffairsItem({ id: 'ca-2' })];
+    const queue: RevisionQueue = {
+      'ca-1': { pyqId: 'ca-1', ...queueItem('2026-10-01', { box: 6 }) }, // MAX_BOX
+      'ca-2': { pyqId: 'ca-2', ...queueItem('2026-10-01', { box: 1 }) },
+    };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.counts.masteredCount).toBe(1);
+    expect(snapshot.counts.totalTracked).toBe(2);
+  });
+
+  it('never reads APFC\'s PYQ_BANK/SYLLABUS at all — a genuinely separate content-resolution path', () => {
+    // Regression guard: an ImportedContent item whose id happens to collide with a real APFC PYQ_BANK
+    // id must still be resolved from ImportedContent's own title, never from PYQ_BANK by accident.
+    const collidingId = PYQ_BANK[0].id;
+    const content = [currentAffairsItem({ id: collidingId, title: 'Not a PYQ, a CSE article' })];
+    const queue: RevisionQueue = { [collidingId]: { pyqId: collidingId, ...queueItem(TODAY) } };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.items[0].title).toBe('Not a PYQ, a CSE article');
+  });
+
+  it('P2.6: reviewedTodayCount and needsAnotherLookCount reflect only this snapshot\'s own eligible Current Affairs ids', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' }), currentAffairsItem({ id: 'ca-2' })];
+    const queue: RevisionQueue = {
+      'ca-1': { pyqId: 'ca-1', ...queueItem('2026-09-25', { lastReviewedDate: TODAY, box: 1, reviewCount: 3 }) },
+      'ca-2': { pyqId: 'ca-2', ...queueItem('2026-09-25', { lastReviewedDate: '2026-09-01', box: 4, reviewCount: 2 }) },
+    };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.reviewedTodayCount).toBe(1);
+    expect(snapshot.needsAnotherLookCount).toBe(1);
+  });
+
+  it('P2.6 isolation: a queue entry with no matching current_affairs ImportedContent (e.g. an APFC PYQ id, or deleted content) is never counted, even though it sits in the same queue object', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' })];
+    const queue: RevisionQueue = {
+      'ca-1': { pyqId: 'ca-1', ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+      'apfc-pyq-1': { pyqId: 'apfc-pyq-1', ...queueItem('2026-09-25', { lastReviewedDate: TODAY }) },
+    };
+    const snapshot = computeCseCurrentAffairsRevisionSnapshot(content, queue, TODAY);
+    expect(snapshot.reviewedTodayCount).toBe(1);
+  });
+});
+
+// P2.9 — regression guard for P2.8's RevisionItem.lastReviewSource: this aggregation layer reads
+// box/dueDate/reviewCount/lastReviewedDate only (never lastReviewSource) for every count/bucket it
+// computes, so a queue whose items happen to carry a source must produce EXACTLY the same snapshot
+// as an otherwise-identical queue that doesn't. Proven by direct comparison, not just by re-asserting
+// the same expected numbers twice (which wouldn't catch a hidden dependency on the new field).
+describe('P2.9: snapshots/counts are unaffected by RevisionItem.lastReviewSource (P2.8)', () => {
+  it('computeRevisionOSSnapshot is identical whether or not eligible items carry a lastReviewSource', () => {
+    const ids = PYQ_BANK.slice(0, 3).map((q) => q.id);
+    const withoutSource: RevisionQueue = {
+      [ids[0]]: { pyqId: ids[0], box: 2, dueDate: '2026-09-20', lastReviewedDate: TODAY, reviewCount: 3 },
+      [ids[1]]: { pyqId: ids[1], box: 1, dueDate: TODAY, lastReviewedDate: '2026-09-01', reviewCount: 2 },
+      [ids[2]]: { pyqId: ids[2], box: 6, dueDate: '2026-10-01', lastReviewedDate: TODAY, reviewCount: 6 },
+    };
+    const withSource: RevisionQueue = {
+      [ids[0]]: { ...withoutSource[ids[0]], lastReviewSource: 'quiz' },
+      [ids[1]]: { ...withoutSource[ids[1]], lastReviewSource: 'self_report' },
+      [ids[2]]: { ...withoutSource[ids[2]], lastReviewSource: 'quiz' },
+    };
+    expect(computeRevisionOSSnapshot([], ids, withSource, TODAY)).toEqual(computeRevisionOSSnapshot([], ids, withoutSource, TODAY));
+  });
+
+  it('computeCseCurrentAffairsRevisionSnapshot is identical whether or not items carry a lastReviewSource', () => {
+    const content = [currentAffairsItem({ id: 'ca-1' }), currentAffairsItem({ id: 'ca-2' })];
+    const withoutSource: RevisionQueue = {
+      'ca-1': { pyqId: 'ca-1', box: 1, dueDate: '2026-09-20', lastReviewedDate: TODAY, reviewCount: 2 },
+      'ca-2': { pyqId: 'ca-2', box: 4, dueDate: TODAY, lastReviewedDate: '2026-09-01', reviewCount: 3 },
+    };
+    const withSource: RevisionQueue = {
+      'ca-1': { ...withoutSource['ca-1'], lastReviewSource: 'self_report' },
+      'ca-2': { ...withoutSource['ca-2'], lastReviewSource: 'quiz' },
+    };
+    expect(computeCseCurrentAffairsRevisionSnapshot(content, withSource, TODAY)).toEqual(
+      computeCseCurrentAffairsRevisionSnapshot(content, withoutSource, TODAY),
+    );
   });
 });

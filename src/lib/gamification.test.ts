@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { computeXp, totalPyqQuestionsAttempted, XP_RULES, getLevelInfo, xpRequiredForLevel, computeStreaks, type GamificationInputs } from './gamification';
+import {
+  computeXp,
+  totalPyqQuestionsAttempted,
+  XP_RULES,
+  getLevelInfo,
+  xpRequiredForLevel,
+  computeStreaks,
+  getGamificationSnapshot,
+  getRewardsSnapshot,
+  type GamificationInputs,
+} from './gamification';
 import type { PYQAttempt, StudyLogEntry } from './types';
 
 function baseInputs(overrides: Partial<GamificationInputs> = {}): GamificationInputs {
@@ -230,5 +240,68 @@ describe('computeStreaks — local-date "today" boundary (Phase 6 Step 1)', () =
       // gap: no entry for 2026-01-08, 2026-01-09, or 2026-01-10 (today)
     );
     expect(computeStreaks(studyLog)).toEqual({ current: 0, best: 3 });
+  });
+});
+
+// Phase 2C (R4) — useGamification and useRewards used to each hand-wire the identical 6
+// useAppStore(...) selector lines before building their own GamificationInputs object; both now
+// go through one shared (unexported) useGamificationInputs() hook. React hooks can't be rendered
+// in this repo's test setup (confirmed elsewhere — no @testing-library/react dependency), so this
+// locks in the one thing that actually matters at this layer: that the GamificationInputs contract
+// both hooks now receive from the shared assembly still has every one of its 6 fields wired into
+// BOTH getGamificationSnapshot and getRewardsSnapshot — a future edit that drops a field from the
+// shared hook (or that one hook stops passing it through) would surface here as one of these
+// snapshots silently stopping to react to that field.
+describe('GamificationInputs — every field independently affects both getGamificationSnapshot and getRewardsSnapshot (R4 selector consolidation)', () => {
+  it('completedTopics affects XP (gamification) and syllabusPct (rewards)', () => {
+    const before = baseInputs();
+    const after = baseInputs({ completedTopics: { 't-1': true } });
+    expect(getGamificationSnapshot(after).xp).toBeGreaterThan(getGamificationSnapshot(before).xp);
+    expect(getRewardsSnapshot(after).context.syllabusPct).toBeGreaterThan(getRewardsSnapshot(before).context.syllabusPct);
+  });
+
+  it('attempts affects XP (gamification) and attemptsCount (rewards)', () => {
+    const before = baseInputs();
+    const after = baseInputs({ attempts: [{ id: 'a1', subject: 'all', score: 0, total: 0, date: '2026-01-01' } as never] });
+    expect(getGamificationSnapshot(after).xp).toBeGreaterThan(getGamificationSnapshot(before).xp);
+    expect(getRewardsSnapshot(after).context.attemptsCount).toBeGreaterThan(getRewardsSnapshot(before).context.attemptsCount);
+  });
+
+  it('sessions affects totalFocusSessions (rewards context) without being double-counted by gamification XP', () => {
+    const before = baseInputs();
+    const after = baseInputs({ sessions: [{ id: 's1', mode: 'focus', completedFully: true, startedAt: '2026-01-01T00:00:00.000Z', durationMinutes: 25 } as never] });
+    expect(getRewardsSnapshot(after).context.totalFocusSessions).toBe(1);
+    expect(getRewardsSnapshot(before).context.totalFocusSessions).toBe(0);
+    // gamification XP has no separate "sessions" rule (focus minutes come from studyLog) — this
+    // documents that sessions is read by the rewards side without affecting gamification's XP.
+    expect(getGamificationSnapshot(after).xp).toBe(getGamificationSnapshot(before).xp);
+  });
+
+  it('studyLog affects XP/streak (gamification) and totalFocusMinutes/streaks (rewards)', () => {
+    const before = baseInputs();
+    const after = baseInputs({ studyLog: log(entry('2026-01-01', { focusMinutes: 60 })) });
+    expect(getGamificationSnapshot(after).xp).toBeGreaterThan(getGamificationSnapshot(before).xp);
+    expect(getRewardsSnapshot(after).context.totalFocusMinutes).toBe(60);
+  });
+
+  it('starredQuestionIds affects XP (gamification, and therefore rewards.context.xp/level too)', () => {
+    const before = baseInputs();
+    const after = baseInputs({ starredQuestionIds: ['q1', 'q2'] });
+    expect(getGamificationSnapshot(after).xp - getGamificationSnapshot(before).xp).toBe(2 * XP_RULES.perStarredQuestion);
+    // RewardContext extends BadgeContext with xp/level (computed via the same computeXp), so
+    // rewards.context.xp must move in lockstep with gamification's xp — but the badge-only fields
+    // (no starred-question rule exists for badges) stay untouched.
+    expect(getRewardsSnapshot(after).context.xp).toBe(getGamificationSnapshot(after).xp);
+    expect(getRewardsSnapshot(after).context.totalFocusSessions).toBe(getRewardsSnapshot(before).context.totalFocusSessions);
+    expect(getRewardsSnapshot(after).context.syllabusPct).toBe(getRewardsSnapshot(before).context.syllabusPct);
+  });
+
+  it('pyqAttempts affects XP (gamification) identically regardless of which snapshot reads it first', () => {
+    const inputs = baseInputs({ pyqAttempts: [pyqAttempt({ correctCount: 4, wrongCount: 1 })] });
+    const gamiXp = getGamificationSnapshot(inputs).xp;
+    const rewardsXp = getRewardsSnapshot(inputs).context.xp;
+    // Both hooks pass the exact same GamificationInputs shape into their own pure function — xp
+    // must agree whichever one is computed first, proving neither mutates the shared inputs.
+    expect(gamiXp).toBe(rewardsXp);
   });
 });

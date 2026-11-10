@@ -12,6 +12,7 @@ import { SUBJECT_COLORS, cx } from '../lib/utils';
 import { Card, Badge, Button, PageHeader, fadeUp } from '../components/ui/Primitives';
 import { buildQuestionCatalog, type CatalogQuestion } from '../lib/questionCatalog';
 import { classifyMockAnswerStatus, matchesMockReviewFilter, MOCK_REVIEW_FILTERS, type MockReviewFilter } from '../lib/mockTestReview';
+import { CHART_COLORS } from '../lib/chartColors';
 
 const REVIEW_FILTER_LABELS: Record<MockReviewFilter, string> = { all: 'All', wrong: 'Wrong', unanswered: 'Skipped', correct: 'Correct' };
 
@@ -94,13 +95,13 @@ export default function MockTestResult() {
             <div className="h-72 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-30} textAnchor="end" height={60} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" allowDecimals={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                  <Bar dataKey="Correct" stackId="a" fill="#059669" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="Wrong" stackId="a" fill="#e11d48" />
-                  <Bar dataKey="Skipped" stackId="a" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-30} textAnchor="end" height={60} stroke={CHART_COLORS.axis} />
+                  <YAxis tick={{ fontSize: 11 }} stroke={CHART_COLORS.axis} allowDecimals={false} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${CHART_COLORS.tooltipBorder}`, fontSize: 12 }} />
+                  <Bar dataKey="Correct" stackId="a" fill={CHART_COLORS.success} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="Wrong" stackId="a" fill={CHART_COLORS.danger} />
+                  <Bar dataKey="Skipped" stackId="a" fill={CHART_COLORS.neutral} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

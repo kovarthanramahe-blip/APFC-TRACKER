@@ -47,11 +47,16 @@ export function StudyProgressInsightsCard({
   insights,
   accent,
   progressLabel = 'Completion',
+  totalSessionsCompleted,
   className,
 }: {
   insights: StudyProgressInsights;
   accent: WorkspaceAccent;
   progressLabel?: string;
+  /** Optional — when passed, appended to the "Total activity" stat's caption (e.g. "12 Pomodoro
+   * sessions completed"). APFC's Dashboard.tsx is the only caller with this number on hand today;
+   * omitted everywhere else, which leaves their rendered output exactly as before. */
+  totalSessionsCompleted?: number;
   /** Spacing is left to the caller (each dashboard already has its own convention — a
    * `space-y-*` wrapper vs. an explicit `mt-6` per card) rather than assumed here. */
   className?: string;
@@ -89,7 +94,10 @@ export function StudyProgressInsightsCard({
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Total activity</p>
           <p className="mt-1 font-display text-xl font-bold text-slate-900 dark:text-white">{formatMinutes(insights.totalActivity.focusMinutes)}</p>
-          <p className="mt-0.5 text-xs text-slate-400">{insights.totalActivity.activeDays} active day{insights.totalActivity.activeDays === 1 ? '' : 's'} all-time</p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            {insights.totalActivity.activeDays} active day{insights.totalActivity.activeDays === 1 ? '' : 's'} all-time
+            {totalSessionsCompleted !== undefined && ` · ${totalSessionsCompleted} Pomodoro session${totalSessionsCompleted === 1 ? '' : 's'}`}
+          </p>
         </div>
       </div>
 

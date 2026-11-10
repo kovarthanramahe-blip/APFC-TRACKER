@@ -165,3 +165,31 @@ describe('hasMeaningfulData — folder-only activity', () => {
     ).toBe(false);
   });
 });
+
+// P2.4 (Revision Data Integrity) — same "one field's own activity is enough" discipline as every
+// block above: a user whose only progress is Leitner spaced-repetition scheduling (box/dueDate/
+// reviewCount per item, never anything else) must never be treated as having no meaningful data —
+// that would let an empty cloud row silently reset their whole revision history.
+describe('hasMeaningfulData — revision-queue-only activity', () => {
+  it('returns true when only revisionQueue is non-empty', () => {
+    expect(hasMeaningfulData({ revisionQueue: { 'pyq-1': { pyqId: 'pyq-1', box: 2, dueDate: '2026-01-05', lastReviewedDate: '2026-01-01', reviewCount: 1 } } })).toBe(true);
+  });
+
+  it('returns false when revisionQueue is present but empty, alongside every other known empty field', () => {
+    expect(
+      hasMeaningfulData({
+        completedTopics: {},
+        notes: [],
+        attempts: [],
+        sessions: [],
+        studyLog: {},
+        starredQuestionIds: [],
+        pyqAttempts: [],
+        bookmarkedPyqIds: [],
+        annotations: [],
+        folders: [],
+        revisionQueue: {},
+      }),
+    ).toBe(false);
+  });
+});

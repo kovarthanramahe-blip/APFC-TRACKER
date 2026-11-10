@@ -11,6 +11,7 @@ import {
   BOX_INTERVALS_DAYS,
   MAX_BOX,
   type RevisionQueue,
+  type RevisionItem,
 } from './revisionQueue';
 
 const TODAY = '2026-01-08';
@@ -226,6 +227,69 @@ describe('addItem', () => {
     expect(queue['ca-1'].box).toBe(2);
     queue = recordIncorrect(queue, 'ca-1', '2026-01-10');
     expect(queue['ca-1'].box).toBe(1);
+  });
+});
+
+// --- P2.8: Revision Review Provenance (lastReviewSource) ---------------------------------------
+describe('lastReviewSource (P2.8)', () => {
+  it('recordCorrect stores the given source and preserves correct-answer scheduling', () => {
+    const queue = recordCorrect({}, 'q1', TODAY, 'quiz');
+    expect(queue.q1.lastReviewSource).toBe('quiz');
+    expect(queue.q1.box).toBe(2); // unchanged scheduling behaviour
+    expect(queue.q1.reviewCount).toBe(1);
+  });
+
+  it('recordIncorrect stores the given source and preserves the incorrect-review reset', () => {
+    const existing: RevisionQueue = { q1: { pyqId: 'q1', box: 4, dueDate: TODAY, lastReviewedDate: '2026-01-01', reviewCount: 5 } };
+    const next = recordIncorrect(existing, 'q1', TODAY, 'quiz');
+    expect(next.q1.lastReviewSource).toBe('quiz');
+    expect(next.q1.box).toBe(1); // unchanged reset-to-box-1 behaviour
+  });
+
+  it('recordCorrect/recordIncorrect accept "self_report" identically to "quiz" — the engine itself has no preference between sources', () => {
+    const correct = recordCorrect({}, 'q1', TODAY, 'self_report');
+    expect(correct.q1.lastReviewSource).toBe('self_report');
+    expect(correct.q1.box).toBe(2);
+
+    const incorrect = recordIncorrect({ q1: { pyqId: 'q1', box: 3, dueDate: TODAY, lastReviewedDate: TODAY, reviewCount: 2 } }, 'q1', TODAY, 'self_report');
+    expect(incorrect.q1.lastReviewSource).toBe('self_report');
+    expect(incorrect.q1.box).toBe(1);
+  });
+
+  it('existing callers that omit the source remain fully backward compatible: scheduling is identical, and lastReviewSource is left undefined rather than fabricated', () => {
+    const withSource = recordCorrect({}, 'q1', TODAY, 'quiz');
+    const withoutSource = recordCorrect({}, 'q1', TODAY);
+    expect(withoutSource.q1.lastReviewSource).toBeUndefined();
+    // Every OTHER field is byte-identical regardless of whether a source was passed.
+    const { lastReviewSource: _ws, ...restWith } = withSource.q1;
+    const { lastReviewSource: _wos, ...restWithout } = withoutSource.q1;
+    expect(restWithout).toEqual(restWith);
+  });
+
+  it('a legacy item with no lastReviewSource key at all still loads and schedules correctly — getOrCreateItem/recordCorrect never throw or reset it', () => {
+    const legacyItem: RevisionItem = { pyqId: 'legacy-1', box: 3, dueDate: TODAY, lastReviewedDate: '2026-01-01', reviewCount: 4 };
+    const legacyQueue: RevisionQueue = { 'legacy-1': legacyItem };
+    expect(getOrCreateItem(legacyQueue, 'legacy-1', TODAY)).toEqual(legacyItem);
+
+    const next = recordCorrect(legacyQueue, 'legacy-1', TODAY, 'quiz');
+    expect(next['legacy-1'].box).toBe(4); // advanced from the legacy item's own box, not reset
+    expect(next['legacy-1'].reviewCount).toBe(5); // advanced from the legacy item's own count, not reset
+    expect(next['legacy-1'].lastReviewSource).toBe('quiz');
+  });
+
+  it('a brand-new item (createInitialRevisionItem/addItem) has no lastReviewSource at all — never reviewed, so no provenance to report', () => {
+    expect(createInitialRevisionItem('q1', TODAY).lastReviewSource).toBeUndefined();
+    expect(addItem({}, 'q1', TODAY)['q1'].lastReviewSource).toBeUndefined();
+  });
+
+  it('setting one item\'s source never touches an unrelated item\'s own source', () => {
+    const queue: RevisionQueue = {
+      q1: { pyqId: 'q1', box: 1, dueDate: TODAY, lastReviewedDate: TODAY, reviewCount: 1, lastReviewSource: 'quiz' },
+      q2: { pyqId: 'q2', box: 1, dueDate: TODAY, lastReviewedDate: TODAY, reviewCount: 1, lastReviewSource: 'self_report' },
+    };
+    const next = recordCorrect(queue, 'q1', TODAY, 'self_report');
+    expect(next.q1.lastReviewSource).toBe('self_report');
+    expect(next.q2).toEqual(queue.q2); // q2 completely untouched, including its own source
   });
 });
 

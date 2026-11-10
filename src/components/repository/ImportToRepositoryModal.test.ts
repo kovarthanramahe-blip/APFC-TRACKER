@@ -20,6 +20,7 @@ import { REPOSITORY_CONTENT_TYPE_REGISTRY, type RepositoryContentType } from '..
 import { queryImportedContent } from '../../lib/importedContentRepository';
 import type { Note } from '../../lib/types';
 import { showsCurrentAffairsFields, buildMetadata, buildSyllabusNodeOptions } from './ImportToRepositoryModal';
+import { ingestMarkdownAsArticles, buildDocumentTypeMetadata } from '../../lib/knowledgeIngestion';
 
 // This component has no rendering test here (no React Testing Library / DOM environment in this
 // repo — see every other *.test.ts file for the established convention). These tests exercise
@@ -50,6 +51,7 @@ function fullReset() {
     revisionQueue: createRevisionQueue(),
     importedContent: [],
     contentRelationships: [],
+    knowledgeClassifications: [],
   });
 }
 
@@ -64,8 +66,8 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
 }
 
 describe('Global Repository Import — file type support', () => {
-  it('accepts every supported extension: .md, .markdown, .docx, .pdf, .txt, .csv, .json', () => {
-    expect(SUPPORTED_IMPORT_EXTENSIONS).toEqual(['.md', '.markdown', '.docx', '.pdf', '.txt', '.csv', '.json']);
+  it('accepts every supported extension: .md, .markdown, .docx, .pdf, .txt, .csv, .json, .png, .jpg, .jpeg, .webp', () => {
+    expect(SUPPORTED_IMPORT_EXTENSIONS).toEqual(['.md', '.markdown', '.docx', '.pdf', '.txt', '.csv', '.json', '.png', '.jpg', '.jpeg', '.webp']);
     for (const [name, size] of [
       ['a.md', 100],
       ['a.markdown', 100],
@@ -74,6 +76,10 @@ describe('Global Repository Import — file type support', () => {
       ['a.txt', 100],
       ['a.csv', 100],
       ['a.json', 100],
+      ['a.png', 100],
+      ['a.jpg', 100],
+      ['a.jpeg', 100],
+      ['a.webp', 100],
     ] as const) {
       expect(validateImportFile({ name, size }).valid).toBe(true);
     }
@@ -444,6 +450,49 @@ describe('Global Repository Import — imported-content persistence', () => {
   });
 });
 
+// Smart Document Upload — the single-document save path (handleConfirm's `else` branch, line
+// ~324) merges buildDocumentTypeMetadata's own output with the user's manually-entered metadata
+// (tags/category/description/etc.) before calling confirmImportedContent, exactly the same
+// composition exercised directly here. This locks in the actual persisted shape the modal's save
+// handler produces, independent of lib/documentTypeClassification.test.ts's own unit coverage of
+// the classifier itself and lib/knowledgeIngestion.test.ts's coverage of the multi-article path.
+describe('Global Repository Import — Smart Document Upload: document-type metadata on the single-document save path', () => {
+  beforeEach(fullReset);
+
+  it('a saved document carries an automatic document-type proposal merged in alongside user-entered metadata', () => {
+    const documentTypeProposal = buildDocumentTypeMetadata(
+      'Government of India, Ministry of Labour. Office Memorandum. In pursuance of the powers conferred, the following is notified.',
+      'notification.pdf',
+    );
+    const userMetadata = { category: 'Important Circulars', tags: ['epfo'] };
+    const saved = confirmImportedContent(preview({ title: 'EPFO Notification' }), {
+      workspaceId: 'apfc',
+      contentType: 'document',
+      metadata: { ...documentTypeProposal, ...userMetadata },
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.documentType).toBe('official_notification');
+    expect(stored.metadata?.documentTypeStatus).toBe('predicted');
+    // The user's own fields survive the merge untouched.
+    expect(stored.metadata?.category).toBe('Important Circulars');
+    expect(stored.metadata?.tags).toEqual(['epfo']);
+  });
+
+  it('an empty/unreadable document still saves successfully with an honest "unclassified" status, never blocking the save or fabricating a type', () => {
+    const documentTypeProposal = buildDocumentTypeMetadata('   ', 'blank.txt');
+    const saved = confirmImportedContent(preview({ title: 'Blank upload' }), {
+      workspaceId: 'apfc',
+      contentType: 'document',
+      metadata: documentTypeProposal,
+    });
+    useAppStore.getState().addImportedContent(saved);
+
+    expect(useAppStore.getState().importedContent[0].metadata?.documentTypeStatus).toBe('unclassified');
+  });
+});
+
 describe('Global Repository Import — question safety (raw import, never fabricated)', () => {
   beforeEach(fullReset);
 
@@ -627,7 +676,9 @@ describe('Global Repository Import — Phase 2: file selection runs through runF
   });
 
   it('an unsupported/malformed file still produces the same user-facing error as before', async () => {
-    const outcome = await runFileImport(new File(['irrelevant'], 'photo.jpg'), [], 'phd_research');
+    // .jpg is now a supported (OCR'd) image format (see contentImport.test.ts's own OCR suite) —
+    // a genuinely unsupported extension is needed here to still exercise this error path.
+    const outcome = await runFileImport(new File(['irrelevant'], 'archive.zip'), [], 'phd_research');
     expect(outcome.status).toBe('error');
     expect(outcome.error).toMatch(/Unsupported file type/i);
   });
@@ -838,5 +889,112 @@ describe('Global Repository Import — Phase 4B: organisation assignment at impo
 
     useAppStore.getState().setActiveWorkspaceId('phd_research');
     expect(useAppStore.getState().importedContent).toEqual([]);
+  });
+});
+
+// Knowledge Librarian (P0), Phase 2 — Markdown multi-article extraction toggle. The modal's own
+// "split into articles" branch does exactly this: build a batch with lib/knowledgeIngestion.ts's
+// ingestMarkdownAsArticles (from the SAME preview.content/sourceHash/fileSizeBytes state every
+// other branch already reads — see confirmImportedContent's own sibling tests above) and persist
+// it with the store's addKnowledgeIngestionBatch — mirrored here exactly one level removed from the
+// component, the same way every other persistence path in this file is already tested.
+describe('Global Repository Import — Phase: multi-article Markdown extraction (opt-in toggle)', () => {
+  beforeEach(fullReset);
+
+  it('building and persisting a batch (what Confirm does when the toggle is checked) saves the original document plus every extracted article', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const batch = ingestMarkdownAsArticles({
+      workspaceId: 'apfc',
+      filename: 'clippings.md',
+      rawContent: '## Inflation Rises\nInflation and monetary policy concerns dominate the discussion on rising prices in today\'s briefing.',
+      originalFormat: 'markdown',
+    });
+    useAppStore.getState().addKnowledgeIngestionBatch(batch);
+
+    expect(useAppStore.getState().importedContent.some((c) => c.id === batch.originalDocument.id)).toBe(true);
+    expect(useAppStore.getState().importedContent.some((c) => c.id === batch.articles[0]?.id)).toBe(true);
+    expect(useAppStore.getState().importedContent.find((c) => c.id === batch.originalDocument.id)?.contentType).toBe('document');
+    expect(useAppStore.getState().importedContent.find((c) => c.id === batch.articles[0]?.id)?.contentType).toBe('current_affairs');
+  });
+
+  it('still saves the original document, with zero articles, for an empty file — the toggle never loses the upload', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const batch = ingestMarkdownAsArticles({ workspaceId: 'apfc', filename: 'empty.md', rawContent: '', originalFormat: 'markdown' });
+    useAppStore.getState().addKnowledgeIngestionBatch(batch);
+
+    expect(useAppStore.getState().importedContent).toHaveLength(1);
+    expect(useAppStore.getState().importedContent[0].id).toBe(batch.originalDocument.id);
+    expect(batch.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('respects sourceHash/sourceFileSize exactly like the single-item path does, on both the original document and its articles', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const batch = ingestMarkdownAsArticles({
+      workspaceId: 'apfc',
+      filename: 'clippings.md',
+      rawContent: '## A\nInflation and monetary policy discussion text here for the article body.',
+      originalFormat: 'markdown',
+      sourceHash: 'hash-xyz',
+      sourceFileSize: 2048,
+    });
+    useAppStore.getState().addKnowledgeIngestionBatch(batch);
+
+    expect(batch.originalDocument.provenance.sourceHash).toBe('hash-xyz');
+    expect(batch.articles[0].provenance.sourceHash).toBe('hash-xyz');
+  });
+
+  it('workspace isolation: a batch ingested under one workspace never appears after switching to another', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const batch = ingestMarkdownAsArticles({
+      workspaceId: 'upsc_cse',
+      filename: 'f.md',
+      rawContent: '## A\nSome real article body text long enough to avoid the near-empty-file guard here.',
+      originalFormat: 'markdown',
+    });
+    useAppStore.getState().addKnowledgeIngestionBatch(batch);
+
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().importedContent).toEqual([]);
+  });
+
+  // Knowledge Librarian P0.1 hardening — addKnowledgeIngestionBatch must never trust the batch's
+  // own workspaceId; it must always re-stamp every record with whichever workspace is ACTUALLY
+  // active at the moment the action runs.
+  it('a batch built with a STALE/WRONG workspaceId still lands entirely in the CURRENTLY active workspace, never the one it was built against', () => {
+    // Built while 'upsc_cse' was active (e.g. the UI computed this batch, then — hypothetically —
+    // the active workspace changed before Confirm was actually clicked) — every record inside
+    // claims workspaceId: 'upsc_cse'.
+    const staleBatch = ingestMarkdownAsArticles({
+      workspaceId: 'upsc_cse',
+      filename: 'f.md',
+      rawContent: '## A\nSome real article body text long enough to avoid the near-empty-file guard here.',
+      originalFormat: 'markdown',
+    });
+    expect(staleBatch.originalDocument.workspaceId).toBe('upsc_cse');
+    expect(staleBatch.articles[0].workspaceId).toBe('upsc_cse');
+    expect(staleBatch.relationships[0].workspaceId).toBe('upsc_cse');
+    expect(staleBatch.classifications.every((c) => c.workspaceId === 'upsc_cse')).toBe(true);
+
+    // ...but by the time it's actually persisted, 'phd_research' is the active workspace.
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    useAppStore.getState().addKnowledgeIngestionBatch(staleBatch);
+
+    // Every record landed in 'phd_research' (the CURRENT workspace), not 'upsc_cse' (the batch's
+    // own stale claim) — re-stamped, not trusted.
+    const state = useAppStore.getState();
+    expect(state.importedContent.every((c) => c.workspaceId === 'phd_research')).toBe(true);
+    expect(state.contentRelationships.every((r) => r.workspaceId === 'phd_research')).toBe(true);
+    expect(state.knowledgeClassifications.every((c) => c.workspaceId === 'phd_research')).toBe(true);
+
+    // And it's genuinely invisible from the workspace the batch itself claimed.
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(useAppStore.getState().importedContent).toEqual([]);
+    expect(useAppStore.getState().contentRelationships).toEqual([]);
+    expect(useAppStore.getState().knowledgeClassifications).toEqual([]);
+
+    // ...and fully present and correctly linked back in the workspace it actually landed in.
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    expect(useAppStore.getState().importedContent).toHaveLength(1 + staleBatch.articles.length);
+    expect(useAppStore.getState().contentRelationships).toHaveLength(staleBatch.relationships.length);
   });
 });

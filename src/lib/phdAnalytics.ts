@@ -1,5 +1,5 @@
 import { computeResearchDuration, type ResearchDuration } from './phdResearch';
-import type { PhdTopicArea } from './phdTopicArea';
+import { itemBelongsToTopicArea, type PhdTopicArea } from './phdTopicArea';
 import { countMicroTargetsByStatus, overdueMicroTargets, upcomingMicroTargets, type MicroTarget, type MicroTargetCounts } from './microTarget';
 import type { ImportedContent, ImportedContentType } from './contentImport';
 import { countByReadingStatus } from './phdReadingStatus';
@@ -71,7 +71,7 @@ const RESEARCH_CONTENT_TYPES: ReadonlySet<ImportedContentType> = new Set(['resea
 
 export function computePhdAnalytics(input: ComputePhdAnalyticsInput): PhdAnalyticsSnapshot {
   const topicAreas: TopicAreaAnalytics[] = input.topicAreas.map((area) => {
-    const linkedContentCount = input.importedContent.filter((c) => c.metadata?.topicAreaId === area.id).length;
+    const linkedContentCount = input.importedContent.filter((c) => itemBelongsToTopicArea(c, area.id)).length;
     const areaTargets = input.microTargets.filter((t) => t.contextId === area.id);
     return {
       topicArea: area,

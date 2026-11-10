@@ -284,7 +284,9 @@ describe('Notes — Phase 3A: file import unchanged, now with hash + duplicate d
   });
 
   it('a malformed/unsupported file still reports the existing importNoteFile error, unaffected by hashing', async () => {
-    const file = new File(['irrelevant'], 'photo.jpg');
+    // .jpg is now a supported (OCR'd) image format (see contentImport.test.ts's own OCR suite) —
+    // a genuinely unsupported extension is needed here to still exercise this error path.
+    const file = new File(['irrelevant'], 'archive.zip');
     const result = await importNoteFile(file);
     expect(result.status).toBe('error');
   });

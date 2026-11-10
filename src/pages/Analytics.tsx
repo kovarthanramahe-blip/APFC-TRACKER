@@ -22,6 +22,7 @@ import { StudyActivityTrend } from '../components/ui/StudyActivityTrend';
 import { PYQ_BANK } from '../data/pyq';
 import { SYLLABUS, getAllTopicsCount } from '../data/syllabus';
 import { BADGES, useGamification, useRewards, REWARDS } from '../lib/gamification';
+import { CHART_COLORS } from '../lib/chartColors';
 import { computeAggregateAccuracy } from '../lib/mockTestStats';
 import {
   computePyqPerformance,
@@ -237,11 +238,11 @@ export default function Analytics() {
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={scoreTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
-                    <XAxis dataKey="attempt" tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                    <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" unit="%" />
-                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                    <Line type="monotone" dataKey="percentage" stroke="#d1922a" strokeWidth={2.5} dot={{ r: 4 }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
+                    <XAxis dataKey="attempt" tick={{ fontSize: 10 }} stroke={CHART_COLORS.axis} />
+                    <YAxis tick={{ fontSize: 10 }} stroke={CHART_COLORS.axis} unit="%" />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${CHART_COLORS.tooltipBorder}`, fontSize: 12 }} />
+                    <Line type="monotone" dataKey="percentage" stroke={CHART_COLORS.line} strokeWidth={2.5} dot={{ r: 4 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -269,7 +270,7 @@ export default function Analytics() {
                           <Cell key={d.name} fill={SUBJECT_COLORS[d.colorKey].chart} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                      <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${CHART_COLORS.tooltipBorder}`, fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>

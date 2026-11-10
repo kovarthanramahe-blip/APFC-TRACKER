@@ -20,15 +20,25 @@ import { resolveGranularBreadcrumb } from './upscCseGranularSyllabus';
  * resolveMicrosyllabusPath for the Subject/Microsyllabus titles), then falls back to treating the
  * id as a plain microsyllabus id in either real tree. Returns undefined for an id that doesn't
  * resolve in either — a stale/invalid id is simply not shown, never a fabricated label.
+ *
+ * P1.1 fix — the granular-node branch previously resolved the microsyllabus path against
+ * UPSC_CSE_PRELIMS_SYLLABUS unconditionally and always prefixed the label "Prelims ›", even for a
+ * Mains-stage granular node (a real, populated case once Knowledge Librarian classification started
+ * using this taxonomy — see lib/upscCseKnowledgeTaxonomy.ts). A Mains node's microsyllabusId never
+ * resolves in the Prelims tree, so `path` silently came back undefined and the label still claimed
+ * "Prelims" while omitting the subject/microsyllabus titles entirely. Fixed by reading the node's
+ * own `stage` (every UpscCseGranularNode already carries one) to pick the correct tree and label.
  */
 export function resolveSyllabusNodeLabel(syllabusNodeId: string): string | undefined {
   const granularBreadcrumb = resolveGranularBreadcrumb(UPSC_CSE_GRANULAR_NODES, syllabusNodeId);
   if (granularBreadcrumb) {
-    const path = resolveMicrosyllabusPath(UPSC_CSE_PRELIMS_SYLLABUS, granularBreadcrumb.microsyllabusId);
+    const isMains = granularBreadcrumb.node.stage === 'mains';
+    const tree = isMains ? UPSC_CSE_MAINS_SYLLABUS : UPSC_CSE_PRELIMS_SYLLABUS;
+    const path = resolveMicrosyllabusPath(tree, granularBreadcrumb.microsyllabusId);
     const parts = [path?.subject.title, path?.item.title, granularBreadcrumb.topic?.title, granularBreadcrumb.subtopic?.title, granularBreadcrumb.microTopic?.title].filter(
       (p): p is string => !!p,
     );
-    return `Prelims › ${parts.join(' › ')}`;
+    return `${isMains ? 'Mains' : 'Prelims'} › ${parts.join(' › ')}`;
   }
   for (const [stageLabel, tree] of [
     ['Prelims', UPSC_CSE_PRELIMS_SYLLABUS],

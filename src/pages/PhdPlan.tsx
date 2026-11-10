@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { GraduationCap, Target, Plus, Trash2, AlertTriangle, CheckCircle2, CalendarClock, Clock, FolderKanban, ExternalLink } from 'lucide-react';
+import { GraduationCap, Target, Plus, Pencil, Trash2, AlertTriangle, CheckCircle2, CalendarClock, Clock, FolderKanban, ExternalLink } from 'lucide-react';
+import type { ImportedContent } from '../lib/contentImport';
+import type { PhdTopicArea } from '../lib/phdTopicArea';
 import { useAppStore } from '../lib/store';
 import { getWorkspaceMeta } from '../lib/workspace';
 import { getLocalDateString, formatDate, cx, uuid } from '../lib/utils';
@@ -11,6 +13,7 @@ import {
   isValidMicroTargetTitle,
   overdueMicroTargets,
   upcomingMicroTargets,
+  type CreateMicroTargetInput,
   type MicroTarget,
   type MicroTargetPriority,
   type MicroTargetStatus,
@@ -19,17 +22,142 @@ import {
 const PRIORITY_TONE: Record<MicroTargetPriority, 'neutral' | 'brand' | 'danger'> = { low: 'neutral', medium: 'brand', high: 'danger' };
 type ViewFilter = 'today' | 'upcoming' | 'overdue' | 'completed' | 'topic_area' | 'timeline';
 
+/** Shared by both "Add Research Micro-target" and "Edit target" — same fields either way, so the
+ * form itself (and its validation) lives in exactly one place rather than two near-identical JSX
+ * blocks drifting apart over time. `onSubmit` receives a complete CreateMicroTargetInput, which is
+ * also a valid UpdateMicroTargetFields (same field names) — the caller decides whether that means
+ * addMicroTarget or updatePhdMicroTarget. */
+function TargetForm({
+  initial,
+  topicAreas,
+  importedContent,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  initial: CreateMicroTargetInput;
+  topicAreas: readonly PhdTopicArea[];
+  importedContent: readonly ImportedContent[];
+  submitLabel: string;
+  onSubmit: (values: CreateMicroTargetInput) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(initial.title);
+  const [description, setDescription] = useState(initial.description ?? '');
+  const [topicAreaId, setTopicAreaId] = useState(initial.contextId ?? '');
+  const [linkedContentId, setLinkedContentId] = useState(initial.linkedContentId ?? '');
+  const [targetDate, setTargetDate] = useState(initial.targetDate ?? '');
+  const [estimatedMinutes, setEstimatedMinutes] = useState(initial.estimatedMinutes !== undefined ? String(initial.estimatedMinutes) : '');
+  const [priority, setPriority] = useState<MicroTargetPriority>(initial.priority ?? 'medium');
+  const [notes, setNotes] = useState(initial.notes ?? '');
+
+  function submit() {
+    if (!isValidMicroTargetTitle(title)) return;
+    const minutes = estimatedMinutes.trim() ? Math.max(1, Math.round(Number(estimatedMinutes))) : undefined;
+    onSubmit({
+      title,
+      description: description || undefined,
+      contextId: topicAreaId || undefined,
+      targetDate: targetDate || undefined,
+      estimatedMinutes: Number.isFinite(minutes) ? minutes : undefined,
+      priority,
+      notes: notes || undefined,
+      linkedContentId: linkedContentId || undefined,
+    });
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-2">
+      {topicAreas.length === 0 && (
+        <p className="text-xs text-slate-400">
+          No Topic Areas yet —{' '}
+          <Link to="/phd-dashboard" className="text-brand-600 hover:underline dark:text-brand-400">
+            create one on the Dashboard
+          </Link>{' '}
+          to link this target to one (optional).
+        </p>
+      )}
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Target title (e.g. Read primary source on Permanent Settlement)…"
+        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
+      />
+      <input
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Description (optional)…"
+        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <select value={topicAreaId} onChange={(e) => setTopicAreaId(e.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm">
+          <option value="">No Topic Area</option>
+          {topicAreas.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.title}
+            </option>
+          ))}
+        </select>
+        <select value={linkedContentId} onChange={(e) => setLinkedContentId(e.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm">
+          <option value="">No linked material</option>
+          {importedContent.map((c) => (
+            <option key={c.id} value={c.id}>
+              {/* Several chapters of the same book/source share an identical title — the filename
+                  is what actually tells two such options apart, so a user picking from a list of
+                  otherwise-identical labels doesn't silently link the wrong chapter. */}
+              {c.title}
+              {c.provenance.sourceFilename ? ` — ${c.provenance.sourceFilename}` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm" />
+        <input
+          type="number"
+          min={1}
+          value={estimatedMinutes}
+          onChange={(e) => setEstimatedMinutes(e.target.value)}
+          placeholder="Minutes"
+          className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
+        />
+        <select value={priority} onChange={(e) => setPriority(e.target.value as MicroTargetPriority)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <input
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="Notes (optional)…"
+        className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
+      />
+      <div className="flex gap-2">
+        <Button size="sm" onClick={submit} disabled={!isValidMicroTargetTitle(title)}>
+          {submitLabel}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function TargetRow({
   target,
   topicAreaTitle,
-  linkedContentTitle,
+  linkedContent,
   onToggleStatus,
+  onEdit,
   onDelete,
 }: {
   target: MicroTarget;
   topicAreaTitle: string | undefined;
-  linkedContentTitle: string | undefined;
+  linkedContent: { title: string; sourceFilename?: string } | undefined;
   onToggleStatus: (id: string, status: MicroTargetStatus) => void;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   return (
@@ -61,9 +189,12 @@ function TargetRow({
             </span>
           )}
           <Badge tone={PRIORITY_TONE[target.priority]}>{target.priority}</Badge>
-          {linkedContentTitle && (
+          {linkedContent && (
             <Link to="/repository" className="inline-flex items-center gap-1 text-[11px] text-brand-600 hover:underline dark:text-brand-400">
-              <ExternalLink className="h-3 w-3" /> {linkedContentTitle}
+              <ExternalLink className="h-3 w-3" /> {linkedContent.title}
+              {/* Several chapters of the same book/source share an identical title — the filename
+                  disambiguates which one this target is actually linked to. */}
+              {linkedContent.sourceFilename && <span className="text-slate-400">— {linkedContent.sourceFilename}</span>}
             </Link>
           )}
         </div>
@@ -76,6 +207,9 @@ function TargetRow({
           {target.status === 'in_progress' ? 'In Progress' : 'Start'}
         </button>
       )}
+      <button onClick={() => onEdit(target.id)} title="Edit target" className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:text-brand-600 dark:text-slate-600 dark:hover:text-brand-400">
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
       <button onClick={() => onDelete(target.id)} title="Delete target" className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:text-rose-500 dark:text-slate-600">
         <Trash2 className="h-3.5 w-3.5" />
       </button>
@@ -100,47 +234,38 @@ export default function PhdPlan() {
   // real, just-created target appear to have vanished. Timeline shows every target regardless of
   // date (undated ones sort last), so it's the only view guaranteed to reflect the real data.
   const [view, setView] = useState<ViewFilter>('timeline');
+  const updateMicroTarget = useAppStore((s) => s.updatePhdMicroTarget);
   const [showAddTarget, setShowAddTarget] = useState(false);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [topicAreaId, setTopicAreaId] = useState('');
-  const [linkedContentId, setLinkedContentId] = useState('');
-  const [targetDate, setTargetDate] = useState('');
-  const [estimatedMinutes, setEstimatedMinutes] = useState('');
-  const [priority, setPriority] = useState<MicroTargetPriority>('medium');
-  const [notes, setNotes] = useState('');
+  const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
 
-  function submitTarget() {
-    if (!isValidMicroTargetTitle(title)) return;
-    const minutes = estimatedMinutes.trim() ? Math.max(1, Math.round(Number(estimatedMinutes))) : undefined;
-    addMicroTarget(
-      {
-        title,
-        description: description || undefined,
-        contextId: topicAreaId || undefined,
-        targetDate: targetDate || undefined,
-        estimatedMinutes: Number.isFinite(minutes) ? minutes : undefined,
-        priority,
-        notes: notes || undefined,
-        linkedContentId: linkedContentId || undefined,
-      },
-      uuid(),
-      new Date().toISOString(),
-    );
-    setTitle('');
-    setDescription('');
-    setTopicAreaId('');
-    setLinkedContentId('');
-    setTargetDate('');
-    setEstimatedMinutes('');
-    setNotes('');
-    setPriority('medium');
+  const blankTarget: CreateMicroTargetInput = { title: '', priority: 'medium' };
+
+  function submitNewTarget(values: CreateMicroTargetInput) {
+    addMicroTarget(values, uuid(), new Date().toISOString());
     setShowAddTarget(false);
     // A target created with no target date (a real, common case — many research micro-targets
     // have no hard deadline) would otherwise vanish from the default 'today' view, which only
     // matches an exact date. Timeline shows every target regardless of date, so it's the one view
     // guaranteed to surface what was just added.
-    if (!targetDate) setView('timeline');
+    if (!values.targetDate) setView('timeline');
+  }
+
+  function submitEditedTarget(id: string, values: CreateMicroTargetInput) {
+    updateMicroTarget(id, values);
+    setEditingTargetId(null);
+  }
+
+  function targetToFormInput(t: MicroTarget): CreateMicroTargetInput {
+    return {
+      title: t.title,
+      description: t.description,
+      contextId: t.contextId,
+      targetDate: t.targetDate,
+      estimatedMinutes: t.estimatedMinutes,
+      priority: t.priority,
+      notes: t.notes,
+      linkedContentId: t.linkedContentId,
+    };
   }
 
   const todayTargets = useMemo(() => microTargets.filter((t) => t.targetDate === today), [microTargets, today]);
@@ -192,72 +317,15 @@ export default function PhdPlan() {
         </div>
 
         {showAddTarget && (
-          <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-2">
-            {topicAreas.length === 0 && (
-              <p className="text-xs text-slate-400">
-                No Topic Areas yet —{' '}
-                <Link to="/phd-dashboard" className="text-brand-600 hover:underline dark:text-brand-400">
-                  create one on the Dashboard
-                </Link>{' '}
-                to link this target to one (optional).
-              </p>
-            )}
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Target title (e.g. Read primary source on Permanent Settlement)…"
-              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
-            />
-            <input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Description (optional)…"
-              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <select value={topicAreaId} onChange={(e) => setTopicAreaId(e.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm">
-                <option value="">No Topic Area</option>
-                {topicAreas.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.title}
-                  </option>
-                ))}
-              </select>
-              <select value={linkedContentId} onChange={(e) => setLinkedContentId(e.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm">
-                <option value="">No linked material</option>
-                {importedContent.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm" />
-              <input
-                type="number"
-                min={1}
-                value={estimatedMinutes}
-                onChange={(e) => setEstimatedMinutes(e.target.value)}
-                placeholder="Minutes"
-                className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
-              />
-              <select value={priority} onChange={(e) => setPriority(e.target.value as MicroTargetPriority)} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Notes (optional)…"
-              className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 px-3 py-2 text-sm"
-            />
-            <Button size="sm" onClick={submitTarget} disabled={!isValidMicroTargetTitle(title)}>
-              Add Micro-target
-            </Button>
-          </div>
+          <TargetForm
+            key="new"
+            initial={blankTarget}
+            topicAreas={topicAreas}
+            importedContent={importedContent}
+            submitLabel="Add Micro-target"
+            onSubmit={submitNewTarget}
+            onCancel={() => setShowAddTarget(false)}
+          />
         )}
 
         <div className="mb-4 flex flex-wrap gap-1.5">
@@ -291,16 +359,30 @@ export default function PhdPlan() {
                       <p className="py-2 text-sm text-slate-400">No micro-targets in this Topic Area yet.</p>
                     ) : (
                       <ul className="space-y-1.5">
-                        {areaTargets.map((t) => (
-                          <TargetRow
-                            key={t.id}
-                            target={t}
-                            topicAreaTitle={undefined}
-                            linkedContentTitle={t.linkedContentId ? importedContent.find((c) => c.id === t.linkedContentId)?.title : undefined}
-                            onToggleStatus={setMicroTargetStatus}
-                            onDelete={deleteMicroTarget}
-                          />
-                        ))}
+                        {areaTargets.map((t) =>
+                          editingTargetId === t.id ? (
+                            <li key={t.id}>
+                              <TargetForm
+                                initial={targetToFormInput(t)}
+                                topicAreas={topicAreas}
+                                importedContent={importedContent}
+                                submitLabel="Save changes"
+                                onSubmit={(values) => submitEditedTarget(t.id, values)}
+                                onCancel={() => setEditingTargetId(null)}
+                              />
+                            </li>
+                          ) : (
+                            <TargetRow
+                              key={t.id}
+                              target={t}
+                              topicAreaTitle={undefined}
+                              linkedContent={t.linkedContentId ? importedContent.find((c) => c.id === t.linkedContentId) : undefined}
+                              onToggleStatus={setMicroTargetStatus}
+                              onEdit={setEditingTargetId}
+                              onDelete={deleteMicroTarget}
+                            />
+                          ),
+                        )}
                       </ul>
                     )}
                   </div>
@@ -312,16 +394,30 @@ export default function PhdPlan() {
           <p className="py-6 text-center text-sm text-slate-400">Nothing here yet.</p>
         ) : (
           <ul className="space-y-1.5">
-            {visibleTargets.map((t) => (
-              <TargetRow
-                key={t.id}
-                target={t}
-                topicAreaTitle={t.contextId ? getPhdTopicAreaById(topicAreas, t.contextId)?.title : undefined}
-                linkedContentTitle={t.linkedContentId ? importedContent.find((c) => c.id === t.linkedContentId)?.title : undefined}
-                onToggleStatus={setMicroTargetStatus}
-                onDelete={deleteMicroTarget}
-              />
-            ))}
+            {visibleTargets.map((t) =>
+              editingTargetId === t.id ? (
+                <li key={t.id}>
+                  <TargetForm
+                    initial={targetToFormInput(t)}
+                    topicAreas={topicAreas}
+                    importedContent={importedContent}
+                    submitLabel="Save changes"
+                    onSubmit={(values) => submitEditedTarget(t.id, values)}
+                    onCancel={() => setEditingTargetId(null)}
+                  />
+                </li>
+              ) : (
+                <TargetRow
+                  key={t.id}
+                  target={t}
+                  topicAreaTitle={t.contextId ? getPhdTopicAreaById(topicAreas, t.contextId)?.title : undefined}
+                  linkedContent={t.linkedContentId ? importedContent.find((c) => c.id === t.linkedContentId) : undefined}
+                  onToggleStatus={setMicroTargetStatus}
+                  onEdit={setEditingTargetId}
+                  onDelete={deleteMicroTarget}
+                />
+              ),
+            )}
           </ul>
         )}
       </Card>

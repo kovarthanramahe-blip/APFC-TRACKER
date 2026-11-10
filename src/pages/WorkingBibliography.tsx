@@ -89,6 +89,9 @@ interface BibliographyFormValues {
   isbn: string;
   url: string;
   citationKey: string;
+  archiveId: string;
+  accessedDate: string;
+  language: string;
   notes: string;
   tags: string;
   category: string;
@@ -108,6 +111,9 @@ function emptyFormValues(): BibliographyFormValues {
     isbn: '',
     url: '',
     citationKey: '',
+    archiveId: '',
+    accessedDate: '',
+    language: '',
     notes: '',
     tags: '',
     category: '',
@@ -129,6 +135,9 @@ function formValuesFromItem(item: ImportedContent): BibliographyFormValues {
     isbn: fields.isbn ?? '',
     url: fields.url ?? '',
     citationKey: fields.citationKey ?? '',
+    archiveId: fields.archiveId ?? '',
+    accessedDate: fields.accessedDate ?? '',
+    language: fields.language ?? '',
     notes: fields.notes ?? '',
     tags: getContentTags(item).join(', '),
     category: getContentCategory(item) ?? '',
@@ -149,6 +158,9 @@ function fieldsFromFormValues(values: BibliographyFormValues): BibliographyField
   if (values.isbn.trim()) fields.isbn = values.isbn.trim();
   if (values.url.trim()) fields.url = values.url.trim();
   if (values.citationKey.trim()) fields.citationKey = values.citationKey.trim();
+  if (values.archiveId.trim()) fields.archiveId = values.archiveId.trim();
+  if (values.accessedDate.trim()) fields.accessedDate = values.accessedDate.trim();
+  if (values.language.trim()) fields.language = values.language.trim();
   if (values.notes.trim()) fields.notes = values.notes.trim();
   return fields;
 }
@@ -1022,10 +1034,11 @@ function ViewSourceModal({ record, onClose }: { record: ImportedContent; onClose
   );
 }
 
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+function FormField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">{label}</p>
+      {hint && <p className="text-[11px] text-slate-400 mb-1">{hint}</p>}
       {children}
     </div>
   );
@@ -1115,6 +1128,19 @@ function BibliographyFormModal({
             </FormField>
             <FormField label="Citation key">
               <input value={values.citationKey} onChange={(e) => set('citationKey', e.target.value)} placeholder="e.g. Smith2020" className={fieldInputClass} />
+            </FormField>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label="Archive / shelfmark ID" hint="A library or archive's own identifier for this source — e.g. a NAIPUB number — distinct from the citation key above.">
+              <input value={values.archiveId} onChange={(e) => set('archiveId', e.target.value)} placeholder="e.g. NAIPUB-1234" className={fieldInputClass} />
+            </FormField>
+            <FormField label="Accessed date" hint="For a website/online source — when you retrieved it, not when you saved it here.">
+              <input type="date" value={values.accessedDate} onChange={(e) => set('accessedDate', e.target.value)} className={fieldInputClass} />
+            </FormField>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label="Language">
+              <input value={values.language} onChange={(e) => set('language', e.target.value)} placeholder="e.g. English, Hindi" className={fieldInputClass} />
             </FormField>
           </div>
           <FormField label="Notes">

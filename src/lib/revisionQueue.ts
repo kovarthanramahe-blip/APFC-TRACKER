@@ -14,6 +14,14 @@
 // names below use the more accurate `itemId`.
 import { getLocalDateString } from './utils';
 
+// P2.8 — Revision Review Provenance: how the LATEST review of an item was conducted. 'quiz' means
+// a real checked answer (the actual due-revision quiz flow in pages/PYQTest.tsx /
+// pages/UpscCsePyqTest.tsx); 'self_report' means a manual action with no checked answer behind it
+// (pages/Revision.tsx's own buttons, pages/RepositoryDetail.tsx's per-item revision card). This is
+// LATEST-REVIEW-ONLY provenance — overwritten on every subsequent recordCorrect/recordIncorrect
+// call, never a history/event log of every past review.
+export type RevisionReviewSource = 'quiz' | 'self_report';
+
 export interface RevisionItem {
   pyqId: string;
   /** 1-based Leitner box; higher = more confidently known. */
@@ -23,6 +31,12 @@ export interface RevisionItem {
   /** yyyy-mm-dd, or null if never reviewed. */
   lastReviewedDate: string | null;
   reviewCount: number;
+  /** P2.8 — optional/backward-compatible: absent on any item created or last reviewed before this
+   * field existed, or whose caller didn't pass a source. Never defaulted to 'quiz' — an unknown
+   * provenance is left unknown (undefined) rather than fabricating a tested-recall claim for a
+   * review that may not have been actually checked. See this file's own RevisionReviewSource
+   * header above for exactly what each value means. */
+  lastReviewSource?: RevisionReviewSource;
 }
 
 /** Keyed by itemId (a PYQ id or any other content id, e.g. an ImportedContent id). An id absent
@@ -71,19 +85,36 @@ export function getDueItems(queue: RevisionQueue, itemIds: string[], today: stri
 }
 
 /** Correct -> advance one box (capped at MAX_BOX) and reschedule further out. Returns a NEW queue;
- * `queue` itself is never mutated. */
-export function recordCorrect(queue: RevisionQueue, itemId: string, today: string): RevisionQueue {
+ * `queue` itself is never mutated. `source` (P2.8) is optional and backward-compatible: a caller
+ * that omits it (every pre-P2.8 call site, until updated) gets the exact same scheduling behaviour
+ * as before — only `lastReviewSource` differs (left undefined rather than fabricated). */
+export function recordCorrect(queue: RevisionQueue, itemId: string, today: string, source?: RevisionReviewSource): RevisionQueue {
   const current = getOrCreateItem(queue, itemId, today);
   const box = Math.min(current.box + 1, MAX_BOX);
-  const updated: RevisionItem = { pyqId: itemId, box, dueDate: addDays(today, intervalForBox(box)), lastReviewedDate: today, reviewCount: current.reviewCount + 1 };
+  const updated: RevisionItem = {
+    pyqId: itemId,
+    box,
+    dueDate: addDays(today, intervalForBox(box)),
+    lastReviewedDate: today,
+    reviewCount: current.reviewCount + 1,
+    lastReviewSource: source,
+  };
   return { ...queue, [itemId]: updated };
 }
 
 /** Incorrect -> reset to box 1 and reschedule for the box-1 interval. Returns a NEW queue; `queue`
- * itself is never mutated. */
-export function recordIncorrect(queue: RevisionQueue, itemId: string, today: string): RevisionQueue {
+ * itself is never mutated. `source` (P2.8) is optional and backward-compatible — see recordCorrect's
+ * own header above for exactly what omitting it means. */
+export function recordIncorrect(queue: RevisionQueue, itemId: string, today: string, source?: RevisionReviewSource): RevisionQueue {
   const current = getOrCreateItem(queue, itemId, today);
-  const updated: RevisionItem = { pyqId: itemId, box: 1, dueDate: addDays(today, intervalForBox(1)), lastReviewedDate: today, reviewCount: current.reviewCount + 1 };
+  const updated: RevisionItem = {
+    pyqId: itemId,
+    box: 1,
+    dueDate: addDays(today, intervalForBox(1)),
+    lastReviewedDate: today,
+    reviewCount: current.reviewCount + 1,
+    lastReviewSource: source,
+  };
   return { ...queue, [itemId]: updated };
 }
 

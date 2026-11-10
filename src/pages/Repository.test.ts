@@ -10,11 +10,13 @@ import {
   computeRepositoryStatistics,
   repositoryEntryFromImportedContent,
   repositoryEntryFromNote,
+  getImportedContentById,
 } from '../lib/repository';
 import { exportAllData, importAllData } from '../lib/store';
 import { navigationTargetFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry, preserveUneditedMetadata } from './Repository';
 import { getIncomingRelationships, getOutgoingRelationships } from '../lib/contentRelationships';
+import { listReviewQueue } from '../lib/knowledgeClassification';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see StudyPlan.test.ts and every other *.test.ts file, which all test exported pure functions
@@ -44,6 +46,7 @@ function fullReset() {
     revisionQueue: createRevisionQueue(),
     importedContent: [],
     contentRelationships: [],
+    knowledgeClassifications: [],
   });
 }
 
@@ -221,6 +224,52 @@ describe('Repository page — statistics', () => {
     const stats = computeRepositoryStatistics(listRepositoryEntries(state.importedContent, state.notes));
     expect(stats.totalItems).toBe(3);
     expect(stats.countsByContentType).toEqual({ research_document: 1, bibliography: 1, note: 1 });
+  });
+});
+
+// Knowledge Librarian P0.1 — minimal review-queue surface (lib/knowledgeClassification.ts's
+// listReviewQueue, already thoroughly tested in isolation there). What's new HERE is only the
+// wiring this page relies on: reading the real store's knowledgeClassifications (already
+// workspace-scoped by construction — same invariant every other store-owned collection has) and
+// resolving each queued classification's underlying item via getImportedContentById, exactly as
+// the page's own JSX does.
+describe('Repository page — classification review queue (P0.1 hardening)', () => {
+  beforeEach(fullReset);
+
+  it('listReviewQueue over the real store surfaces only proposed classifications, most confident first, resolvable back to their real items', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    const doc = confirmImportedContent(preview({ title: 'Inflation Article' }), { workspaceId: 'apfc', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(doc);
+    useAppStore.setState({
+      knowledgeClassifications: [
+        { id: 'k1', workspaceId: 'apfc', itemId: doc.id, itemType: 'imported_content', taxonomy: 'apfc', topicId: 'topic-a', confidence: 0.4, rationale: 'r', status: 'proposed', source: 'lexical', createdAt: 'a', updatedAt: 'a' },
+        { id: 'k2', workspaceId: 'apfc', itemId: doc.id, itemType: 'imported_content', taxonomy: 'apfc', topicId: 'topic-b', confidence: 0.9, rationale: 'r', status: 'proposed', source: 'lexical', createdAt: 'a', updatedAt: 'a' },
+        { id: 'k3', workspaceId: 'apfc', itemId: doc.id, itemType: 'imported_content', taxonomy: 'apfc', topicId: 'topic-c', confidence: 1, rationale: 'r', status: 'confirmed', source: 'manual', createdAt: 'a', updatedAt: 'a' },
+      ],
+    });
+
+    const state = useAppStore.getState();
+    const queue = listReviewQueue(state.knowledgeClassifications);
+    expect(queue.map((c) => c.id)).toEqual(['k2', 'k1']); // confirmed (k3) excluded; most confident first
+    expect(getImportedContentById(state.importedContent, queue[0].itemId)?.title).toBe('Inflation Article');
+  });
+
+  it('the review queue is workspace-isolated: switching workspaces shows none of the other workspace\'s pending classifications', () => {
+    useAppStore.getState().setActiveWorkspaceId('apfc');
+    useAppStore.getState().addImportedContent(confirmImportedContent(preview(), { workspaceId: 'apfc', contentType: 'current_affairs' }));
+    useAppStore.setState({
+      knowledgeClassifications: [
+        { id: 'k1', workspaceId: 'apfc', itemId: useAppStore.getState().importedContent[0].id, itemType: 'imported_content', taxonomy: 'apfc', topicId: 'topic-a', confidence: 0.5, rationale: 'r', status: 'proposed', source: 'lexical', createdAt: 'a', updatedAt: 'a' },
+      ],
+    });
+    expect(listReviewQueue(useAppStore.getState().knowledgeClassifications)).toHaveLength(1);
+
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    expect(listReviewQueue(useAppStore.getState().knowledgeClassifications)).toEqual([]);
+  });
+
+  it('an empty knowledgeClassifications collection produces an empty review queue, never throwing', () => {
+    expect(listReviewQueue(useAppStore.getState().knowledgeClassifications)).toEqual([]);
   });
 });
 
@@ -452,6 +501,42 @@ describe('Repository Item Management — Current Affairs metadata-preservation r
     const stored = useAppStore.getState().importedContent[0];
     expect(stored.metadata?.syllabusNodeId).toBe('node-1');
     expect(stored.metadata?.apfcTopicId).toBe('apfc-rights');
+  });
+
+  it('topicAreaId/topicAreaIds (PhD Research Topic Areas) survive an unrelated metadata edit — never silently wiped', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'Field notes' }), {
+      workspaceId: 'phd_research',
+      contentType: 'research_document',
+      metadata: { topicAreaId: 'area-1', topicAreaIds: ['area-2', 'area-3'] },
+    });
+    useAppStore.getState().addImportedContent(doc);
+
+    // Simulates EditMetadataModal's save exactly as the other tests in this describe block do:
+    // a fresh metadata object with no idea topicAreaId/topicAreaIds exist.
+    const merged = preserveUneditedMetadata({ tags: ['new-tag'], category: 'Fieldwork' }, doc, { folderId: null, isPinned: false, isArchived: false });
+    useAppStore.getState().updateImportedContent(doc.id, { title: 'Field notes (edited)', metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.title).toBe('Field notes (edited)');
+    expect(stored.metadata?.tags).toEqual(['new-tag']);
+    expect(stored.metadata?.category).toBe('Fieldwork');
+    expect(stored.metadata?.topicAreaId).toBe('area-1');
+    expect(stored.metadata?.topicAreaIds).toEqual(['area-2', 'area-3']);
+  });
+
+  it('a research document with no topicAreaId/topicAreaIds set keeps them absent after editing — never fabricated', () => {
+    useAppStore.getState().setActiveWorkspaceId('phd_research');
+    const doc = confirmImportedContent(preview({ title: 'No topic area' }), { workspaceId: 'phd_research', contentType: 'research_document' });
+    useAppStore.getState().addImportedContent(doc);
+
+    const merged = preserveUneditedMetadata({ category: 'General' }, doc, { folderId: null, isPinned: false, isArchived: false });
+    useAppStore.getState().updateImportedContent(doc.id, { metadata: merged });
+
+    const stored = useAppStore.getState().importedContent[0];
+    expect(stored.metadata?.category).toBe('General');
+    expect(stored.metadata).not.toHaveProperty('topicAreaId');
+    expect(stored.metadata).not.toHaveProperty('topicAreaIds');
   });
 });
 

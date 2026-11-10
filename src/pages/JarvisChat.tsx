@@ -1,8 +1,11 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Send, Square, RotateCcw, Cpu, ShieldCheck, Loader2, Sparkles } from 'lucide-react';
+import { Bot, Send, Square, RotateCcw, Cpu, ShieldCheck, Loader2, Sparkles, Search, FileText, NotebookText, ArrowUpRight, AlertTriangle } from 'lucide-react';
 import { Card, PageHeader, Button, Badge } from '../components/ui/Primitives';
 import { cx } from '../lib/utils';
+import { useAppStore } from '../lib/store';
+import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { useJarvisConversation } from '../lib/jarvisChat/useJarvisConversation';
 import { useJarvisRuntimeStatus } from '../lib/jarvisChat/useJarvisRuntimeStatus';
 import { useActiveWorkspaceGroundingData } from '../lib/jarvisChat/useActiveWorkspaceGroundingData';
@@ -10,6 +13,14 @@ import { buildJarvisChatRequestContext } from '../lib/jarvisChat/buildJarvisChat
 import { JARVIS_UI_RUNTIME_STATUS_LABEL } from '../lib/jarvisChat/jarvisRuntimeStatus';
 import type { JarvisChatMessage } from '../lib/jarvisChat/jarvisConversationTypes';
 import type { JarvisRuntimeProvenanceSource } from '../lib/jarvis/runtime';
+// Knowledge Librarian / JARVIS — "Ask about your notes": deterministic, provider-free source
+// retrieval over the ACTIVE workspace's own real Notes/ImportedContent, via the EXISTING
+// workspaceContentBridge.ts (itself composing the EXISTING jarvis/documents retrieval pipeline —
+// no new chunking/ranking logic here, no AI call, no new provider). Deliberately a SEPARATE
+// section from the chat thread above (never a message bubble, never routed through
+// useJarvisConversation/runtime.ts) so a direct, cited text match can never be mistaken for an
+// LLM-generated answer — see the "Direct match, not AI-generated" badge below, always visible.
+import { retrieveWorkspaceEvidence, resolveWorkspaceDocumentTitle } from '../lib/jarvis/workspaceContentBridge';
 
 // JARVIS Phase 14 — the dedicated JARVIS conversation surface. Deliberately NOT a reimplementation
 // of anything: every request still goes through the EXISTING runtime.ts (runJarvisRequest's own
@@ -37,6 +48,7 @@ const STATUS_DOT_CLASS: Record<ReturnType<typeof useJarvisRuntimeStatus>['status
   deterministic: 'bg-slate-400',
   model_unavailable: 'bg-amber-500',
   model_loading: 'bg-brand-500 animate-pulse',
+  model_load_failed: 'bg-rose-500',
   model_ready: 'bg-emerald-500',
 };
 
@@ -89,6 +101,21 @@ function RuntimeStatusBar() {
           {isLoadingModel ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Cpu className="h-3.5 w-3.5" aria-hidden="true" />}
           {isLoadingModel ? 'Loading…' : `Load ${modelDisplayName ?? 'model'}`}
         </Button>
+      )}
+
+      {status === 'model_load_failed' && (
+        <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+          <Badge tone="warning" className="gap-1">
+            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+            Load failed
+          </Badge>
+          {canLoadModel && (
+            <Button type="button" variant="secondary" size="sm" onClick={handleLoadModel} disabled={isLoadingModel}>
+              {isLoadingModel ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />}
+              {isLoadingModel ? 'Loading…' : `Retry loading ${modelDisplayName ?? 'model'}`}
+            </Button>
+          )}
+        </div>
       )}
     </Card>
   );
@@ -147,6 +174,89 @@ function MessageBubble({ message, onRetry }: { message: JarvisChatMessage; onRet
   );
 }
 
+const EVIDENCE_RESULT_LIMIT = 5;
+
+/**
+ * "Ask about your notes" — a deterministic, cited search over the ACTIVE workspace's own real
+ * Notes/ImportedContent (never mock data: notes/importedContent/activeWorkspaceId all come
+ * straight from the EXISTING store, exactly like every other workspace-scoped page). Never
+ * touches useJarvisConversation/runtime.ts — there is no AI call anywhere in this component, so
+ * it can never be confused with (or silently degrade into) a fabricated LLM answer.
+ */
+function WorkspaceEvidenceSearch() {
+  const notes = useAppStore((s) => s.notes);
+  const importedContent = useAppStore((s) => s.importedContent);
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const [query, setQuery] = useState('');
+  const trimmedQuery = query.trim();
+  const workspaceIsEmpty = notes.length === 0 && importedContent.length === 0;
+
+  const evidence = useMemo(() => {
+    if (!trimmedQuery) return [];
+    return retrieveWorkspaceEvidence(notes, importedContent, activeWorkspaceId, { question: trimmedQuery, limit: EVIDENCE_RESULT_LIMIT });
+  }, [notes, importedContent, activeWorkspaceId, trimmedQuery]);
+
+  return (
+    <Card className="mb-4 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Search className="h-4 w-4 shrink-0 text-brand-500" aria-hidden="true" />
+        <h3 className="font-display text-sm font-semibold text-slate-700 dark:text-slate-200">Ask about your notes</h3>
+        <Badge tone="neutral" className="ml-auto">
+          Direct match, not AI-generated
+        </Badge>
+      </div>
+
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search the text of your notes and documents in this workspace…"
+        aria-label="Search your notes and documents"
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+      />
+
+      <div className="mt-3" role="region" aria-live="polite" aria-label="Note and document search results">
+        {trimmedQuery === '' ? (
+          <p className="text-sm text-slate-400">Type a question above to search the text of your notes and documents — results are exact passages with their source, never an AI-written answer.</p>
+        ) : workspaceIsEmpty ? (
+          <p className="text-sm text-slate-400">You don't have any notes or documents yet in this workspace.</p>
+        ) : evidence.length === 0 ? (
+          <p className="text-sm text-slate-400">No matching passages found in your notes or documents.</p>
+        ) : (
+          <ul className="space-y-2.5">
+            {evidence.map((item) => {
+              const resolved = resolveWorkspaceDocumentTitle(item.citation.documentId, notes, importedContent, activeWorkspaceId);
+              const title = resolved?.title || 'Untitled source';
+              const Icon = resolved?.itemType === 'note' ? NotebookText : FileText;
+              return (
+                <li key={item.citation.chunkId} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {resolved ? (
+                      <Link
+                        to={repositoryDetailPathFor(resolved.itemType, resolved.itemId)}
+                        className="group inline-flex min-w-0 items-center gap-1 truncate rounded text-slate-500 hover:text-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 dark:text-slate-400 dark:hover:text-brand-400"
+                        aria-label={`Open source: ${title}`}
+                      >
+                        <span className="truncate">{title}</span>
+                        <ArrowUpRight className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                      </Link>
+                    ) : (
+                      <span className="truncate">{title}</span>
+                    )}
+                    {item.citation.page !== undefined && <span className="shrink-0 text-slate-400">· p.{item.citation.page}</span>}
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{item.citation.quote ?? item.chunk.text}</p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function EmptyState() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center py-16 px-6 text-center">
@@ -189,6 +299,8 @@ export default function JarvisChat() {
       <PageHeader eyebrow="JARVIS" title="Ask JARVIS" description="A dedicated conversation with JARVIS — grounded in your real study state, never fabricated." />
 
       <RuntimeStatusBar />
+
+      <WorkspaceEvidenceSearch />
 
       <Card className="flex flex-1 flex-col overflow-hidden p-0">
         <div className="flex-1 space-y-3 overflow-y-auto p-4" role="log" aria-live="polite" aria-label="JARVIS conversation">

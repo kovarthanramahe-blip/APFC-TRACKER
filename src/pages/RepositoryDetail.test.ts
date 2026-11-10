@@ -12,12 +12,15 @@ import {
 import { getRelatedContent, RELATIONSHIP_TYPE_LABELS } from '../lib/contentRelationships';
 import { repositoryDetailPathFor } from '../lib/repositoryNavigation';
 import { canEditEntry, canDeleteEntry, preserveUneditedMetadata } from './Repository';
-import { resolveSyllabusNodeLabel } from './RepositoryDetail';
+import { resolveSyllabusNodeLabel, availableApfcTopicOptions, topicsForWorkspace, describeClassificationTopicLabel } from './RepositoryDetail';
 import { resolveApfcTopicPath } from '../lib/apfcSyllabus';
 import { SYLLABUS } from '../data/syllabus';
 import { UPSC_CSE_PRELIMS_SYLLABUS } from '../data/upscCsePrelimsSyllabus';
 import { UPSC_CSE_GRANULAR_NODES } from '../data/upscCseGranularTopics';
 import { createInkAnnotation, createHighlighterInkAnnotation, createStickyNote, createBookmark, annotationsForDocument } from '../lib/annotations';
+import { listClassificationsForItem } from '../lib/knowledgeClassification';
+import { listUpscCseTopicsFlat } from '../lib/upscCseKnowledgeTaxonomy';
+import { listApfcTopicsFlat } from '../lib/apfcSyllabusTaxonomy';
 
 // This page has no rendering test here (no React Testing Library / DOM environment in this repo —
 // see every other *.test.ts file for the established convention). These tests exercise exactly
@@ -50,6 +53,7 @@ function fullReset() {
     importedContent: [],
     contentRelationships: [],
     annotations: [],
+    knowledgeClassifications: [],
   });
 }
 
@@ -269,6 +273,154 @@ describe('Repository Detail — syllabus/topic display generalised to any knowle
     const item = getImportedContentById(useAppStore.getState().importedContent, doc.id)!;
     expect(item.metadata?.syllabusNodeId).toBeUndefined();
     expect(item.metadata?.apfcTopicId).toBeUndefined();
+  });
+});
+
+describe('Repository Detail — Syllabus Classifications card (Knowledge Librarian P0, Phase 2)', () => {
+  beforeEach(fullReset);
+
+  function addItem(id: string, workspaceId: 'apfc' = 'apfc') {
+    useAppStore.getState().setActiveWorkspaceId(workspaceId);
+    const doc = confirmImportedContent(preview({ title: 'Article' }), { workspaceId, contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent({ ...doc, id });
+    return doc;
+  }
+
+  it('itemClassifications (listClassificationsForItem) returns only this item\'s own classifications, never another item\'s', () => {
+    addItem('item-1');
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: SYLLABUS[0].topics[0].id });
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'other-item', itemType: 'imported_content', topicId: SYLLABUS[0].topics[0].id });
+
+    const classifications = listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1');
+    expect(classifications).toHaveLength(1);
+    expect(classifications[0].itemId).toBe('item-1');
+  });
+
+  it('each classification\'s topicId resolves to a real subject/topic via resolveApfcTopicPath, exactly like the single apfcTopicId line already does', () => {
+    addItem('item-1');
+    const topic = SYLLABUS[0].topics[0];
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: topic.id });
+
+    const [classification] = listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1');
+    const resolved = resolveApfcTopicPath(classification.topicId);
+    expect(resolved?.topic.id).toBe(topic.id);
+    expect(resolved?.subject.id).toBe(SYLLABUS[0].id);
+  });
+
+  it('confirming a proposed classification updates its status and backfills the item\'s primary apfcTopicId', () => {
+    const doc = addItem('item-1');
+    const topic = SYLLABUS[0].topics[0];
+    useAppStore.setState({
+      knowledgeClassifications: [
+        {
+          id: 'k1',
+          workspaceId: 'apfc',
+          itemId: 'item-1',
+          itemType: 'imported_content',
+          taxonomy: 'apfc',
+          topicId: topic.id,
+          confidence: 0.6,
+          rationale: 'Matched terms: x',
+          status: 'proposed',
+          source: 'lexical',
+          createdAt: doc.provenance.importedAt,
+          updatedAt: doc.provenance.importedAt,
+        },
+      ],
+    });
+
+    useAppStore.getState().confirmKnowledgeClassification('k1');
+
+    const classification = listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')[0];
+    expect(classification.status).toBe('confirmed');
+    const item = getImportedContentById(useAppStore.getState().importedContent, 'item-1')!;
+    expect(item.metadata?.apfcTopicId).toBe(topic.id);
+    expect(resolveApfcTopicPath(item.metadata!.apfcTopicId!)?.topic.id).toBe(topic.id);
+  });
+
+  it('rejecting and deleting a classification both remove it from this item\'s list', () => {
+    addItem('item-1');
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: SYLLABUS[0].topics[0].id });
+    const id = useAppStore.getState().knowledgeClassifications[0].id;
+
+    useAppStore.getState().rejectKnowledgeClassification(id);
+    expect(listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')[0].status).toBe('rejected');
+
+    useAppStore.getState().deleteKnowledgeClassification(id);
+    expect(listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')).toEqual([]);
+  });
+
+  it('deleting the item itself cascade-deletes its classifications (no dangling reference left for the card to resolve)', () => {
+    addItem('item-1');
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: SYLLABUS[0].topics[0].id });
+    useAppStore.getState().deleteImportedContent('item-1');
+    expect(listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')).toEqual([]);
+  });
+
+  it('classifications survive an export/import round-trip (page reload)', () => {
+    addItem('item-1');
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId: SYLLABUS[0].topics[0].id });
+    const json = exportAllData();
+    fullReset();
+    importAllData(json);
+    expect(listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')).toHaveLength(1);
+  });
+});
+
+// Knowledge Librarian P0.1 hardening — duplicate-classification prevention, from this page's own
+// perspective: the "Add classification" picker's option list (availableApfcTopicOptions, the exact
+// predicate the JSX uses) and the store-level guard it backs up.
+describe('Repository Detail — duplicate classification prevention (P0.1 hardening)', () => {
+  beforeEach(fullReset);
+
+  function addItem(id: string, workspaceId: 'apfc' = 'apfc') {
+    useAppStore.getState().setActiveWorkspaceId(workspaceId);
+    const doc = confirmImportedContent(preview({ title: 'Article' }), { workspaceId, contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent({ ...doc, id });
+    return doc;
+  }
+
+  it('availableApfcTopicOptions excludes a topic the item already has ANY record for (proposed, confirmed, or rejected)', () => {
+    const allTopics = [
+      { subjectId: 's', subjectTitle: 'Subject', topicId: 't1', topicTitle: 'Topic One' },
+      { subjectId: 's', subjectTitle: 'Subject', topicId: 't2', topicTitle: 'Topic Two' },
+      { subjectId: 's', subjectTitle: 'Subject', topicId: 't3', topicTitle: 'Topic Three' },
+    ];
+    const classifications = [
+      { id: 'k1', workspaceId: 'apfc' as const, itemId: 'item-1', itemType: 'imported_content' as const, taxonomy: 'apfc' as const, topicId: 't1', confidence: 1, rationale: 'r', status: 'proposed' as const, source: 'lexical' as const, createdAt: 'a', updatedAt: 'a' },
+      { id: 'k2', workspaceId: 'apfc' as const, itemId: 'item-1', itemType: 'imported_content' as const, taxonomy: 'apfc' as const, topicId: 't2', confidence: 1, rationale: 'r', status: 'rejected' as const, source: 'manual' as const, createdAt: 'a', updatedAt: 'a' },
+    ];
+    const available = availableApfcTopicOptions(allTopics, classifications);
+    expect(available.map((t) => t.topicId)).toEqual(['t3']);
+  });
+
+  it('returns every topic unfiltered when the item has no classifications yet', () => {
+    const allTopics = [{ subjectId: 's', subjectTitle: 'Subject', topicId: 't1', topicTitle: 'Topic One' }];
+    expect(availableApfcTopicOptions(allTopics, [])).toEqual(allTopics);
+  });
+
+  it('a duplicate manual add attempt (simulating the store action bypassing the already-filtered picker) never creates a second row', () => {
+    addItem('item-1');
+    const topicId = SYLLABUS[0].topics[0].id;
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId });
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId });
+    expect(listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')).toHaveLength(1);
+  });
+
+  it('a rejected classification is reclassified (confirmed) via confirmKnowledgeClassification without creating a duplicate, and backfills apfcTopicId', () => {
+    addItem('item-1');
+    const topicId = SYLLABUS[0].topics[0].id;
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'item-1', itemType: 'imported_content', topicId });
+    const id = useAppStore.getState().knowledgeClassifications[0].id;
+    useAppStore.getState().rejectKnowledgeClassification(id);
+    expect(listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1')[0].status).toBe('rejected');
+
+    useAppStore.getState().confirmKnowledgeClassification(id);
+    const classifications = listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'item-1');
+    expect(classifications).toHaveLength(1);
+    expect(classifications[0].id).toBe(id);
+    expect(classifications[0].status).toBe('confirmed');
+    expect(getImportedContentById(useAppStore.getState().importedContent, 'item-1')?.metadata?.apfcTopicId).toBe(topicId);
   });
 });
 
@@ -1034,6 +1186,26 @@ describe('Repository Detail — Current Affairs revision (reuses the existing re
     expect(useAppStore.getState().revisionQueue[article.id].box).toBe(1);
   });
 
+  // P2.8 — this page's own handleRevisionCorrect/handleRevisionIncorrect (the per-item revision
+  // card's buttons) now pass 'self_report' as the third argument — there is no checked answer
+  // behind reading a Current Affairs article. Proves this neither changes the scheduling outcome
+  // (identical box progression to the two no-source tests immediately above) nor gets misclassified
+  // as 'quiz'.
+  it('the per-item revision card\'s review actions (passing \'self_report\') schedule identically to before and are never misclassified as quiz-tested', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent(article);
+    useAppStore.getState().addToRevisionQueue(article.id, '2026-01-08');
+
+    useAppStore.getState().recordRevisionCorrect(article.id, '2026-01-08', 'self_report');
+    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(2);
+    expect(useAppStore.getState().revisionQueue[article.id].lastReviewSource).toBe('self_report');
+
+    useAppStore.getState().recordRevisionIncorrect(article.id, '2026-01-10', 'self_report');
+    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(1);
+    expect(useAppStore.getState().revisionQueue[article.id].lastReviewSource).toBe('self_report');
+  });
+
   it('the Current Affairs content resolves correctly for review — title and raw content come from the real ImportedContent item, not a fabricated copy', () => {
     useAppStore.getState().setActiveWorkspaceId('upsc_cse');
     const article = confirmImportedContent(preview({ title: 'Policy announcement', content: 'Full article body for review.' }), {
@@ -1048,7 +1220,7 @@ describe('Repository Detail — Current Affairs revision (reuses the existing re
     expect(resolved?.item && 'rawContent' in resolved.item ? resolved.item.rawContent : undefined).toBe('Full article body for review.');
   });
 
-  it('a queued Current Affairs item whose content has since been deleted resolves to nothing, but never throws, and its revision record is not silently deleted', () => {
+  it('deleting a queued Current Affairs item resolves to nothing and never throws; P2.4 now also cascades its revision record away rather than leaving it stale', () => {
     useAppStore.getState().setActiveWorkspaceId('upsc_cse');
     const article = confirmImportedContent(preview({ title: 'Policy announcement' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
     useAppStore.getState().addImportedContent(article);
@@ -1059,12 +1231,11 @@ describe('Repository Detail — Current Affairs revision (reuses the existing re
 
     expect(() => resolveEntity('imported_content', article.id)).not.toThrow();
     expect(resolveEntity('imported_content', article.id)).toBeUndefined();
-    // The existing system has no precedent for cascading a content deletion into the revision
-    // queue (PYQ_BANK questions are never deleted), so a stale revision record is left exactly as
-    // it was — RepositoryDetail.tsx simply renders its existing "Content not found" state instead
-    // of the revision widget, rather than this layer silently deleting history.
-    expect(useAppStore.getState().revisionQueue[article.id]).toBeDefined();
-    expect(useAppStore.getState().revisionQueue[article.id].box).toBe(2);
+    // P2.4 (Revision Data Integrity, Fix B) — deleteImportedContent's own cascade (lib/store.ts)
+    // now removes this exact id's revisionQueue entry too, same discipline as its pre-existing
+    // contentRelationships/knowledgeClassifications cascades. Before P2.4 this was deliberately left
+    // stale (see this test's own git history) — that gap is what this phase closes.
+    expect(useAppStore.getState().revisionQueue[article.id]).toBeUndefined();
   });
 
   it('existing PYQ revision behaviour (recordRevisionCorrect/Incorrect keyed by pyqId) is unchanged when a Current Affairs item is also in the queue', () => {
@@ -1078,5 +1249,75 @@ describe('Repository Detail — Current Affairs revision (reuses the existing re
     expect(useAppStore.getState().revisionQueue['some-pyq-id'].reviewCount).toBe(1);
     // The Current Affairs entry is untouched by the unrelated PYQ review.
     expect(useAppStore.getState().revisionQueue[article.id].box).toBe(1);
+  });
+});
+
+// Knowledge Librarian P1.1 — workspace-aware classification taxonomy: the "Add classification"
+// picker and the existing-classification label must both dispatch on the ACTIVE workspace / the
+// classification's OWN taxonomy, never assume APFC.
+describe('Repository Detail — workspace-aware classification taxonomy (P1.1)', () => {
+  beforeEach(fullReset);
+
+  it('topicsForWorkspace returns the real APFC topic list for "apfc" and the real granular CSE topic list for "upsc_cse"', () => {
+    const apfcTopics = topicsForWorkspace('apfc');
+    const cseTopics = topicsForWorkspace('upsc_cse');
+    expect(apfcTopics).toEqual(listApfcTopicsFlat());
+    expect(cseTopics).toEqual(listUpscCseTopicsFlat());
+  });
+
+  it('topicsForWorkspace returns an empty list for phd_research — no taxonomy exists for it yet', () => {
+    expect(topicsForWorkspace('phd_research')).toEqual([]);
+  });
+
+  it('the APFC and CSE topic lists never share a topicId — the two pickers can never display each other’s topics', () => {
+    const apfcIds = new Set(topicsForWorkspace('apfc').map((t) => t.topicId));
+    const cseIds = topicsForWorkspace('upsc_cse').map((t) => t.topicId);
+    expect(cseIds.some((id) => apfcIds.has(id))).toBe(false);
+  });
+
+  it('describeClassificationTopicLabel resolves an apfc-taxonomy classification via the APFC syllabus path', () => {
+    const topicId = SYLLABUS[0].topics[0].id;
+    const label = describeClassificationTopicLabel({ taxonomy: 'apfc', topicId });
+    expect(label).toContain(SYLLABUS[0].title);
+    expect(label).toContain(SYLLABUS[0].topics[0].title);
+  });
+
+  it('describeClassificationTopicLabel resolves a upsc_cse-taxonomy classification via the granular CSE syllabus, never via the APFC resolver', () => {
+    const cseTopicId = UPSC_CSE_GRANULAR_NODES.find((n) => n.level === 'topic')!.id;
+    const label = describeClassificationTopicLabel({ taxonomy: 'upsc_cse', topicId: cseTopicId });
+    expect(label).not.toBe(cseTopicId);
+    expect(label).toBe(resolveSyllabusNodeLabel(cseTopicId));
+  });
+
+  it('describeClassificationTopicLabel falls back to the raw topicId for an unresolvable CSE id, never fabricating a label', () => {
+    const label = describeClassificationTopicLabel({ taxonomy: 'upsc_cse', topicId: 'not-a-real-granular-node' });
+    expect(label).toBe('not-a-real-granular-node');
+  });
+
+  it('a manual classification added while the active workspace is upsc_cse is tagged taxonomy "upsc_cse" and never backfills the APFC-only apfcTopicId field', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'CSE note' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent({ ...doc, id: 'cse-item-1' });
+    const cseTopicId = listUpscCseTopicsFlat()[0].topicId;
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'cse-item-1', itemType: 'imported_content', topicId: cseTopicId });
+    const stored = listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'cse-item-1');
+    expect(stored).toHaveLength(1);
+    expect(stored[0].taxonomy).toBe('upsc_cse');
+    expect(stored[0].status).toBe('confirmed');
+    expect(getImportedContentById(useAppStore.getState().importedContent, 'cse-item-1')?.metadata?.apfcTopicId).toBeUndefined();
+  });
+
+  it('confirming a upsc_cse classification never writes to the APFC-only metadata.apfcTopicId field', () => {
+    useAppStore.getState().setActiveWorkspaceId('upsc_cse');
+    const doc = confirmImportedContent(preview({ title: 'CSE note' }), { workspaceId: 'upsc_cse', contentType: 'current_affairs' });
+    useAppStore.getState().addImportedContent({ ...doc, id: 'cse-item-2' });
+    const cseTopicId = listUpscCseTopicsFlat()[0].topicId;
+    useAppStore.getState().addManualKnowledgeClassification({ itemId: 'cse-item-2', itemType: 'imported_content', topicId: cseTopicId });
+    const id = listClassificationsForItem(useAppStore.getState().knowledgeClassifications, 'cse-item-2')[0].id;
+    // Already confirmed (manual classifications are born confirmed) — re-confirming is a no-op on
+    // status, but exercises the exact same backfill-guard code path confirmKnowledgeClassification
+    // uses for a genuinely 'proposed' CSE record.
+    useAppStore.getState().confirmKnowledgeClassification(id);
+    expect(getImportedContentById(useAppStore.getState().importedContent, 'cse-item-2')?.metadata?.apfcTopicId).toBeUndefined();
   });
 });

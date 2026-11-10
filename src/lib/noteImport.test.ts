@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   SUPPORTED_IMPORT_EXTENSIONS,
   MAX_IMPORT_FILE_SIZE_BYTES,
@@ -11,6 +11,13 @@ import {
   importNoteFile,
   type PdfPageTextItem,
 } from './noteImport';
+
+// See contentImport.test.ts's own header on this same mock — noteImport.ts is a thin wrapper over
+// contentImport.ts's extractContentFromFile, which (for an 'image' format) imports this module.
+const recognizeMock = vi.fn();
+vi.mock('./jarvis/ai/ocrProvider', () => ({
+  createOcrProvider: () => ({ recognize: recognizeMock }),
+}));
 
 describe('1. markdown extraction', () => {
   it('importNoteFile reads a .md file as-is (normalized) via file.text()', async () => {
@@ -72,7 +79,7 @@ describe('2. file extension/type validation', () => {
     ['plain.txt', 'text'],
     ['plain.TXT', 'text'],
     ['old.doc', 'doc'],
-    ['image.png', 'unsupported'],
+    ['photo.png', 'image'],
     ['archive.zip', 'unsupported'],
     ['no-extension', 'unsupported'],
   ] as const)('classifies %s as %s', (filename, expectedKind) => {
@@ -80,32 +87,58 @@ describe('2. file extension/type validation', () => {
   });
 
   // Intentionally expanded from the original md/markdown/docx/pdf set — Multi-Workspace OS's
-  // Import-First Content Repository foundation adds .txt (plain text needs no parsing), and the
-  // Import Centre stage (Phase 8 Step 2) adds .csv/.json, on top of everything Notes import
-  // already supported. Every extension that already worked keeps working identically — see the
-  // rest of this file.
-  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json', () => {
-    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual(['.csv', '.docx', '.json', '.markdown', '.md', '.pdf', '.txt']);
+  // Import-First Content Repository foundation adds .txt (plain text needs no parsing), the
+  // Import Centre stage (Phase 8 Step 2) adds .csv/.json, and the AI Library's OCR phase adds
+  // .png/.jpg/.jpeg/.webp (requirement: "OCR for scanned PDFs/images"), on top of everything Notes
+  // import already supported. Every extension that already worked keeps working identically — see
+  // the rest of this file.
+  it('SUPPORTED_IMPORT_EXTENSIONS lists exactly md/markdown/docx/pdf/txt/csv/json/png/jpg/jpeg/webp', () => {
+    expect([...SUPPORTED_IMPORT_EXTENSIONS].sort()).toEqual([
+      '.csv',
+      '.docx',
+      '.jpeg',
+      '.jpg',
+      '.json',
+      '.markdown',
+      '.md',
+      '.pdf',
+      '.png',
+      '.txt',
+      '.webp',
+    ]);
   });
 
   it('validateImportFile accepts every supported extension with a normal size', () => {
-    for (const kind of ['notes.md', 'notes.markdown', 'report.docx', 'report.pdf', 'notes.txt']) {
+    for (const kind of ['notes.md', 'notes.markdown', 'report.docx', 'report.pdf', 'notes.txt', 'photo.png']) {
       const result = validateImportFile({ name: kind, size: 1024 });
       expect(result.valid).toBe(true);
     }
   });
 
-  it('validateImportFile rejects an unsupported extension', () => {
-    const result = validateImportFile({ name: 'image.png', size: 1024 });
+  it('validateImportFile rejects a genuinely unsupported extension', () => {
+    const result = validateImportFile({ name: 'archive.zip', size: 1024 });
     expect(result.valid).toBe(false);
     expect(result.kind).toBe('unsupported');
     expect(result.error).toContain('Unsupported file type');
   });
 
-  it('importNoteFile rejects an unsupported extension without attempting to read the file', async () => {
-    const file = new File(['irrelevant'], 'photo.jpg');
+  it('importNoteFile rejects a genuinely unsupported extension without attempting to read the file', async () => {
+    const file = new File(['irrelevant'], 'archive.zip');
     const result = await importNoteFile(file);
     expect(result).toEqual({ status: 'error', message: expect.stringContaining('Unsupported file type') });
+  });
+});
+
+describe('2b. OCR image import (via the shared foundation — see contentImport.test.ts for the full suite)', () => {
+  beforeEach(() => {
+    recognizeMock.mockReset();
+  });
+
+  it('importNoteFile recognises an image via OCR, same as any other supported format', async () => {
+    recognizeMock.mockResolvedValue({ text: 'A photographed page of real handwritten notes.', confidence: 88 });
+    const file = new File(['fake png bytes'], 'photo.png');
+    const result = await importNoteFile(file);
+    expect(result).toEqual({ status: 'ok', title: 'photo', content: 'A photographed page of real handwritten notes.' });
   });
 });
 

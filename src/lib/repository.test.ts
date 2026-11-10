@@ -8,6 +8,8 @@ import {
   listNotesForWorkspace,
   listImportedContentBySyllabusNode,
   listImportedContentByApfcTopic,
+  listImportedContentByApfcTopicIncludingClassifications,
+  listImportedContentBySyllabusNodeIncludingClassifications,
   queryRepository,
   sortRepositoryEntries,
   listRepositoryEntries,
@@ -28,6 +30,7 @@ import {
 import { IMPORTED_CONTENT_TYPES, type ImportedContent, type ImportPreview } from './contentImport';
 import type { Note } from './types';
 import type { ContentRelationship } from './contentRelationships';
+import type { KnowledgeClassification } from './knowledgeClassification';
 
 function content(overrides: Partial<ImportedContent> = {}): ImportedContent {
   return {
@@ -56,6 +59,23 @@ function note(overrides: Partial<Note> = {}): Note {
     folderId: overrides.folderId,
     tags: overrides.tags,
     isArchived: overrides.isArchived,
+  };
+}
+
+function classification(overrides: Partial<KnowledgeClassification> = {}): KnowledgeClassification {
+  return {
+    id: overrides.id ?? 'k1',
+    workspaceId: overrides.workspaceId ?? 'apfc',
+    itemId: overrides.itemId ?? 'item-1',
+    itemType: overrides.itemType ?? 'imported_content',
+    taxonomy: overrides.taxonomy ?? 'apfc',
+    topicId: overrides.topicId ?? 'topic-a',
+    confidence: overrides.confidence ?? 1,
+    rationale: overrides.rationale ?? 'r',
+    status: overrides.status ?? 'confirmed',
+    source: overrides.source ?? 'manual',
+    createdAt: overrides.createdAt ?? '2026-01-01T00:00:00.000Z',
+    updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
   };
 }
 
@@ -487,6 +507,89 @@ describe('repository — Knowledge <-> Syllabus connections (Phase 3)', () => {
   });
 });
 
+// Knowledge Librarian P0.1 hardening — "Syllabus -> Knowledge" made bidirectionally complete: an
+// item confirmed against MULTIPLE topics (lib/knowledgeClassification.ts) must be discoverable from
+// EVERY one of those topics' own pages/filters, not just its legacy single metadata.apfcTopicId.
+describe('repository — listImportedContentByApfcTopicIncludingClassifications (P0.1 hardening)', () => {
+  it('still matches via the legacy metadata.apfcTopicId field alone, with no classifications at all', () => {
+    const items = [content({ id: 'd-1', metadata: { apfcTopicId: 'topic-a' } })];
+    expect(listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a', []).map((i) => i.id)).toEqual(['d-1']);
+  });
+
+  it('matches via a CONFIRMED classification even when metadata.apfcTopicId points elsewhere (the second-topic case)', () => {
+    const items = [content({ id: 'd-1', metadata: { apfcTopicId: 'topic-a' } })];
+    const classifications = [classification({ itemId: 'd-1', topicId: 'topic-b', status: 'confirmed' })];
+    expect(listImportedContentByApfcTopicIncludingClassifications(items, 'topic-b', classifications).map((i) => i.id)).toEqual(['d-1']);
+    // The legacy field is completely untouched by this read-only widening.
+    expect(items[0].metadata?.apfcTopicId).toBe('topic-a');
+  });
+
+  it('never matches via a PROPOSED classification — only confirmed ones count as "linked"', () => {
+    const items = [content({ id: 'd-1' })];
+    const classifications = [classification({ itemId: 'd-1', topicId: 'topic-a', status: 'proposed' })];
+    expect(listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a', classifications)).toEqual([]);
+  });
+
+  it('never matches via a REJECTED classification', () => {
+    const items = [content({ id: 'd-1' })];
+    const classifications = [classification({ itemId: 'd-1', topicId: 'topic-a', status: 'rejected' })];
+    expect(listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a', classifications)).toEqual([]);
+  });
+
+  it('an item matching via BOTH the legacy field AND a confirmed classification for the SAME topic still appears exactly once', () => {
+    const items = [content({ id: 'd-1', metadata: { apfcTopicId: 'topic-a' } })];
+    const classifications = [classification({ itemId: 'd-1', topicId: 'topic-a', status: 'confirmed' })];
+    const results = listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a', classifications);
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('d-1');
+  });
+
+  it('regression: one item confirmed against TWO different topics appears under both topics, each exactly once', () => {
+    const items = [content({ id: 'd-1', metadata: { apfcTopicId: 'topic-a' } })];
+    const classifications = [
+      classification({ id: 'k1', itemId: 'd-1', topicId: 'topic-a', status: 'confirmed' }),
+      classification({ id: 'k2', itemId: 'd-1', topicId: 'topic-b', status: 'confirmed' }),
+    ];
+    const underTopicA = listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a', classifications);
+    const underTopicB = listImportedContentByApfcTopicIncludingClassifications(items, 'topic-b', classifications);
+    expect(underTopicA.map((i) => i.id)).toEqual(['d-1']);
+    expect(underTopicB.map((i) => i.id)).toEqual(['d-1']);
+  });
+
+  it('a classification for a different item never leaks in', () => {
+    const items = [content({ id: 'd-1' }), content({ id: 'd-2' })];
+    const classifications = [classification({ itemId: 'd-2', topicId: 'topic-a', status: 'confirmed' })];
+    expect(listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a', classifications).map((i) => i.id)).toEqual(['d-2']);
+  });
+
+  it('defaults to [] when no classifications argument is given, matching the legacy-only behaviour exactly', () => {
+    const items = [content({ id: 'd-1', metadata: { apfcTopicId: 'topic-a' } })];
+    expect(listImportedContentByApfcTopicIncludingClassifications(items, 'topic-a').map((i) => i.id)).toEqual(['d-1']);
+  });
+
+  it('queryRepository.apfcTopicId widens end-to-end when a classifications array is passed, and is unaffected when omitted', () => {
+    const items = [content({ id: 'd-1', workspaceId: 'apfc' })];
+    const classifications = [classification({ itemId: 'd-1', topicId: 'topic-a', status: 'confirmed' })];
+
+    expect(queryRepository(items, [], { workspaceId: 'apfc', apfcTopicId: 'topic-a' })).toEqual([]);
+    const withClassifications = queryRepository(items, [], { workspaceId: 'apfc', apfcTopicId: 'topic-a' }, classifications);
+    expect(withClassifications.map((r) => r.entityId)).toEqual(['d-1']);
+  });
+
+  it('queryRepository composes a classification-derived apfcTopicId match with other active filters (e.g. content type)', () => {
+    const items = [
+      content({ id: 'd-1', workspaceId: 'apfc', contentType: 'current_affairs' }),
+      content({ id: 'd-2', workspaceId: 'apfc', contentType: 'bibliography' }),
+    ];
+    const classifications = [
+      classification({ id: 'k1', itemId: 'd-1', topicId: 'topic-a', status: 'confirmed' }),
+      classification({ id: 'k2', itemId: 'd-2', topicId: 'topic-a', status: 'confirmed' }),
+    ];
+    const results = queryRepository(items, [], { workspaceId: 'apfc', contentType: 'current_affairs', apfcTopicId: 'topic-a' }, classifications);
+    expect(results.map((r) => r.entityId)).toEqual(['d-1']);
+  });
+});
+
 describe('repository — tag/category filtering', () => {
   it('a tags filter matches ImportedContent by tag and excludes every note (notes have no tags)', () => {
     const items = [
@@ -797,5 +900,63 @@ describe('repository — Phase 4: folder/pin/archive projection and filtering', 
     const items = [content({ id: 'other-ws', workspaceId: 'apfc', metadata: { folderId: 'f1' } })];
     const results = queryRepository(items, [], { workspaceId: 'phd_research', folderId: 'f1' });
     expect(results).toEqual([]);
+  });
+});
+
+// Knowledge Librarian P1.2 — the UPSC CSE equivalent of
+// listImportedContentByApfcTopicIncludingClassifications's own P0.1 hardening above. Before this,
+// a CSE Knowledge Librarian classification (P1.1) was invisible from both pages/UpscCseSyllabus.tsx's
+// own "N linked" badge and queryRepository's own syllabusNodeId dispatch, since both read only the
+// legacy metadata.syllabusNodeId field, which nothing in the CSE classify/confirm flow writes.
+describe('repository — listImportedContentBySyllabusNodeIncludingClassifications (P1.2 hardening)', () => {
+  it('still matches via the legacy metadata.syllabusNodeId field alone, with no classifications at all', () => {
+    const items = [content({ id: 'ca-1', metadata: { syllabusNodeId: 'node-a' } })];
+    expect(listImportedContentBySyllabusNodeIncludingClassifications(items, 'node-a', []).map((i) => i.id)).toEqual(['ca-1']);
+  });
+
+  it('matches via a CONFIRMED upsc_cse classification even when metadata.syllabusNodeId is absent entirely', () => {
+    const items = [content({ id: 'ca-1' })];
+    const classifications = [classification({ itemId: 'ca-1', taxonomy: 'upsc_cse', topicId: 'granular-topic-a', status: 'confirmed' })];
+    expect(listImportedContentBySyllabusNodeIncludingClassifications(items, 'granular-topic-a', classifications).map((i) => i.id)).toEqual(['ca-1']);
+  });
+
+  it('never matches via a PROPOSED classification — only confirmed ones count as "linked"', () => {
+    const items = [content({ id: 'ca-1' })];
+    const classifications = [classification({ itemId: 'ca-1', taxonomy: 'upsc_cse', topicId: 'granular-topic-a', status: 'proposed' })];
+    expect(listImportedContentBySyllabusNodeIncludingClassifications(items, 'granular-topic-a', classifications)).toEqual([]);
+  });
+
+  it('never matches via a REJECTED classification', () => {
+    const items = [content({ id: 'ca-1' })];
+    const classifications = [classification({ itemId: 'ca-1', taxonomy: 'upsc_cse', topicId: 'granular-topic-a', status: 'rejected' })];
+    expect(listImportedContentBySyllabusNodeIncludingClassifications(items, 'granular-topic-a', classifications)).toEqual([]);
+  });
+
+  it('never matches a CONFIRMED classification for the same topicId under a DIFFERENT taxonomy (apfc) — taxonomies never cross-match', () => {
+    const items = [content({ id: 'd-1' })];
+    const classifications = [classification({ itemId: 'd-1', taxonomy: 'apfc', topicId: 'shared-id', status: 'confirmed' })];
+    expect(listImportedContentBySyllabusNodeIncludingClassifications(items, 'shared-id', classifications)).toEqual([]);
+  });
+
+  it('an item matching via BOTH the legacy field AND a confirmed classification for the SAME node still appears exactly once', () => {
+    const items = [content({ id: 'ca-1', metadata: { syllabusNodeId: 'node-a' } })];
+    const classifications = [classification({ itemId: 'ca-1', taxonomy: 'upsc_cse', topicId: 'node-a', status: 'confirmed' })];
+    const results = listImportedContentBySyllabusNodeIncludingClassifications(items, 'node-a', classifications);
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('ca-1');
+  });
+
+  it('defaults to [] when no classifications argument is given, matching the legacy-only behaviour exactly', () => {
+    const items = [content({ id: 'ca-1', metadata: { syllabusNodeId: 'node-a' } })];
+    expect(listImportedContentBySyllabusNodeIncludingClassifications(items, 'node-a').map((i) => i.id)).toEqual(['ca-1']);
+  });
+
+  it('queryRepository.syllabusNodeId widens end-to-end when a classifications array is passed, and is unaffected when omitted', () => {
+    const items = [content({ id: 'ca-1', workspaceId: 'upsc_cse' })];
+    const classifications = [classification({ itemId: 'ca-1', taxonomy: 'upsc_cse', topicId: 'node-a', status: 'confirmed' })];
+
+    expect(queryRepository(items, [], { workspaceId: 'upsc_cse', syllabusNodeId: 'node-a' })).toEqual([]);
+    const withClassifications = queryRepository(items, [], { workspaceId: 'upsc_cse', syllabusNodeId: 'node-a' }, classifications);
+    expect(withClassifications.map((r) => r.entityId)).toEqual(['ca-1']);
   });
 });

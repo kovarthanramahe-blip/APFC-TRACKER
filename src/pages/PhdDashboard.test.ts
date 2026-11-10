@@ -11,6 +11,9 @@ import type { MicroTarget } from '../lib/microTarget';
 import { computeStudyProgressInsights, buildDailyActivityTrend } from '../lib/studyProgressInsights';
 import { getWorkspaceAccent } from '../lib/workspaceAccent';
 import { getEncouragementMessage } from '../lib/gamification';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 function fullReset() {
   useAppStore.setState({
@@ -439,5 +442,19 @@ describe('PhD Research Dashboard — Context-aware encouragement integration (Ph
     useAppStore.getState().setActiveWorkspaceId('phd_research');
     expect(useAppStore.getState().studyLog).toEqual(phdStudyLog);
     expect(useAppStore.getState().studyLog['2026-01-08']?.focusMinutes).toBe(45);
+  });
+});
+
+// Feedback item — Recent Activity entries can repeat the exact same title (e.g. several chapters
+// imported from the same book all carry that book's title), making them indistinguishable. No DOM
+// rendering harness exists in this repo (see this file's own header), so this is a structural,
+// source-verifiable check — the same approach PhdPlan.test.ts/App.test.ts/NotFound.test.ts already
+// use — that the filename (the one thing that actually differs between such entries) is shown.
+describe('PhD Research Dashboard — Recent Activity shows the filename, not just the (possibly repeated) title', () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'PhdDashboard.tsx'), 'utf-8');
+
+  it('renders c.provenance.sourceFilename alongside c.title in the Recent Activity list', () => {
+    const recentActivitySection = source.slice(source.indexOf('Recent Activity'));
+    expect(recentActivitySection).toMatch(/\{c\.provenance\.sourceFilename && <span[^>]*>— \{c\.provenance\.sourceFilename\}<\/span>\}/);
   });
 });

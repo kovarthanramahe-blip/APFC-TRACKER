@@ -120,6 +120,90 @@ describe('JarvisChat.tsx — architecture boundary (Part 10): no native/provider
   });
 });
 
+describe('JarvisChat.tsx — "Ask about your notes" (deterministic, provider-free source retrieval)', () => {
+  it('obtains notes/importedContent/activeWorkspaceId from the EXISTING store, never mock data', () => {
+    const componentStart = source.indexOf('function WorkspaceEvidenceSearch()');
+    expect(componentStart).toBeGreaterThan(-1);
+    const componentBody = source.slice(componentStart, source.indexOf('\nfunction EmptyState()'));
+    expect(componentBody).toMatch(/useAppStore\(\(s\) => s\.notes\)/);
+    expect(componentBody).toMatch(/useAppStore\(\(s\) => s\.importedContent\)/);
+    expect(componentBody).toMatch(/useAppStore\(\(s\) => s\.activeWorkspaceId\)/);
+  });
+
+  it('retrieves evidence through the EXISTING workspaceContentBridge functions only — no new retrieval/ranking logic in this file', () => {
+    const importLines = source.split('\n').filter((line) => /^\s*import\b/.test(line));
+    const importText = importLines.join('\n');
+    expect(importText).toMatch(/from '..\/lib\/jarvis\/workspaceContentBridge'/);
+    expect(source).toMatch(/retrieveWorkspaceEvidence\(notes, importedContent, activeWorkspaceId/);
+    expect(source).toMatch(/resolveWorkspaceDocumentTitle\(item\.citation\.documentId, notes, importedContent, activeWorkspaceId\)/);
+  });
+
+  it('never routes this feature through useJarvisConversation/runtime.ts — a direct text match can never be mistaken for an AI-generated chat message', () => {
+    const componentStart = source.indexOf('function WorkspaceEvidenceSearch()');
+    const componentBody = source.slice(componentStart, source.indexOf('\nfunction EmptyState()'));
+    expect(componentBody).not.toMatch(/\bsend\(|\buseJarvisConversation\b/);
+  });
+
+  it('always shows a "not AI-generated" label, never only conditionally', () => {
+    expect(source).toMatch(/Direct match, not AI-generated/);
+  });
+
+  it('handles an empty query distinctly from a real no-match result', () => {
+    expect(source).toMatch(/trimmedQuery === '' \?/);
+    expect(source).toMatch(/Type a question above to search/);
+  });
+
+  it('handles a workspace with no notes or documents distinctly from "no matches for this query"', () => {
+    expect(source).toMatch(/workspaceIsEmpty \?/);
+    expect(source).toMatch(/You don't have any notes or documents yet in this workspace\./);
+  });
+
+  it('handles a real query with zero matching evidence, never fabricating a result', () => {
+    expect(source).toMatch(/evidence\.length === 0 \?/);
+    expect(source).toMatch(/No matching passages found in your notes or documents\./);
+  });
+
+  it('falls back to an honest "Untitled source" label rather than fabricating a title when resolution fails or the real title is blank', () => {
+    // `||`, not `??` — resolveWorkspaceDocumentTitle can return a real item whose title is an
+    // empty string (an untitled note), which `??` would render as a blank, unlabelled citation.
+    expect(source).toMatch(/resolved\?\.title \|\| 'Untitled source'/);
+  });
+
+  it('links a resolved citation to its real source via the EXISTING repositoryDetailPathFor — never a fabricated or guessed URL', () => {
+    const importLines = source.split('\n').filter((line) => /^\s*import\b/.test(line));
+    const importText = importLines.join('\n');
+    expect(importText).toMatch(/from '..\/lib\/repositoryNavigation'/);
+    expect(source).toMatch(/repositoryDetailPathFor\(resolved\.itemType, resolved\.itemId\)/);
+  });
+
+  it('only renders a citation as a Link when resolveWorkspaceDocumentTitle actually found the item — a real item with a blank title still links (labelled "Untitled source" but real and navigable); only a documentId that fails to resolve at all (stale, deleted, or cross-workspace) falls back to plain, unlinked text', () => {
+    expect(source).toMatch(/resolved \? \(\s*<Link/);
+    expect(source).toMatch(/\) : \(\s*<span className="truncate">\{title\}<\/span>/);
+  });
+
+  it('renders each result\'s own citation quote (falling back to the raw chunk text), never a paraphrase', () => {
+    expect(source).toMatch(/item\.citation\.quote \?\? item\.chunk\.text/);
+  });
+
+  it('the search input and results region carry accessible labels', () => {
+    expect(source).toMatch(/aria-label="Search your notes and documents"/);
+    expect(source).toMatch(/aria-label="Note and document search results"/);
+  });
+
+  it('never bypasses the bridge\'s own workspace scoping by reading notes/importedContent directly for display — every render path resolves through resolveWorkspaceDocumentTitle/retrieveWorkspaceEvidence', () => {
+    const componentStart = source.indexOf('function WorkspaceEvidenceSearch()');
+    const componentBody = source.slice(componentStart, source.indexOf('\nfunction EmptyState()'));
+    // The only direct reads of notes/importedContent are: the store selectors themselves, the
+    // workspaceIsEmpty length check, and passing them straight through to the bridge functions —
+    // never a second, independent filter/search implementation inside this component.
+    expect(componentBody).not.toMatch(/notes\.filter\(|notes\.find\(|importedContent\.filter\(|importedContent\.find\(/);
+  });
+
+  it('is actually rendered on the page, directly below the runtime status bar', () => {
+    expect(source).toMatch(/<RuntimeStatusBar \/>\s*\n\s*<WorkspaceEvidenceSearch \/>/);
+  });
+});
+
 describe('Routing/navigation integration (Part 1 + Part 7 responsive navigation)', () => {
   it('App.tsx registers a lazy /jarvis route', () => {
     expect(appSource).toMatch(/const JarvisChat = lazy\(\(\) => import\('\.\/pages\/JarvisChat'\)\)/);

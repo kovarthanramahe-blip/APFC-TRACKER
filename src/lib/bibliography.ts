@@ -64,7 +64,28 @@ export interface BibliographyFields {
   url?: string;
   /** A short citation/reference-manager key, e.g. "Smith2020". */
   citationKey?: string;
+  /** Archive/shelfmark identifier — e.g. a National Archives of India accession number (a
+   * "NAIPUB" number) or any other library/archive call number — for a primary source held at a
+   * physical or digital archive. Deliberately separate from `citationKey` (a reference-manager
+   * key a user invents for their OWN citation scheme, not the archive's own identifier for the
+   * item) — before this field existed, an archive number had nowhere else to go but into
+   * `citationKey` as a workaround. */
+  archiveId?: string;
   notes?: string;
+  /** ISO date (yyyy-mm-dd) the source was ACCESSED/RETRIEVED — the standard citation field for a
+   * website/online source, whose content can change after the fact (unlike a published book/
+   * journal article's fixed year). Deliberately separate from
+   * ImportedContentProvenance.importedAt (lib/contentImport.ts): that records when this record was
+   * imported INTO THIS APP, a fact about the app's own copy; `accessedDate` records when the
+   * underlying SOURCE was actually read/retrieved, a fact about the citation itself — the two can
+   * differ (cataloguing a source days or years after first reading it) and neither should be
+   * inferred from the other. Never auto-filled from provenance.importedAt. */
+  accessedDate?: string;
+  /** The source's own language (e.g. "English", "Hindi") — a standard bibliographic field for a
+   * multilingual research corpus (UPSC/APFC preparation routinely draws on both English and Hindi
+   * sources). Freeform text, not a fixed enum, matching this interface's existing discipline for
+   * every other field here. */
+  language?: string;
 }
 
 /** `item.metadata?.bibliography`, defaulting to `{}` for any item with no bibliography metadata
@@ -155,6 +176,9 @@ DOI: <...>
 ISBN: <...>
 URL: <...>
 Citation Key: <e.g. Smith2020>
+Archive ID: <e.g. a NAIPUB number or other archive/shelfmark identifier>
+Accessed Date: <yyyy-mm-dd, for an online source>
+Language: <e.g. English, Hindi>
 Tags: <comma-separated>
 Category: <...>
 Notes: <...>
@@ -210,10 +234,18 @@ const FIELD_KEY_ALIASES: Record<string, BibliographyLineKey> = {
   'citation key': 'citationKey',
   key: 'citationKey',
   id: 'citationKey',
+  'archive id': 'archiveId',
+  archive: 'archiveId',
+  shelfmark: 'archiveId',
+  'call number': 'archiveId',
   tags: 'tags',
   category: 'category',
   notes: 'notes',
   note: 'notes',
+  'accessed date': 'accessedDate',
+  accessed: 'accessedDate',
+  language: 'language',
+  lang: 'language',
 };
 
 const LINE_PATTERN = /^([A-Za-z][A-Za-z/ ]*?)\s*:\s*(.*)$/;
@@ -305,6 +337,9 @@ export function formatBibliographyRecordAsText(input: { title: string; fields: B
   if (f.isbn) lines.push(`ISBN: ${f.isbn}`);
   if (f.url) lines.push(`URL: ${f.url}`);
   if (f.citationKey) lines.push(`Citation Key: ${f.citationKey}`);
+  if (f.archiveId) lines.push(`Archive ID: ${f.archiveId}`);
+  if (f.accessedDate) lines.push(`Accessed Date: ${f.accessedDate}`);
+  if (f.language) lines.push(`Language: ${f.language}`);
   if (input.tags && input.tags.length > 0) lines.push(`Tags: ${input.tags.join(', ')}`);
   if (input.category) lines.push(`Category: ${input.category}`);
   if (f.notes) lines.push(`Notes: ${f.notes}`);

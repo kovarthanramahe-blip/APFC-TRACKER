@@ -250,7 +250,7 @@ export default function Notes() {
           onClick={() => setViewMode('browse')}
           className={cx(
             'flex items-center gap-1.5 rounded-md px-3 py-1.5 font-medium transition-colors',
-            viewMode === 'browse' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+            viewMode === 'browse' ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
           )}
         >
           <LayoutGrid className="h-3.5 w-3.5" /> Browse
@@ -260,7 +260,7 @@ export default function Notes() {
           onClick={() => setViewMode('organise')}
           className={cx(
             'flex items-center gap-1.5 rounded-md px-3 py-1.5 font-medium transition-colors',
-            viewMode === 'organise' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+            viewMode === 'organise' ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
           )}
         >
           <ListChecks className="h-3.5 w-3.5" /> Organise
@@ -277,7 +277,7 @@ export default function Notes() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search all notes…"
-          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
         />
       </div>
 
@@ -486,7 +486,7 @@ function OrganiseView({
               onClick={() => setCreatingFolderParentId(null)}
               aria-label="New root folder"
               title="New folder"
-              className="rounded p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+              className="rounded p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
             >
               <FolderPlus className="h-3.5 w-3.5" />
             </button>
@@ -513,7 +513,7 @@ function OrganiseView({
                   className={cx(
                     'inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium transition-colors',
                     scopeEquals(scope, { kind: 'tag', tag })
-                      ? 'bg-brand-600 text-white'
+                      ? 'bg-primary-600 text-white'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700',
                   )}
                 >
@@ -533,13 +533,13 @@ function OrganiseView({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search…"
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent py-2 pl-9 pr-3 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent py-2 pl-9 pr-3 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
             />
           </div>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as NoteSortOrder)}
-            className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            className="rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
           >
             <option value="updated">Recently updated</option>
             <option value="created">Recently created</option>
@@ -549,8 +549,8 @@ function OrganiseView({
         </div>
 
         {selectedIds.size > 0 && (
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
-            <span className="text-xs font-medium text-brand-700 dark:text-brand-300">{selectedIds.size} selected</span>
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary-100 bg-primary-50 px-3 py-2.5 dark:border-primary-500/30 dark:bg-primary-500/10">
+            <span className="text-xs font-medium text-primary-700 dark:text-primary-400">{selectedIds.size} selected</span>
             <select
               onChange={(e) => {
                 if (!e.target.value) return;
@@ -680,8 +680,8 @@ function SidebarItem({ label, icon: Icon, active, onClick }: { label: string; ic
     <button
       onClick={onClick}
       className={cx(
-        'flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500',
-        active ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
+        'flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500',
+        active ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
       )}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" /> {label}
@@ -714,7 +714,7 @@ function FolderTreeList({
             className={cx(
               'group flex items-center justify-between gap-1 rounded-lg px-2 py-1',
               scopeEquals(scope, { kind: 'folder', folderId: node.folder.id })
-                ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400'
                 : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
             )}
           >
@@ -723,13 +723,13 @@ function FolderTreeList({
               <span className="truncate">{node.folder.name}</span>
             </button>
             <div className="flex shrink-0 items-center gap-0.5">
-              <button onClick={() => onAddChild(node.folder.id)} aria-label="New subfolder" title="New subfolder" className="rounded p-2 hover:bg-slate-200 dark:hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+              <button onClick={() => onAddChild(node.folder.id)} aria-label="New subfolder" title="New subfolder" className="rounded p-2 hover:bg-slate-200 dark:hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
                 <FolderPlus className="h-3.5 w-3.5" />
               </button>
-              <button onClick={() => onRename(node.folder)} aria-label="Rename folder" title="Rename" className="rounded p-2 hover:bg-slate-200 dark:hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+              <button onClick={() => onRename(node.folder)} aria-label="Rename folder" title="Rename" className="rounded p-2 hover:bg-slate-200 dark:hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
                 <Pencil className="h-3.5 w-3.5" />
               </button>
-              <button onClick={() => onDelete(node.folder)} aria-label="Delete folder" title="Delete" className="rounded p-2 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+              <button onClick={() => onDelete(node.folder)} aria-label="Delete folder" title="Delete" className="rounded p-2 text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -771,7 +771,7 @@ function OrganiseNoteCard({
             onClick={onToggleArchive}
             aria-label={archived ? 'Unarchive' : 'Archive'}
             title={archived ? 'Unarchive' : 'Archive'}
-            className="flex h-11 w-11 items-center justify-center rounded text-slate-300 hover:bg-slate-100 hover:text-slate-500 dark:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+            className="flex h-11 w-11 items-center justify-center rounded text-slate-300 hover:bg-slate-100 hover:text-slate-500 dark:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
           >
             {archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
           </button>
@@ -779,7 +779,7 @@ function OrganiseNoteCard({
             onClick={onTogglePin}
             aria-label={note.pinned ? 'Unpin' : 'Pin'}
             className={cx(
-              'flex h-11 w-11 items-center justify-center rounded text-slate-300 hover:bg-slate-100 dark:text-slate-600 dark:hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500',
+              'flex h-11 w-11 items-center justify-center rounded text-slate-300 hover:bg-slate-100 dark:text-slate-600 dark:hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500',
               note.pinned && 'text-gold-500',
             )}
           >
@@ -839,7 +839,7 @@ function FolderNameDialog({
               if (e.key === 'Enter' && name.trim()) onConfirm(name);
             }}
             placeholder="Folder name"
-            className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
           />
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800 px-5 py-4">
@@ -1034,7 +1034,7 @@ function NavCard({
 }) {
   return (
     <button onClick={onClick} className="text-left">
-      <Card className="flex items-center gap-3 p-4 h-full hover:border-brand-300 dark:hover:border-brand-500/40 transition-colors">
+      <Card className="flex items-center gap-3 p-4 h-full hover:border-primary-400 dark:hover:border-primary-500/40 transition-colors">
         <span className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', colorClass)}>
           <FolderOpen className="h-4.5 w-4.5" />
         </span>
@@ -1346,7 +1346,7 @@ function NoteEditor({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Note title"
-            className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
           />
           {isNew && (
             <div>
@@ -1360,7 +1360,7 @@ function NoteEditor({
                   applyTemplate(getNoteTemplate(e.target.value));
                   e.target.value = '';
                 }}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               >
                 <option value="" disabled>
                   Choose a template… (replaces current content)
@@ -1377,7 +1377,7 @@ function NoteEditor({
             <select
               value={subject}
               onChange={(e) => handleSubjectChange(e.target.value as SubjectColorKey | 'general')}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
             >
               <option value="general">General</option>
               {SYLLABUS.map((s) => (
@@ -1390,7 +1390,7 @@ function NoteEditor({
               value={topicId ?? ''}
               onChange={(e) => setTopicId(e.target.value || undefined)}
               disabled={!subj}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50"
             >
               <option value="">{subj ? 'No specific topic' : 'Topics need a subject'}</option>
               {subj?.topics.map((t) => (
@@ -1421,7 +1421,7 @@ function NoteEditor({
                 onClick={() => setMode('edit')}
                 className={cx(
                   'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
-                  mode === 'edit' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                  mode === 'edit' ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
                 )}
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
@@ -1431,7 +1431,7 @@ function NoteEditor({
                 onClick={() => setMode('preview')}
                 className={cx(
                   'flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors',
-                  mode === 'preview' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
+                  mode === 'preview' ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300',
                 )}
               >
                 <Eye className="h-3.5 w-3.5" /> Preview
@@ -1454,7 +1454,7 @@ function NoteEditor({
                 onBlur={() => { setSlashTrigger(null); setWikiLinkTrigger(null); }}
                 placeholder="Write your notes here… Type / for commands, [[ to link a note or document."
                 rows={10}
-                className="w-full resize-none rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="w-full resize-none rounded-lg border border-slate-200 dark:border-slate-800 bg-transparent px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               />
             </div>
           ) : (

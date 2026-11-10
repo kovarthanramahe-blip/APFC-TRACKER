@@ -549,7 +549,9 @@ describe('PhD Research — Phase 3A: file selection runs through runFileImport',
   });
 
   it('an unsupported file still produces the same user-facing error as before', async () => {
-    const outcome = await runFileImport(new File(['irrelevant'], 'photo.jpg'), [], 'phd_research');
+    // .jpg is now a supported (OCR'd) image format (see contentImport.test.ts's own OCR suite) —
+    // a genuinely unsupported extension is needed here to still exercise this error path.
+    const outcome = await runFileImport(new File(['irrelevant'], 'archive.zip'), [], 'phd_research');
     expect(outcome.status).toBe('error');
     expect(outcome.error).toMatch(/Unsupported file type/i);
   });
